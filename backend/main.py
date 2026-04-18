@@ -14,6 +14,7 @@ import asyncio
 import json
 
 import pb_client
+from pb_client import start_token_refresh, stop_token_refresh
 import pb_setup
 from backfill import run_once_if_needed, rebuild_fts_if_needed, backfill_html_once
 from config import settings
@@ -69,6 +70,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Mailflow backend...")
 
     await pb_client.authenticate()
+    start_token_refresh()
     await pb_setup.setup_pocketbase_schema(pb_client.get_token())
     fts_setup(settings.PB_DATA_PATH)
     start_scheduler()
@@ -83,6 +85,7 @@ async def lifespan(app: FastAPI):
     yield
     await idle_manager.stop()
     stop_scheduler()
+    stop_token_refresh()
     logger.info("Shutting down Mailflow backend")
 
 
@@ -193,10 +196,12 @@ async def sse_events(request: Request):
     )
 
 
+_ACCOUNT_SAFE_FIELDS = "id,name,from_email,from_name,signature,color_tag,reply_to_email,imap_host,imap_port,imap_user"
+
 @app.get("/accounts")
 async def get_accounts():
     return await pb_client.pb_get("/api/collections/accounts/records",
-                                  params={"perPage": 100})
+                                  params={"perPage": 100, "fields": _ACCOUNT_SAFE_FIELDS})
 
 
 @app.patch("/accounts/{account_id}")
