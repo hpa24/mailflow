@@ -17,7 +17,7 @@ import pb_client
 import pb_setup
 from backfill import run_once_if_needed, rebuild_fts_if_needed, backfill_html_once
 from config import settings
-from fts import fts_setup, fts_search, fts_rebuild
+from fts import fts_setup, fts_search, fts_rebuild, fts_delete
 from idle_manager import idle_manager, get_sse_queues
 from imap_sync import sync_all_accounts, get_sync_status, upsert_contact
 from imap_utils import find_imap_folder
@@ -557,11 +557,19 @@ async def send_email_endpoint(data: dict):
     in_reply_to_email_id = data.get("in_reply_to_email_id")
     if in_reply_to_email_id:
         try:
-            original = await pb_client.pb_patch(
-                f"/api/collections/emails/records/{in_reply_to_email_id}",
-                {"is_answered": True},
+            original = await pb_client.pb_get(
+                f"/api/collections/emails/records/{in_reply_to_email_id}"
             )
-            asyncio.create_task(_imap_set_answered_safe(original))
+            # Sicherstellen, dass die E-Mail zum selben Account gehört
+            if original.get("account") == from_account:
+                original = await pb_client.pb_patch(
+                    f"/api/collections/emails/records/{in_reply_to_email_id}",
+                    {"is_answered": True},
+                )
+                asyncio.create_task(_imap_set_answered_safe(original))
+            else:
+                logger.warning("IDOR-Versuch: in_reply_to_email_id %s gehört nicht zu Account %s",
+                               in_reply_to_email_id, from_account)
         except Exception as exc:
             logger.warning("is_answered konnte nicht gesetzt werden für %s: %s", in_reply_to_email_id, exc)
 
@@ -1110,6 +1118,7 @@ async def delete_email(email_id: str):
             headers={"Authorization": f"Bearer {pb_client.get_token()}"}
         )
         resp.raise_for_status()
+    fts_delete(settings.PB_DATA_PATH, email_id)
     return {"deleted": email_id}
 
 

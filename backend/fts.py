@@ -60,6 +60,17 @@ def fts_search(db_path: str, query: str) -> list[str]:
         conn.close()
 
 
+def fts_delete(db_path: str, email_id: str) -> None:
+    """Entfernt eine E-Mail aus dem FTS5-Index. Aufrufen wenn PocketBase-Record gelöscht wird."""
+    conn = sqlite3.connect(db_path, timeout=10)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("DELETE FROM fts_emails WHERE email_id = ?", (email_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def fts_rebuild(db_path: str, records: list[dict]) -> int:
     """FTS5-Index aus PocketBase-Datensätzen neu aufbauen. Gibt Anzahl ein­gefügter Einträge zurück."""
     conn = sqlite3.connect(db_path, timeout=30)

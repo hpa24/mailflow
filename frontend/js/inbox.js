@@ -153,6 +153,7 @@ function startEventSource() {
   }
 
   connect();
+  window.addEventListener('beforeunload', () => { if (es) es.close(); }, { once: true });
 }
 
 // ── KI-Modus ────────────────────────────────────────────────
@@ -227,7 +228,10 @@ function renderKiRefineBar() {
 
 // ─────────────────────────────────────────────────────────────
 
+let _refreshing = false;
 async function silentRefresh() {
+  if (_refreshing) return;
+  _refreshing = true;
   try {
     const params = { page: 1, limit: PAGE_SIZE };
     if (state.activeAccount) params.account = state.activeAccount;
@@ -339,6 +343,8 @@ async function silentRefresh() {
     loadUnreadCounts();
   } catch (e) {
     console.error('silentRefresh:', e);
+  } finally {
+    _refreshing = false;
   }
 }
 
