@@ -109,7 +109,7 @@ app.add_middleware(
 async def _api_key_middleware(request: Request, call_next):
     """Erzwingt API-Key-Auth auf allen Routen außer /health.
     Wenn API_KEY in .env leer ist, ist Auth deaktiviert (lokale Entwicklung)."""
-    if request.url.path == "/health":
+    if request.url.path == "/health" or request.method == "OPTIONS":
         return await call_next(request)
     expected = settings.API_KEY
     if not expected:
