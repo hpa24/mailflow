@@ -6,7 +6,7 @@ const API = window.location.hostname === 'mailflow.barres.de'
 // API-Key muss mit API_KEY in backend/.env übereinstimmen.
 // Für lokale Entwicklung kann er leer bleiben — Backend ignoriert den Key,
 // wenn API_KEY in .env nicht gesetzt ist.
-const API_KEY = window.rWuVH8m3VguMHRFxGMrRcK-QOKYDut_un2yElm_VMaY || 'HIER-API-KEY-EINTRAGEN';
+const API_KEY = window.MAILFLOW_API_KEY || 'rWuVH8m3VguMHRFxGMrRcK-QOKYDut_un2yElm_VMaY';
 
 
 async function apiFetch(path, options = {}) {
