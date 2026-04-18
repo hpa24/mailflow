@@ -131,7 +131,7 @@ function startAutoRefresh() {
 }
 
 function startEventSource() {
-  const url = `${window.location.protocol}//${window.location.hostname}:8000/events`;
+  const url = apiEventSourceUrl();
   let es = null;
 
   function connect() {

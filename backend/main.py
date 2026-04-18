@@ -86,14 +86,46 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Mailflow backend")
 
 
+def _parse_cors_origins(raw: str) -> list[str]:
+    """Parst kommagetrennte CORS-Origins; fügt immer localhost hinzu."""
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    for local in ("http://localhost", "http://127.0.0.1"):
+        if local not in origins:
+            origins.append(local)
+    return origins
+
+
 app = FastAPI(title="Mailflow API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_parse_cors_origins(settings.CORS_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _api_key_middleware(request: Request, call_next):
+    """Erzwingt API-Key-Auth auf allen Routen außer /health.
+    Wenn API_KEY in .env leer ist, ist Auth deaktiviert (lokale Entwicklung)."""
+    if request.url.path == "/health":
+        return await call_next(request)
+    expected = settings.API_KEY
+    if not expected:
+        return await call_next(request)
+    provided = (
+        request.headers.get("X-API-Key")
+        or request.query_params.get("key")
+        or ""
+    )
+    if provided != expected:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Unauthorized"},
+            headers={"Access-Control-Allow-Origin": request.headers.get("origin", "*")},
+        )
+    return await call_next(request)
 
 
 @app.exception_handler(Exception)

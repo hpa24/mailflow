@@ -3,8 +3,16 @@ const API = window.location.hostname === 'mailflow.barres.de'
   ? 'https://mailflow-api.barres.de'
   : `${window.location.protocol}//${window.location.hostname}:8000`;
 
+// API-Key muss mit API_KEY in backend/.env übereinstimmen.
+// Für lokale Entwicklung kann er leer bleiben — Backend ignoriert den Key,
+// wenn API_KEY in .env nicht gesetzt ist.
+const API_KEY = window.rWuVH8m3VguMHRFxGMrRcK-QOKYDut_un2yElm_VMaY || 'HIER-API-KEY-EINTRAGEN';
+
 
 async function apiFetch(path, options = {}) {
+  if (API_KEY) {
+    options.headers = { 'X-API-Key': API_KEY, ...(options.headers || {}) };
+  }
   const res = await fetch(API + path, options);
   if (!res.ok) {
     let detail = `${res.status}`;
@@ -18,6 +26,12 @@ async function apiFetch(path, options = {}) {
 function apiGet(path, params = {}) {
   const q = new URLSearchParams(params).toString();
   return apiFetch(q ? `${path}?${q}` : path);
+}
+
+// EventSource-URL mit Key als Query-Parameter (Browser-API erlaubt keine Custom-Header)
+function apiEventSourceUrl() {
+  const base = `${API}/events`;
+  return API_KEY ? `${base}?key=${encodeURIComponent(API_KEY)}` : base;
 }
 
 // POST/PATCH mit JSON-Body
