@@ -1,0 +1,43 @@
+# Lokale Umgebungsvariablen — NIEMALS committen
+.env
+*.env
+backend/.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# PocketBase Binary und lokale Daten
+pocketbase/
+pb_data/
+
+# FTS-Datenbank (wird beim Start neu aufgebaut)
+backend/fts/
+
+# Playwright / Test-Logs
+.playwright-mcp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Lokale Planungsdokumente
+MAILFLOW-BRIEFING.md
+MAILFLOW-KIINTEGRATION-PLAN.md
+MAILFLOW-PLAN.md
+context/
+
+# Lokale Hilfsskripte
+backfill_reply_to.py
+reset_emails.py
+test_imap.py
+add_thread_id.py

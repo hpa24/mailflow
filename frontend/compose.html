@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mailflow — Neue E-Mail</title>
+  <link rel="stylesheet" href="css/main.css">
+  <script src="js/auth.js"></script>
+  <script>auth.requireAuth();</script>
+  <style>
+    #compose-layout {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      height: 100vh;
+    }
+    #compose-main {
+      display: flex;
+      flex-direction: column;
+      max-width: 860px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 28px 32px;
+      gap: 0;
+      overflow-y: auto;
+    }
+    .compose-field {
+      display: grid;
+      grid-template-columns: 80px 1fr;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      min-height: 44px;
+    }
+    .compose-label {
+      font-size: 15px;
+      color: var(--text2);
+      font-weight: 500;
+      padding: 10px 0;
+    }
+    .compose-field input {
+      border: none;
+      outline: none;
+      font-size: 16px;
+      color: var(--text);
+      padding: 10px 8px;
+      background: transparent;
+      width: 100%;
+      font-family: inherit;
+    }
+    #compose-body-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      margin-top: 4px;
+    }
+    #compose-body {
+      flex: 1;
+      border: none;
+      outline: none;
+      font-size: 16px;
+      line-height: 1.7;
+      color: var(--text);
+      resize: none;
+      padding: 16px 8px;
+      font-family: inherit;
+      background: transparent;
+      min-height: 300px;
+    }
+    .compose-quote {
+      margin-top: 16px;
+      padding: 12px 16px;
+      border-left: 3px solid var(--border-strong);
+      color: var(--text2);
+      font-size: 15px;
+      white-space: pre-wrap;
+      line-height: 1.6;
+    }
+    #compose-actions {
+      display: flex;
+      gap: 8px;
+      padding: 12px 0 0;
+      border-top: 1px solid var(--border);
+      margin-top: auto;
+    }
+    .sending-note {
+      font-size: 13px;
+      color: var(--text2);
+      align-self: center;
+      margin-left: 8px;
+    }
+  </style>
+</head>
+<body>
+<div id="compose-layout">
+
+  <!-- Topbar -->
+  <header id="topbar">
+    <span id="topbar-title">Mailflow</span>
+    <div id="topbar-actions">
+      <a class="action-btn" href="index.html">← Zurück zum Posteingang</a>
+    </div>
+    <button class="action-btn" id="btn-logout" onclick="auth.logout()">Abmelden</button>
+  </header>
+
+  <main id="compose-main">
+
+    <div class="compose-field">
+      <span class="compose-label">An</span>
+      <input type="email" id="to" placeholder="empfaenger@beispiel.de" autocomplete="off">
+    </div>
+    <div class="compose-field">
+      <span class="compose-label">Betreff</span>
+      <input type="text" id="subject" placeholder="Betreff">
+    </div>
+
+    <div id="compose-body-wrap">
+      <textarea id="compose-body" placeholder="Nachricht schreiben…"></textarea>
+      <div class="compose-quote" id="compose-quote" style="display:none"></div>
+    </div>
+
+    <div id="compose-actions">
+      <button class="action-btn primary" id="btn-send">✉ Senden</button>
+      <button class="action-btn" onclick="history.back()">Verwerfen</button>
+      <span class="sending-note" id="send-status"></span>
+    </div>
+
+  </main>
+</div>
+
+<script src="js/api.js"></script>
+<script>
+  // URL-Parameter auslesen
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('to'))      document.getElementById('to').value      = params.get('to');
+  if (params.get('subject')) document.getElementById('subject').value = params.get('subject');
+
+  const quote = params.get('quote');
+  if (quote) {
+    const quoteEl = document.getElementById('compose-quote');
+    quoteEl.textContent = quote;
+    quoteEl.style.display = 'block';
+  }
+
+  // Fokus ans Ende des Body-Felds
+  const bodyEl = document.getElementById('compose-body');
+  bodyEl.focus();
+
+  // Senden (SMTP kommt in Schritt 10 — bis dahin Hinweis)
+  document.getElementById('btn-send').addEventListener('click', async () => {
+    const to      = document.getElementById('to').value.trim();
+    const subject = document.getElementById('subject').value.trim();
+    const body    = bodyEl.value.trim();
+    const status  = document.getElementById('send-status');
+
+    if (!to || !subject) {
+      status.textContent = 'Bitte Empfänger und Betreff ausfüllen.';
+      status.style.color = 'var(--danger)';
+      return;
+    }
+
+    const btn = document.getElementById('btn-send');
+    btn.disabled = true;
+    status.style.color = 'var(--text2)';
+    status.textContent = 'Wird gesendet…';
+
+    try {
+      await api.sendEmail({ to, subject, body, quote });
+      status.textContent = 'Gesendet ✓';
+      status.style.color = 'var(--success)';
+      setTimeout(() => history.back(), 1200);
+    } catch (e) {
+      status.textContent = 'Senden fehlgeschlagen: ' + e.message;
+      status.style.color = 'var(--danger)';
+      btn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

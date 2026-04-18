@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mailflow</title>
+  <link rel="stylesheet" href="css/main.css">
+  <script src="js/auth.js"></script>
+  <script>auth.requireAuth();</script>
+</head>
+<body>
+  <div id="layout">
+
+    <!-- Funktionszeile -->
+    <header id="topbar">
+
+<div id="topbar-left">
+      <div id="topbar-title">Mailflow</div>
+</div>
+
+<div id="topbar-actions">
+        <button class="action-btn primary" id="btn-sync">E-Mails abrufen</button>
+<button class="action-btn primary" id="btn-new-email">Neue E-Mail</button>
+        <button class="action-btn" id="btn-ki-mode">KI-Modus</button>
+        <div id="search-wrap">
+          <input type="text" id="search-input" placeholder="Suchen…" autocomplete="off">
+          <button id="search-clear" title="Suche beenden">✕</button>
+        </div>
+        
+</div>
+
+<div id="topbar-right">
+<button class="action-btn" id="btn-logout" onclick="auth.logout()">Abmelden</button>
+</div>
+
+    </header>
+
+    <!-- KI-Toolbar -->
+    <div id="ki-toolbar" style="display:none">
+<div class="ki-toolbar-kategorisiere">
+      <button id="btn-ki-triage" class="action-btn">Kategorisiere E-Mails</button>
+      <span id="ki-triage-status"></span>
+</div>
+      <div class="ki-filter-group-container">
+        <div class="ki-filter-group">
+        <button class="ki-filter-btn active" data-filter="">Alle</button>
+        <button class="ki-filter-btn" data-filter="focus">Fokus</button>
+        <button class="ki-filter-btn" data-filter="quick-reply">Quick-Reply</button>
+        <button class="ki-filter-btn" data-filter="office">Office</button>
+        <button class="ki-filter-btn" data-filter="info-trash">Trash</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div id="app">
+
+      <!-- Sidebar -->
+      <aside id="sidebar">
+        <div id="sidebar-accounts"></div>
+      </aside>
+
+      <!-- E-Mail-Liste -->
+      <section id="email-list-panel">
+        <div id="list-header">
+          <span id="list-header-title">Posteingang</span>
+          <div class="view-toggle">
+            <button class="view-toggle-btn active" id="btn-view-thread">Thread</button>
+            <button class="view-toggle-btn" id="btn-view-sender">Absender</button>
+          </div>
+          <div class="read-filter">
+            <button class="read-filter-btn active" data-filter="all">Alle</button>
+            <button class="read-filter-btn" data-filter="unread">Ungelesen</button>
+            <button class="read-filter-btn" data-filter="read">Gelesen</button>
+          </div>
+        </div>
+        <div id="email-list"></div>
+        <div id="list-footer">
+          <span id="list-status"></span>
+        </div>
+      </section>
+
+      <!-- Detail-Panel -->
+      <section id="detail-panel">
+
+        <!-- Tab-Leiste (nur sichtbar wenn Compose offen) -->
+        <div id="detail-tabs" style="display:none">
+          <button class="detail-tab active" id="tab-email">E-Mail</button>
+          <button class="detail-tab" id="tab-compose">✏ Neue E-Mail</button>
+        </div>
+
+        <!-- E-Mail-Ansicht -->
+        <div id="view-mode">
+
+          <div id="detail-ki-bar" style="display:none">
+            <div class="ki-cat-group">
+              <button class="ki-cat-btn" data-cat="focus">Fokus</button>
+              <button class="ki-cat-btn" data-cat="quick-reply">Quick</button>
+              <button class="ki-cat-btn" data-cat="office">Office</button>
+              <button class="ki-cat-btn" data-cat="info-trash">Trash</button>
+            </div>
+          </div>
+
+          <div id="detail-actions" style="display:none">
+            <button class="action-btn" id="btn-edit-draft" style="display:none">Bearbeiten</button>
+            <button class="action-btn primary" id="btn-send-draft" style="display:none">Senden</button>
+            <button class="action-btn" id="btn-sync-draft" style="display:none">Synchronisieren</button>
+            <button class="action-btn primary" id="btn-reply">Antworten</button>
+            <button class="action-btn" id="btn-forward">Weiterleiten</button>
+            <button class="action-btn" id="btn-toggle-read">Als gelesen markieren</button>
+            <button class="action-btn danger primary" id="btn-delete">Löschen</button>
+            <button class="action-btn danger" id="btn-spam">Spam</button>
+            <button id="btn-ki-suggest" class="action-btn primary" style="display:none">KI-Antwort erstellen</button>
+          </div>
+
+<div class="view-inner-container">
+
+          <div id="detail-header" style="display:none">
+            <div class="detail-meta" id="detail-meta"></div>
+            <div id="detail-subject"></div>
+
+          </div>
+
+          <div id="detail-attachments" style="display:none"></div>
+          <div id="detail-body" style="display:none"></div>
+          <div id="detail-empty">Bitte eine E-Mail aus der Liste auswählen</div>
+
+</div>
+
+        </div>
+
+        <!-- Compose-Ansicht (inline) -->
+        <div id="compose-mode" style="display:none">
+
+          <div id="compose-actions-bar">
+            <button class="action-btn primary" id="btn-send-inline">Senden</button>
+            <button class="action-btn" id="btn-compose-cancel">Abbrechen</button>
+            <button class="action-btn" id="btn-attach" title="Datei anhängen">Anhang</button>
+            <input type="file" id="ci-file-input" multiple style="display:none">
+            <span id="draft-status"></span>
+          </div>
+
+<div class="compose-inner-container">
+
+          <div id="compose-fields">
+            <div class="compose-field-row">
+              <span class="compose-lbl">Von</span>
+              <select id="ci-from-account" class="compose-select"></select>
+              <span class="compose-lbl-mid">SMTP</span>
+              <select id="ci-smtp-server" class="compose-select"></select>
+            </div>
+            <div class="compose-field-row" style="position:relative">
+              <span class="compose-lbl">An</span>
+              <div class="address-field" id="ci-to-field">
+                <input type="text" class="address-chips-input" id="ci-to-input" placeholder="empfaenger@beispiel.de" autocomplete="off">
+              </div>
+              <div class="address-suggestions" id="ci-to-suggestions"></div>
+            </div>
+            <div class="compose-field-row" style="position:relative">
+              <span class="compose-lbl">CC</span>
+              <div class="address-field" id="ci-cc-field">
+                <input type="text" class="address-chips-input" id="ci-cc-input" placeholder="" autocomplete="off">
+              </div>
+              <div class="address-suggestions" id="ci-cc-suggestions"></div>
+            </div>
+            <div class="compose-field-row">
+              <span class="compose-lbl">Betreff</span>
+              <input type="text" id="ci-subject" placeholder="Betreff">
+            </div>
+          </div>
+          <div id="ki-refine-bar" style="display:none"></div>
+
+          <div id="compose-toolbar">
+            <button class="toolbar-btn" id="tb-bold" title="Fett (Strg+B)"><b>B</b></button>
+            <button class="toolbar-btn" id="tb-underline" title="Unterstrichen (Strg+U)"><u>U</u></button>
+            <div class="toolbar-btngroup" id="tb-fontsize-group">
+              <button class="toolbar-btn tbfs" data-size="1" title="Klein">S</button>
+              <button class="toolbar-btn tbfs tbfs-active" data-size="3" title="Normal">M</button>
+              <button class="toolbar-btn tbfs" data-size="4" title="Groß">L</button>
+              <button class="toolbar-btn tbfs" data-size="5" title="Sehr groß">XL</button>
+            </div>
+          </div>
+          <div id="ci-attachments" style="display:none"></div>
+          <div id="ci-scroll-area">
+            <div id="ci-body" contenteditable="true" data-placeholder="Nachricht schreiben…"></div>
+            <div id="ci-quote"></div>
+          </div>
+          <div id="compose-drop-overlay"><span>Datei hier ablegen</span></div>
+
+</div>
+
+        </div>
+
+      </section>
+
+    </div>
+  </div>
+
+  <!-- Kontext-Menü -->
+  <div id="ctx-menu"></div>
+
+  <!-- Bestätigungs-Dialog -->
+  <div id="confirm-overlay" style="display:none">
+    <div id="confirm-box">
+      <div id="confirm-msg"></div>
+      <div id="confirm-actions">
+        <button class="action-btn" id="confirm-cancel">Abbrechen</button>
+        <button class="action-btn primary" id="confirm-ok">Verwerfen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Account-Einstellungen Modal -->
+  <div id="account-modal-overlay" style="display:none">
+    <div id="account-modal">
+      <div id="account-modal-header">
+        <span id="account-modal-title">Account-Einstellungen</span>
+        <button id="account-modal-close">✕</button>
+      </div>
+      <div id="account-modal-body">
+        <div class="modal-field-row">
+          <label class="modal-lbl">Name</label>
+          <input type="text" id="am-name" placeholder="Mein Account">
+        </div>
+        <div class="modal-field-row">
+          <label class="modal-lbl">Absender</label>
+          <input type="text" id="am-from-name" placeholder="Max Mustermann">
+        </div>
+        <div class="modal-field-row">
+          <label class="modal-lbl">Farbe</label>
+          <div class="am-color-wrap">
+            <input type="color" id="am-color" value="#888888">
+            <span id="am-color-hex" class="am-color-hex">#888888</span>
+          </div>
+        </div>
+        <div class="modal-field-row">
+          <label class="modal-lbl">Signatur</label>
+          <textarea id="am-signature" rows="6" placeholder="Mit freundlichen Grüßen&#10;Max Mustermann&#10;Meine Firma GmbH&#10;www.beispiel.de"></textarea>
+        </div>
+      </div>
+      <div id="account-modal-footer">
+        <span id="account-modal-status"></span>
+        <button class="action-btn" id="account-modal-cancel">Abbrechen</button>
+        <button class="action-btn primary" id="account-modal-save">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/inbox.js"></script>
+</body>
+</html>
+
+
+alias claude-gemini='export ANTHROPIC_BASE_URL="https://openrouter.ai/api/v1" && export ANTHROPIC_AUTH_TOKEN="DEIN_KEY" && claude --model google/gemini-pro-1.5'
