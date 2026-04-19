@@ -1309,6 +1309,20 @@ async def ai_triage(req: TriageRequest):
     if not emails:
         return {"categorized": 0, "skipped": 0, "errors": 0}
 
+    # Lernbeispiele für diesen Account laden
+    examples: list = []
+    try:
+        ex_filter = f'account="{req.account_id}"' if req.account_id else ""
+        ex_data = await pb_client.pb_get("/api/collections/triage_examples/records", params={
+            "filter": ex_filter,
+            "perPage": 30,
+            "sort": "-created",
+            "fields": "from_email,subject,body_snippet,category",
+        })
+        examples = ex_data.get("items", [])
+    except Exception as exc:
+        logger.warning("Triage: Lernbeispiele konnten nicht geladen werden: %s", exc)
+
     categorized = 0
     errors = 0
     semaphore = asyncio.Semaphore(5)  # Max. 5 parallele AI-Anfragen
@@ -1321,6 +1335,7 @@ async def ai_triage(req: TriageRequest):
                     subject=email.get("subject") or "",
                     body=email.get("body_plain") or "",
                     from_email=email.get("from_email") or "",
+                    examples=examples,
                 )
                 await pb_client.pb_patch(
                     f"/api/collections/emails/records/{email['id']}",
@@ -1335,6 +1350,45 @@ async def ai_triage(req: TriageRequest):
     await asyncio.gather(*[_process_one(e) for e in emails])
 
     return {"categorized": categorized, "skipped": 0, "errors": errors}
+
+
+@app.post("/triage/example")
+async def save_triage_example(data: dict):
+    """Speichert eine manuelle Korrektur als Lernbeispiel für die KI-Triage."""
+    email_id = data.get("email_id", "").strip()
+    category = data.get("category", "").strip()
+    valid = {"focus", "quick-reply", "office", "info-trash"}
+    if not email_id or category not in valid:
+        raise HTTPException(status_code=400, detail="email_id und gültige category erforderlich")
+
+    try:
+        email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}",
+                                       params={"fields": "account,from_email,subject,body_plain"})
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"E-Mail nicht gefunden: {exc}")
+
+    body_plain = email.get("body_plain") or ""
+    body_snippet = body_plain[:300].strip()
+
+    # Vorhandenes Beispiel für diese E-Mail überschreiben
+    existing = await pb_client.pb_get("/api/collections/triage_examples/records", params={
+        "filter": f'account="{email["account"]}" && from_email="{email.get("from_email","")}" && subject="{email.get("subject","")}"',
+        "perPage": 1,
+    })
+    items = existing.get("items", [])
+    if items:
+        await pb_client.pb_patch(f"/api/collections/triage_examples/records/{items[0]['id']}",
+                                 {"category": category, "body_snippet": body_snippet})
+    else:
+        await pb_client.pb_post("/api/collections/triage_examples/records", {
+            "account":      email["account"],
+            "from_email":   email.get("from_email", ""),
+            "subject":      email.get("subject", ""),
+            "body_snippet": body_snippet,
+            "category":     category,
+        })
+
+    return {"ok": True}
 
 
 @app.post("/ai/suggest")

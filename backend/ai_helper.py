@@ -42,11 +42,22 @@ def load_optional_context(filename: str) -> str | None:
     return None
 
 
-async def categorize_email(subject: str, body: str, from_email: str) -> str:
+async def categorize_email(subject: str, body: str, from_email: str, examples: list | None = None) -> str:
     """Kategorisiert eine einzelne E-Mail in eine von vier Kategorien.
 
     Gibt zurück: "focus" | "quick-reply" | "office" | "info-trash"
     """
+    examples_section = ""
+    if examples:
+        lines = ["Hier sind Beispiele aus diesem Postfach mit der korrekten Kategorie:"]
+        for ex in examples[:30]:
+            snippet = ex.get("body_snippet") or ""
+            lines.append(
+                f'- Von: {ex.get("from_email","")} | Betreff: {ex.get("subject","")} | '
+                f'Inhalt: {snippet[:150]} → Kategorie: {ex.get("category","")}'
+            )
+        examples_section = "\n".join(lines) + "\n\n"
+
     prompt = f"""Klassifiziere diese E-Mail in genau eine der folgenden 4 Kategorien:
 
 focus: Tiefgehende fachliche Fragen oder komplexe Anliegen, die volle Aufmerksamkeit erfordern
@@ -54,7 +65,7 @@ quick-reply: Kurze organisatorische Fragen, Terminbestätigungen oder einfache B
 office: Rechnungen, Buchhaltung, Verträge, geschäftliche Unterlagen und Dokumente
 info-trash: Newsletter, Werbung, automatische Benachrichtigungen ohne direkten Handlungsbedarf
 
-Von: {from_email}
+{examples_section}Von: {from_email}
 Betreff: {subject}
 Inhalt (gekürzt): {body[:800] if body else "(kein Inhalt)"}
 

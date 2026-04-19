@@ -1814,6 +1814,9 @@ document.getElementById('detail-ki-bar').addEventListener('click', async (e) => 
     alert('Kategorie konnte nicht gespeichert werden: ' + err.message);
     return;
   }
+  if (newCat) {
+    api.saveTriageExample(state.activeEmailId, newCat).catch(() => {});
+  }
 
   // Lokalen State aktualisieren
   email.ai_category = newCat;
