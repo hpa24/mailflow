@@ -36,6 +36,9 @@ async def setup_pocketbase_schema(token: str) -> None:
         # 6. smtp_servers (no dependencies)
         await _ensure_collection(client, headers, existing, _smtp_servers_schema())
 
+        # 7. triage_rules (depends on accounts)
+        await _ensure_collection(client, headers, existing, _triage_rules_schema(accounts_id))
+
         # Migrations: add fields to existing collections if missing
         if "accounts" in existing:
             await _add_missing_fields(client, headers, "accounts", existing["accounts"], [
@@ -277,6 +280,24 @@ def _smtp_servers_schema() -> dict:
             _field("use_tls", "bool"),
             _field("use_starttls", "bool"),
             _field("is_default", "bool"),
+        ],
+    }
+
+
+def _triage_rules_schema(accounts_id: str) -> dict:
+    return {
+        "name": "triage_rules",
+        "type": "base",
+        "listRule": None,
+        "viewRule": None,
+        "createRule": None,
+        "updateRule": None,
+        "deleteRule": None,
+        "fields": [
+            _field("account", "relation", required=True,
+                   collectionId=accounts_id, maxSelect=1, cascadeDelete=True),
+            _field("category_slug", "text", required=True),
+            _field("rule_text", "text", max=MAX_UNLIMITED),
         ],
     }
 

@@ -138,13 +138,14 @@ async def categorize_email(subject: str, body: str, from_email: str, rules: list
 
     main_prompt_template = config.get("main_prompt", "")
     if main_prompt_template:
+        safe_body = (body[:800] if body else "(kein Inhalt)").replace("{", "{{").replace("}", "}}")
         prompt = main_prompt_template.format(
             n=len(categories),
             categories_block=categories_block,
             rules_block=rules_block,
             from_email=from_email,
-            subject=subject,
-            body=body[:800] if body else "(kein Inhalt)",
+            subject=subject.replace("{", "{{").replace("}", "}}"),
+            body=safe_body,
         )
     else:
         # Fallback-Prompt wenn Template leer
@@ -189,8 +190,8 @@ async def extract_rule(from_email: str, subject: str, body_snippet: str, categor
     if template:
         prompt = template.format(
             from_email=from_email,
-            subject=subject,
-            body_snippet=body_snippet[:300],
+            subject=subject.replace("{", "{{").replace("}", "}}"),
+            body_snippet=body_snippet[:300].replace("{", "{{").replace("}", "}}"),
             category_name=category_name,
             category_slug=category_slug,
         )
@@ -226,7 +227,7 @@ async def consolidate_rules(rules: list[str], category_slug: str) -> list[str]:
         prompt = template.format(
             n=len(rules),
             category_name=category_name,
-            rules_list=rules_list,
+            rules_list=rules_list.replace("{", "{{").replace("}", "}}"),
         )
     else:
         prompt = (
