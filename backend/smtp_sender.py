@@ -130,7 +130,7 @@ def _send_smtp(
 
     if use_tls:
         ctx = ssl.create_default_context()
-        with smtplib.SMTP_SSL(host, port, context=ctx) as srv:
+        with smtplib.SMTP_SSL(host, port, context=ctx, timeout=30) as srv:
             if user:
                 srv.login(user, password)
             refused = srv.sendmail(from_addr, to_list, msg_bytes)
