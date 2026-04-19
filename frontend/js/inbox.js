@@ -441,7 +441,7 @@ function setupSearch() {
 async function loadAccounts() {
   try {
     const data = await api.getAccounts();
-    state.accounts = data.items || [];
+    state.accounts = (data.items || []).sort((a, b) => a.name.localeCompare(b.name, 'de'));
     if (state.accounts.length > 0 && !state.activeAccount) {
       state.activeAccount = state.accounts[0].id;
     }

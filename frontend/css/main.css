@@ -360,7 +360,7 @@ align-items:center;
 .email-content {
   flex: 1;
   min-width: 0;
-  padding: 8px 5px 8px 5px;
+  padding: 6px 5px 6px 5px;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 0px 8px;
@@ -400,7 +400,7 @@ align-items:center;
 
 
 .email-from {
-  font-size: 12px;
+  font-size: 16px;
   color: var(--text2);
   white-space: nowrap;
   overflow: hidden;
@@ -415,6 +415,7 @@ align-items:center;
   align-items: center;
   gap: 6px;
   min-width: 0;
+margin-top: 3px;
 }
 .email-subject-text {
   flex: 1;
