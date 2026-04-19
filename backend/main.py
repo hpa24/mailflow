@@ -1371,7 +1371,9 @@ async def save_triage_example(data: dict):
         email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}",
                                        params={"fields": "account,from_email,subject,body_plain"})
     except Exception as exc:
-        raise HTTPException(status_code=404, detail=f"E-Mail nicht gefunden: {exc}")
+        logger.error("triage/example: E-Mail %s konnte nicht geladen werden: %s", email_id, exc)
+        status = 404 if "404" in str(exc) else 502
+        raise HTTPException(status_code=status, detail=f"E-Mail konnte nicht geladen werden: {exc}")
 
     # Regel via AI extrahieren
     rule_text = await ai_helper.extract_rule(
@@ -1382,11 +1384,15 @@ async def save_triage_example(data: dict):
     )
     logger.info("Triage-Regel extrahiert: %s → %s", category, rule_text)
 
-    await pb_client.pb_post("/api/collections/triage_rules/records", {
-        "account":       email["account"],
-        "category_slug": category,
-        "rule_text":     rule_text,
-    })
+    try:
+        await pb_client.pb_post("/api/collections/triage_rules/records", {
+            "account":       email["account"],
+            "category_slug": category,
+            "rule_text":     rule_text,
+        })
+    except Exception as exc:
+        logger.error("triage/example: Regel konnte nicht gespeichert werden: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Regel konnte nicht gespeichert werden: {exc}")
 
     # Konsolidierung prüfen: bei ≥15 Regeln für diesen Account + Kategorie
     try:
