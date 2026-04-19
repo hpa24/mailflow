@@ -509,6 +509,8 @@ async def get_emails_by_sender(account: str | None = None, folder: str | None = 
 @app.post("/emails/send")
 async def send_email_endpoint(data: dict):
     """Sendet eine E-Mail via SMTP und speichert sie im Sent-Ordner."""
+    logger.info("POST /emails/send empfangen: to=%s subject=%s smtp=%s account=%s",
+                data.get("to"), data.get("subject"), data.get("smtp_server"), data.get("from_account"))
     to = data.get("to", "").strip()
     cc = data.get("cc", "").strip()
     subject = data.get("subject", "").strip()
