@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -292,6 +293,9 @@ async def _get_all_accounts() -> list[dict]:
     return result.get("items", [])
 
 
+_folder_create_lock = asyncio.Lock()
+
+
 async def _get_or_create_folder(account_id: str, imap_path: str,
                                 uidvalidity: int, email_folder: str = "",
                                 no_select: bool = False) -> dict:
@@ -299,37 +303,38 @@ async def _get_or_create_folder(account_id: str, imap_path: str,
     email_folder: normierter Name der in emails.folder gespeichert wird (z.B. 'Drafts' für 'INBOX.Drafts').
     no_select: True wenn der Ordner \\NoSelect hat (reiner Namensraum, keine E-Mails).
     """
-    result = await pb_client.pb_get(
-        "/api/collections/folders/records",
-        params={"filter": f'account="{account_id}" && imap_path="{imap_path}"', "perPage": 1},
-    )
-    items = result.get("items", [])
-    if items:
-        folder = items[0]
-        updates = {}
-        if email_folder and not folder.get("email_folder"):
-            updates["email_folder"] = email_folder
-        if no_select and not folder.get("no_select"):
-            updates["no_select"] = True
-        if updates:
-            await pb_client.pb_patch(
-                f"/api/collections/folders/records/{folder['id']}", updates
-            )
-            folder.update(updates)
-        return folder
+    async with _folder_create_lock:
+        result = await pb_client.pb_get(
+            "/api/collections/folders/records",
+            params={"filter": f'account="{account_id}" && imap_path="{imap_path}"', "perPage": 1},
+        )
+        items = result.get("items", [])
+        if items:
+            folder = items[0]
+            updates = {}
+            if email_folder and not folder.get("email_folder"):
+                updates["email_folder"] = email_folder
+            if no_select and not folder.get("no_select"):
+                updates["no_select"] = True
+            if updates:
+                await pb_client.pb_patch(
+                    f"/api/collections/folders/records/{folder['id']}", updates
+                )
+                folder.update(updates)
+            return folder
 
-    display_name = imap_path.split("/")[-1].split(".")[-1]
-    new_folder = await pb_client.pb_post("/api/collections/folders/records", {
-        "account": account_id,
-        "imap_path": imap_path,
-        "display_name": display_name,
-        "email_folder": email_folder or imap_path,
-        "no_select": no_select,
-        "unread_count": 0,
-        "last_sync_uid": 0,
-        "uidvalidity": uidvalidity,
-    })
-    return new_folder
+        display_name = imap_path.split("/")[-1].split(".")[-1]
+        new_folder = await pb_client.pb_post("/api/collections/folders/records", {
+            "account": account_id,
+            "imap_path": imap_path,
+            "display_name": display_name,
+            "email_folder": email_folder or imap_path,
+            "no_select": no_select,
+            "unread_count": 0,
+            "last_sync_uid": 0,
+            "uidvalidity": uidvalidity,
+        })
+        return new_folder
 
 
 async def _update_folder(folder_id: str, uidvalidity: int,
