@@ -1,7 +1,4 @@
-// Backend-URL: in Produktion eigene Subdomain, lokal Port 8000
-const API = window.location.hostname === 'mailflow.barres.de'
-  ? 'https://mailflow-api.barres.de'
-  : `${window.location.protocol}//${window.location.hostname}:8000`;
+const API = 'https://mailflow-api.barres.de';
 
 // API-Key muss mit API_KEY in backend/.env übereinstimmen.
 // Für lokale Entwicklung kann er leer bleiben — Backend ignoriert den Key,
