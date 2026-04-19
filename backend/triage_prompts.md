@@ -1,8 +1,8 @@
 ## Kategorien
-kat1 | focus | Fokus | Tiefgehende fachliche Fragen oder komplexe Anliegen, die volle Aufmerksamkeit erfordern
+kat1 | focus | Tief | Tiefgehende fachliche Fragen oder komplexe Anliegen, die volle Aufmerksamkeit erfordern
 kat2 | quick-reply | Schnell | Kurze organisatorische Fragen, Terminbestätigungen oder einfache Bestätigungen
 kat3 | office | Office | Rechnungen, Buchhaltung, Verträge, geschäftliche Unterlagen und Dokumente
-kat4 | info-trash | Info | Newsletter, Werbung, automatische Benachrichtigungen ohne direkten Handlungsbedarf
+kat4 | info-trash | Trash | Newsletter, Werbung, automatische Benachrichtigungen ohne direkten Handlungsbedarf
 
 ## Haupt-Kategorisierungsprompt
 Klassifiziere diese E-Mail in genau eine der folgenden {n} Kategorien:
