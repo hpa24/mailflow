@@ -48,6 +48,7 @@ window.api = {
   searchContacts(q)              { return apiGet('/contacts/search', { q }); },
   getFolderCounts()              { return apiGet('/folders/counts'); },
   getFolders(accountId)          { return apiGet('/folders', { account: accountId }); },
+  getCategories()                { return apiGet('/categories'); },
   getAccounts()                  { return apiFetch('/accounts'); },
   getSmtpServers()               { return apiFetch('/smtp-servers'); },
   getSyncStatus()                { return apiFetch('/sync/status'); },

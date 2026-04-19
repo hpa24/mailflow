@@ -79,6 +79,7 @@ function buildFolderTree(folders, delimiter) {
 
 let state = {
   accounts: [],
+  categories: [],        // [{slug, name, description}] — dynamisch geladen
   folders: {},          // accountId → [{imap_path, display_name, unread_count, …}]
   delimiters: {},       // accountId → '/' | '.' | null
   collapsedFolders: new Set(JSON.parse(localStorage.getItem('mf_collapsed') || '[]')),
@@ -103,7 +104,7 @@ let state = {
 };
 
 async function init() {
-  await Promise.all([loadAccounts(), loadSmtpServers()]);
+  await Promise.all([loadAccounts(), loadSmtpServers(), loadCategories()]);
   await loadEmails(true);
   setupInfiniteScroll();
   setupViewToggle();
@@ -112,6 +113,51 @@ async function init() {
   setupComposeToolbar();
   startAutoRefresh();
   startEventSource();
+}
+
+async function loadCategories() {
+  try {
+    const cats = await api.getCategories();
+    state.categories = cats;
+    _renderCategoryButtons();
+  } catch (e) {
+    // Fallback: eingebaute Defaults
+    state.categories = [
+      { slug: 'focus',      name: 'Fokus'  },
+      { slug: 'quick-reply',name: 'Quick'  },
+      { slug: 'office',     name: 'Office' },
+      { slug: 'info-trash', name: 'Info'   },
+    ];
+    _renderCategoryButtons();
+  }
+}
+
+function _renderCategoryButtons() {
+  // KI-Toolbar-Filterbuttons
+  const filterGroup = document.getElementById('ki-filter-group');
+  if (filterGroup) {
+    filterGroup.innerHTML = '<button class="ki-filter-btn active" data-filter="">Alle</button>';
+    state.categories.forEach(cat => {
+      const btn = document.createElement('button');
+      btn.className = 'ki-filter-btn';
+      btn.dataset.filter = cat.slug;
+      btn.textContent = cat.name;
+      filterGroup.appendChild(btn);
+    });
+  }
+
+  // Detail-Panel Kategorie-Buttons
+  const catGroup = document.getElementById('ki-cat-group');
+  if (catGroup) {
+    catGroup.innerHTML = '';
+    state.categories.forEach(cat => {
+      const btn = document.createElement('button');
+      btn.className = 'ki-cat-btn';
+      btn.dataset.cat = cat.slug;
+      btn.textContent = cat.name;
+      catGroup.appendChild(btn);
+    });
+  }
 }
 
 let _lastKnownSync = null;
@@ -819,14 +865,9 @@ function buildEmailItem(email) {
   const folderBadge = state.searchQuery
     ? `<span class="folder-badge">${escHtml(email.folder || '')}</span>` : '';
 
-  const AI_BADGE_LABELS = {
-    'focus':      'Fokus',
-    'quick-reply':'Quick',
-    'office':     'Office',
-    'info-trash': 'Trash',
-  };
-  const aiBadge = (state.kiModeActive && email.ai_category && AI_BADGE_LABELS[email.ai_category])
-    ? `<span class="ai-category-badge ${escHtml(email.ai_category)}">${AI_BADGE_LABELS[email.ai_category]}</span>`
+  const catLabel = state.categories.find(c => c.slug === email.ai_category)?.name;
+  const aiBadge = (state.kiModeActive && email.ai_category && catLabel)
+    ? `<span class="ai-category-badge ${escHtml(email.ai_category)}">${escHtml(catLabel)}</span>`
     : '';
 
   item.innerHTML = `
@@ -1826,8 +1867,7 @@ document.getElementById('detail-ki-bar').addEventListener('click', async (e) => 
   const itemEl = document.querySelector(`.email-item[data-id="${state.activeEmailId}"]`);
   if (itemEl) {
     const badge = itemEl.querySelector('.ai-category-badge');
-    const labels = { focus: 'Fokus', 'quick-reply': 'Quick', office: 'Office', 'info-trash': 'Trash' };
-    if (badge) badge.textContent = labels[newCat] || newCat;
+    if (badge) badge.textContent = state.categories.find(c => c.slug === newCat)?.name || newCat;
   }
 
   // E-Mail aus gefilterter Liste entfernen, wenn neue Kategorie nicht zum Filter passt

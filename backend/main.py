@@ -1281,13 +1281,19 @@ class RefineRequest(BaseModel):
     instruction: str
 
 
+@app.get("/categories")
+async def get_categories():
+    """Liefert die konfigurierten Triage-Kategorien."""
+    categories = ai_helper.load_triage_config()["categories"]
+    return [{"slug": c["slug"], "name": c["name"], "description": c["description"]} for c in categories]
+
+
 @app.post("/ai/triage")
 async def ai_triage(req: TriageRequest):
     """Kategorisiert ungelesene E-Mails ohne ai_category via Claude Haiku.
 
     Max. 50 E-Mails pro Aufruf (Kostenschutz).
     """
-    # Filter: ungelesen UND noch keine Kategorie
     filters = ['is_read=false', '(ai_category="" || ai_category=null)']
     if req.account_id:
         filters.append(f'account="{req.account_id}"')
@@ -1299,7 +1305,7 @@ async def ai_triage(req: TriageRequest):
             "filter": " && ".join(filters),
             "perPage": 50,
             "sort": "-date_sent",
-            "fields": "id,subject,body_plain,from_email",
+            "fields": "id,subject,body_plain,from_email,account",
         })
     except Exception as exc:
         logger.error("Triage: PocketBase-Abfrage fehlgeschlagen: %s", exc)
@@ -1309,23 +1315,23 @@ async def ai_triage(req: TriageRequest):
     if not emails:
         return {"categorized": 0, "skipped": 0, "errors": 0}
 
-    # Lernbeispiele für diesen Account laden
-    examples: list = []
+    # Lernregeln für diesen Account laden
+    rules: list[str] = []
     try:
-        ex_filter = f'account="{req.account_id}"' if req.account_id else ""
-        ex_data = await pb_client.pb_get("/api/collections/triage_examples/records", params={
-            "filter": ex_filter,
-            "perPage": 30,
+        rule_filter = f'account="{req.account_id}"' if req.account_id else ""
+        rule_data = await pb_client.pb_get("/api/collections/triage_rules/records", params={
+            "filter": rule_filter,
+            "perPage": 100,
             "sort": "-created",
-            "fields": "from_email,subject,body_snippet,category",
+            "fields": "rule_text",
         })
-        examples = ex_data.get("items", [])
+        rules = [r["rule_text"] for r in rule_data.get("items", []) if r.get("rule_text")]
     except Exception as exc:
-        logger.warning("Triage: Lernbeispiele konnten nicht geladen werden: %s", exc)
+        logger.warning("Triage: Lernregeln konnten nicht geladen werden: %s", exc)
 
     categorized = 0
     errors = 0
-    semaphore = asyncio.Semaphore(5)  # Max. 5 parallele AI-Anfragen
+    semaphore = asyncio.Semaphore(5)
 
     async def _process_one(email: dict) -> None:
         nonlocal categorized, errors
@@ -1335,7 +1341,7 @@ async def ai_triage(req: TriageRequest):
                     subject=email.get("subject") or "",
                     body=email.get("body_plain") or "",
                     from_email=email.get("from_email") or "",
-                    examples=examples,
+                    rules=rules,
                 )
                 await pb_client.pb_patch(
                     f"/api/collections/emails/records/{email['id']}",
@@ -1354,11 +1360,11 @@ async def ai_triage(req: TriageRequest):
 
 @app.post("/triage/example")
 async def save_triage_example(data: dict):
-    """Speichert eine manuelle Korrektur als Lernbeispiel für die KI-Triage."""
+    """Speichert eine manuelle Korrektur als Lernregel für die KI-Triage."""
     email_id = data.get("email_id", "").strip()
     category = data.get("category", "").strip()
-    valid = {"focus", "quick-reply", "office", "info-trash"}
-    if not email_id or category not in valid:
+    valid_slugs = set(ai_helper.get_category_slugs())
+    if not email_id or category not in valid_slugs:
         raise HTTPException(status_code=400, detail="email_id und gültige category erforderlich")
 
     try:
@@ -1367,28 +1373,65 @@ async def save_triage_example(data: dict):
     except Exception as exc:
         raise HTTPException(status_code=404, detail=f"E-Mail nicht gefunden: {exc}")
 
-    body_plain = email.get("body_plain") or ""
-    body_snippet = body_plain[:300].strip()
+    # Regel via AI extrahieren
+    rule_text = await ai_helper.extract_rule(
+        from_email=email.get("from_email", ""),
+        subject=email.get("subject", ""),
+        body_snippet=(email.get("body_plain") or "")[:300],
+        category_slug=category,
+    )
+    logger.info("Triage-Regel extrahiert: %s → %s", category, rule_text)
 
-    # Vorhandenes Beispiel für diese E-Mail überschreiben
-    existing = await pb_client.pb_get("/api/collections/triage_examples/records", params={
-        "filter": f'account="{email["account"]}" && from_email="{email.get("from_email","")}" && subject="{email.get("subject","")}"',
-        "perPage": 1,
+    await pb_client.pb_post("/api/collections/triage_rules/records", {
+        "account":       email["account"],
+        "category_slug": category,
+        "rule_text":     rule_text,
     })
-    items = existing.get("items", [])
-    if items:
-        await pb_client.pb_patch(f"/api/collections/triage_examples/records/{items[0]['id']}",
-                                 {"category": category, "body_snippet": body_snippet})
-    else:
-        await pb_client.pb_post("/api/collections/triage_examples/records", {
-            "account":      email["account"],
-            "from_email":   email.get("from_email", ""),
-            "subject":      email.get("subject", ""),
-            "body_snippet": body_snippet,
-            "category":     category,
-        })
 
-    return {"ok": True}
+    # Konsolidierung prüfen: bei ≥15 Regeln für diesen Account + Kategorie
+    try:
+        count_data = await pb_client.pb_get("/api/collections/triage_rules/records", params={
+            "filter": f'account="{email["account"]}" && category_slug="{category}"',
+            "perPage": 1,
+        })
+        total = count_data.get("totalItems", 0)
+        if total >= 15:
+            asyncio.create_task(_consolidate_rules(email["account"], category))
+    except Exception as exc:
+        logger.warning("Konsolidierungsprüfung fehlgeschlagen: %s", exc)
+
+    return {"ok": True, "rule": rule_text}
+
+
+async def _consolidate_rules(account: str, category_slug: str) -> None:
+    """Hintergrundaufgabe: Konsolidiert Lernregeln auf max. 7."""
+    try:
+        data = await pb_client.pb_get("/api/collections/triage_rules/records", params={
+            "filter": f'account="{account}" && category_slug="{category_slug}"',
+            "perPage": 200,
+            "fields": "id,rule_text",
+        })
+        items = data.get("items", [])
+        if len(items) < 15:
+            return
+
+        rules = [r["rule_text"] for r in items if r.get("rule_text")]
+        consolidated = await ai_helper.consolidate_rules(rules, category_slug)
+        logger.info("Konsolidierung %s/%s: %d → %d Regeln", account, category_slug, len(items), len(consolidated))
+
+        # Alle alten löschen
+        for item in items:
+            await pb_client.pb_delete(f"/api/collections/triage_rules/records/{item['id']}")
+
+        # Neue speichern
+        for rule_text in consolidated:
+            await pb_client.pb_post("/api/collections/triage_rules/records", {
+                "account":       account,
+                "category_slug": category_slug,
+                "rule_text":     rule_text,
+            })
+    except Exception as exc:
+        logger.error("Konsolidierung fehlgeschlagen (%s/%s): %s", account, category_slug, exc)
 
 
 @app.post("/ai/suggest")

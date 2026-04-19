@@ -6,6 +6,7 @@ AI-Hilfsfunktionen für Mailflow:
 """
 import logging
 import os
+from functools import lru_cache
 from pathlib import Path
 
 from anthropic import AsyncAnthropic
@@ -24,11 +25,7 @@ _CONTEXT_SEARCH_PATHS = [
 
 
 def load_optional_context(filename: str) -> str | None:
-    """Lädt eine optionale Kontext-Datei (graceful fallback wenn nicht vorhanden).
-
-    Sucht zuerst in /app/{filename}, dann im Projektverzeichnis.
-    Gibt None zurück wenn die Datei nicht existiert (kein Fehler).
-    """
+    """Lädt eine optionale Kontext-Datei (graceful fallback wenn nicht vorhanden)."""
     for base in _CONTEXT_SEARCH_PATHS:
         path = base / filename
         if path.is_file():
@@ -42,34 +39,123 @@ def load_optional_context(filename: str) -> str | None:
     return None
 
 
-async def categorize_email(subject: str, body: str, from_email: str, examples: list | None = None) -> str:
-    """Kategorisiert eine einzelne E-Mail in eine von vier Kategorien.
+def _load_triage_prompts_raw() -> str | None:
+    return load_optional_context("triage_prompts.md")
 
-    Gibt zurück: "focus" | "quick-reply" | "office" | "info-trash"
+
+@lru_cache(maxsize=1)
+def load_triage_config() -> dict:
+    """Parst triage_prompts.md und gibt Config-Dict zurück.
+
+    Returns:
+        {
+          "categories": [{"slug": "focus", "name": "Fokus", "description": "..."}],
+          "main_prompt": "...",
+          "rule_extract_prompt": "...",
+          "consolidation_prompt": "...",
+        }
+    Fällt auf eingebaute Defaults zurück wenn Datei fehlt.
     """
-    examples_section = ""
-    if examples:
-        lines = ["Hier sind Beispiele aus diesem Postfach mit der korrekten Kategorie:"]
-        for ex in examples[:30]:
-            snippet = ex.get("body_snippet") or ""
-            lines.append(
-                f'- Von: {ex.get("from_email","")} | Betreff: {ex.get("subject","")} | '
-                f'Inhalt: {snippet[:150]} → Kategorie: {ex.get("category","")}'
-            )
-        examples_section = "\n".join(lines) + "\n\n"
+    raw = _load_triage_prompts_raw()
+    if not raw:
+        logger.warning("triage_prompts.md nicht gefunden — verwende eingebaute Defaults")
+        return _default_triage_config()
 
-    prompt = f"""Klassifiziere diese E-Mail in genau eine der folgenden 4 Kategorien:
+    sections: dict[str, str] = {}
+    current_key: str | None = None
+    current_lines: list[str] = []
 
-focus: Tiefgehende fachliche Fragen oder komplexe Anliegen, die volle Aufmerksamkeit erfordern
-quick-reply: Kurze organisatorische Fragen, Terminbestätigungen oder einfache Bestätigungen
-office: Rechnungen, Buchhaltung, Verträge, geschäftliche Unterlagen und Dokumente
-info-trash: Newsletter, Werbung, automatische Benachrichtigungen ohne direkten Handlungsbedarf
+    for line in raw.splitlines():
+        if line.startswith("## "):
+            if current_key is not None:
+                sections[current_key] = "\n".join(current_lines).strip()
+            current_key = line[3:].strip()
+            current_lines = []
+        else:
+            current_lines.append(line)
+    if current_key is not None:
+        sections[current_key] = "\n".join(current_lines).strip()
 
-{examples_section}Von: {from_email}
-Betreff: {subject}
-Inhalt (gekürzt): {body[:800] if body else "(kein Inhalt)"}
+    # Kategorien parsen
+    categories = []
+    for line in sections.get("Kategorien", "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) >= 4:
+            categories.append({
+                "key": parts[0],
+                "slug": parts[1],
+                "name": parts[2],
+                "description": parts[3],
+            })
 
-Antworte NUR mit dem Kategorie-Namen (focus, quick-reply, office oder info-trash). Kein Satzzeichen, kein Erklärungstext."""
+    if not categories:
+        logger.warning("Keine Kategorien in triage_prompts.md gefunden — verwende Defaults")
+        return _default_triage_config()
+
+    return {
+        "categories": categories,
+        "main_prompt": sections.get("Haupt-Kategorisierungsprompt", ""),
+        "rule_extract_prompt": sections.get("Regelextraktions-Prompt", ""),
+        "consolidation_prompt": sections.get("Konsolidierungs-Prompt", ""),
+    }
+
+
+def _default_triage_config() -> dict:
+    return {
+        "categories": [
+            {"key": "kat1", "slug": "focus",      "name": "Fokus",  "description": "Tiefgehende fachliche Fragen oder komplexe Anliegen"},
+            {"key": "kat2", "slug": "quick-reply", "name": "Schnell","description": "Kurze organisatorische Fragen, Terminbestätigungen"},
+            {"key": "kat3", "slug": "office",      "name": "Office", "description": "Rechnungen, Buchhaltung, Verträge"},
+            {"key": "kat4", "slug": "info-trash",  "name": "Info",   "description": "Newsletter, Werbung, automatische Benachrichtigungen"},
+        ],
+        "main_prompt": "",
+        "rule_extract_prompt": "",
+        "consolidation_prompt": "",
+    }
+
+
+def get_category_slugs() -> list[str]:
+    return [c["slug"] for c in load_triage_config()["categories"]]
+
+
+async def categorize_email(subject: str, body: str, from_email: str, rules: list[str] | None = None) -> str:
+    """Kategorisiert eine einzelne E-Mail dynamisch anhand der konfigurierten Kategorien."""
+    config = load_triage_config()
+    categories = config["categories"]
+
+    categories_block = "\n".join(
+        f'{c["slug"]}: {c["description"]}' for c in categories
+    )
+
+    rules_block = ""
+    if rules:
+        lines = ["Gelernte Regeln für dieses Postfach:"]
+        lines += [f"- {r}" for r in rules]
+        rules_block = "\n".join(lines) + "\n\n"
+
+    main_prompt_template = config.get("main_prompt", "")
+    if main_prompt_template:
+        prompt = main_prompt_template.format(
+            n=len(categories),
+            categories_block=categories_block,
+            rules_block=rules_block,
+            from_email=from_email,
+            subject=subject,
+            body=body[:800] if body else "(kein Inhalt)",
+        )
+    else:
+        # Fallback-Prompt wenn Template leer
+        slugs = ", ".join(c["slug"] for c in categories)
+        prompt = (
+            f"Klassifiziere diese E-Mail in genau eine der folgenden {len(categories)} Kategorien:\n\n"
+            f"{categories_block}\n\n"
+            f"{rules_block}"
+            f"Von: {from_email}\nBetreff: {subject}\nInhalt (gekürzt): {body[:800] if body else '(kein Inhalt)'}\n\n"
+            f"Antworte NUR mit dem Kategorie-Slug ({slugs}). Kein Satzzeichen, kein Erklärungstext."
+        )
 
     response = await client.messages.create(
         model=MODEL,
@@ -78,17 +164,89 @@ Antworte NUR mit dem Kategorie-Namen (focus, quick-reply, office oder info-trash
     )
     result = response.content[0].text.strip().lower()
 
-    # Validierung — Fallback auf "info-trash" bei unerwartetem Wert
-    valid = {"focus", "quick-reply", "office", "info-trash"}
+    valid = set(get_category_slugs())
     if result not in valid:
-        # Versuche partiellen Match
-        for cat in valid:
-            if cat in result:
-                return cat
-        logger.warning("Unbekannte Kategorie '%s', Fallback auf 'info-trash'", result)
-        return "info-trash"
+        for slug in valid:
+            if slug in result:
+                return slug
+        logger.warning("Unbekannte Kategorie '%s', Fallback auf letzte Kategorie", result)
+        return categories[-1]["slug"]
 
     return result
+
+
+async def extract_rule(from_email: str, subject: str, body_snippet: str, category_slug: str) -> str:
+    """Extrahiert eine allgemeine Lernregel aus einer manuellen Korrektur."""
+    config = load_triage_config()
+    categories = config["categories"]
+
+    category_name = next(
+        (c["name"] for c in categories if c["slug"] == category_slug),
+        category_slug
+    )
+
+    template = config.get("rule_extract_prompt", "")
+    if template:
+        prompt = template.format(
+            from_email=from_email,
+            subject=subject,
+            body_snippet=body_snippet[:300],
+            category_name=category_name,
+            category_slug=category_slug,
+        )
+    else:
+        prompt = (
+            f'Leite aus dieser manuellen E-Mail-Korrektur eine allgemeine Regel ab.\n\n'
+            f'E-Mail: Von {from_email}, Betreff: "{subject}", Inhalt: {body_snippet[:300]}\n'
+            f'Korrekte Kategorie: {category_name}\n\n'
+            f'Schreibe eine einzige kurze Regel (max. 15 Wörter). Nur die Regel, kein Erklärungstext.'
+        )
+
+    response = await client.messages.create(
+        model=MODEL,
+        max_tokens=60,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.content[0].text.strip()
+
+
+async def consolidate_rules(rules: list[str], category_slug: str) -> list[str]:
+    """Konsolidiert ≥15 Regeln auf max. 7 Kernregeln."""
+    config = load_triage_config()
+    categories = config["categories"]
+
+    category_name = next(
+        (c["name"] for c in categories if c["slug"] == category_slug),
+        category_slug
+    )
+
+    rules_list = "\n".join(rules)
+    template = config.get("consolidation_prompt", "")
+    if template:
+        prompt = template.format(
+            n=len(rules),
+            category_name=category_name,
+            rules_list=rules_list,
+        )
+    else:
+        prompt = (
+            f'Fasse diese {len(rules)} Lernregeln für Kategorie "{category_name}" zu maximal 7 Kernregeln zusammen.\n'
+            f'Behalte nur die wichtigsten, allgemeinsten Muster. Eliminiere Duplikate.\n'
+            f'Gib jede Regel auf einer eigenen Zeile aus — keine Nummerierung, kein Bindestrich.\n\n'
+            f'Regeln:\n{rules_list}'
+        )
+
+    response = await client.messages.create(
+        model=MODEL,
+        max_tokens=512,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    consolidated = [
+        line.strip().lstrip("-").strip()
+        for line in response.content[0].text.strip().splitlines()
+        if line.strip()
+    ]
+    return consolidated[:7]
 
 
 async def suggest_reply(
@@ -97,22 +255,10 @@ async def suggest_reply(
     contact_history: list,
     tone: str = "neutral",
 ) -> str:
-    """Generiert einen Antwortvorschlag auf eine E-Mail.
-
-    Args:
-        email: Die E-Mail, auf die geantwortet wird
-        thread_emails: Alle anderen E-Mails im Thread (chronologisch)
-        contact_history: Letzte 5 E-Mails vom selben Absender (außerhalb Thread)
-        tone: "neutral" | "formal" | "friendly" | "short"
-
-    Returns:
-        Nur der E-Mail-Text (kein Betreff, keine Meta-Kommentare)
-    """
-    # Optionale Kontext-Dateien laden
+    """Generiert einen Antwortvorschlag auf eine E-Mail."""
     company_knowledge = load_optional_context("company_knowledge.md")
     tonality_profiles = load_optional_context("tonality_profiles.md")
 
-    # Ton-Beschreibungen
     tone_descriptions = {
         "neutral": "sachlich und klar",
         "formal": "formell und professionell (Sie-Ansprache)",
@@ -121,27 +267,22 @@ async def suggest_reply(
     }
     tone_desc = tone_descriptions.get(tone, "sachlich und klar")
 
-    # Prompt-Abschnitte dynamisch aufbauen
     sections = []
-
     sections.append(f"Du schreibst eine E-Mail-Antwort auf Deutsch (du-Ansprache, außer bei formal). Ton: {tone_desc}.")
     sections.append("Gib NUR den E-Mail-Text zurück — keine Betreffzeile, keine Anrede 'Hier ist mein Vorschlag:', keine Meta-Kommentare.")
 
     if company_knowledge:
         sections.append(f"\n## Unternehmenskontext\n{company_knowledge}")
-
     if tonality_profiles:
         sections.append(f"\n## Tonalitätsprofile\n{tonality_profiles}")
 
-    # Thread-Kontext
     if thread_emails:
         thread_text = "\n\n---\n\n".join(
             f"Von: {e.get('from_email', '')}\nBetreff: {e.get('subject', '')}\n\n{(e.get('body_plain') or '')[:600]}"
-            for e in thread_emails[-5:]  # max. 5 Thread-Mails im Kontext
+            for e in thread_emails[-5:]
         )
         sections.append(f"\n## Bisheriger Thread-Verlauf\n{thread_text}")
 
-    # Kontakthistorie
     if contact_history:
         history_text = "\n\n---\n\n".join(
             f"Von: {e.get('from_email', '')}\nBetreff: {e.get('subject', '')}\n\n{(e.get('body_plain') or '')[:300]}"
@@ -149,14 +290,12 @@ async def suggest_reply(
         )
         sections.append(f"\n## Frühere E-Mails von diesem Absender\n{history_text}")
 
-    # Die zu beantwortende E-Mail
     sections.append(
         f"\n## Zu beantwortende E-Mail\n"
         f"Von: {email.get('from_email', '')}\n"
         f"Betreff: {email.get('subject', '')}\n\n"
         f"{(email.get('body_plain') or '')[:1200]}"
     )
-
     sections.append("\n## Aufgabe\nSchreibe jetzt die Antwort (nur den E-Mail-Text, ohne Betreff und ohne Kommentar):")
 
     prompt = "\n".join(sections)
@@ -170,15 +309,7 @@ async def suggest_reply(
 
 
 async def refine_reply(text: str, instruction: str) -> str:
-    """Verfeinert einen bestehenden E-Mail-Entwurf.
-
-    Args:
-        text: Der bestehende Entwurfstext
-        instruction: z.B. "kürzer", "ausführlicher", "persönlicher gruß", oder ein Tonalitätswechsel
-
-    Returns:
-        Nur der verfeinerte Text (kein Meta-Kommentar)
-    """
+    """Verfeinert einen bestehenden E-Mail-Entwurf."""
     prompt = f"""Überarbeite den folgenden E-Mail-Entwurf gemäß dieser Anweisung: "{instruction}"
 
 Gib NUR den überarbeiteten E-Mail-Text zurück — keine Erklärungen, keine Meta-Kommentare, kein "Hier ist die überarbeitete Version:".

@@ -44,12 +44,9 @@
       <span id="ki-triage-status"></span>
 </div>
       <div class="ki-filter-group-container">
-        <div class="ki-filter-group">
-        <button class="ki-filter-btn active" data-filter="">Alle</button>
-        <button class="ki-filter-btn" data-filter="focus">Fokus</button>
-        <button class="ki-filter-btn" data-filter="quick-reply">Quick-Reply</button>
-        <button class="ki-filter-btn" data-filter="office">Office</button>
-        <button class="ki-filter-btn" data-filter="info-trash">Trash</button>
+        <div class="ki-filter-group" id="ki-filter-group">
+          <button class="ki-filter-btn active" data-filter="">Alle</button>
+          <!-- Kategorie-Buttons werden dynamisch via JS eingefügt -->
         </div>
       </div>
     </div>
@@ -95,11 +92,8 @@
         <div id="view-mode">
 
           <div id="detail-ki-bar" style="display:none">
-            <div class="ki-cat-group">
-              <button class="ki-cat-btn" data-cat="focus">Fokus</button>
-              <button class="ki-cat-btn" data-cat="quick-reply">Quick</button>
-              <button class="ki-cat-btn" data-cat="office">Office</button>
-              <button class="ki-cat-btn" data-cat="info-trash">Trash</button>
+            <div class="ki-cat-group" id="ki-cat-group">
+              <!-- Kategorie-Buttons werden dynamisch via JS eingefügt -->
             </div>
           </div>
 
