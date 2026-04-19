@@ -1,4 +1,6 @@
-const PB_URL = 'http://localhost:8090';
+const PB_URL = window.location.hostname === 'mailflow.barres.de'
+  ? 'https://mailflow-pb.barres.de'
+  : 'http://localhost:8090';
 const AUTH_KEY = 'mf_auth';
 
 function getAuth() {
