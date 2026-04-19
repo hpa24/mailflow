@@ -457,7 +457,12 @@ async function loadAllFolders() {
   try {
     await Promise.all(state.accounts.map(async (account) => {
       const data = await api.getFolders(account.id);
-      const items = data.items || [];
+      const seen = new Set();
+      const items = (data.items || []).filter(f => {
+        if (seen.has(f.imap_path)) return false;
+        seen.add(f.imap_path);
+        return true;
+      });
       state.folders[account.id]   = items;
       state.delimiters[account.id] = detectDelimiter(items);
     }));
