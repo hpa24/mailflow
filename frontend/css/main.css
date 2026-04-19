@@ -270,7 +270,6 @@ display:none;
 }
 
 .email-item {
-height:55px;
 border-right:1px solid #ddd;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
