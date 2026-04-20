@@ -65,6 +65,27 @@ async def _get_imap_account(account_id: str) -> dict | None:
     return items[0] if items else None
 
 
+async def _update_folder_unread_count(account_id: str, folder: str) -> None:
+    """Zählt is_read=false E-Mails für den Ordner und schreibt den Wert in folders.unread_count."""
+    count_data = await pb_client.pb_get("/api/collections/emails/records", params={
+        "filter": f'account="{account_id}" && folder="{folder}" && is_read=false',
+        "perPage": 1,
+        "fields": "id",
+    })
+    new_unread = count_data.get("totalItems", 0)
+    folder_data = await pb_client.pb_get("/api/collections/folders/records", params={
+        "filter": f'account="{account_id}" && imap_path="{folder}"',
+        "perPage": 1,
+        "fields": "id",
+    })
+    folder_items = folder_data.get("items", [])
+    if folder_items:
+        await pb_client.pb_patch(
+            f"/api/collections/folders/records/{folder_items[0]['id']}",
+            {"unread_count": new_unread},
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Mailflow backend...")
@@ -905,27 +926,8 @@ async def bulk_mark_read(req: BulkReadRequest):
         elif not uid or uid == 0:
             logger.warning("bulk_mark_read: E-Mail %s hat keine imap_uid — nur PocketBase aktualisiert", e.get("id"))
 
-    async def _update_folder_count(account_id: str, folder: str) -> None:
-        count_data = await pb_client.pb_get("/api/collections/emails/records", params={
-            "filter": f'account="{account_id}" && folder="{folder}" && is_read=false',
-            "perPage": 1,
-            "fields": "id",
-        })
-        new_unread = count_data.get("totalItems", 0)
-        folder_data = await pb_client.pb_get("/api/collections/folders/records", params={
-            "filter": f'account="{account_id}" && imap_path="{folder}"',
-            "perPage": 1,
-            "fields": "id",
-        })
-        folder_items = folder_data.get("items", [])
-        if folder_items:
-            await pb_client.pb_patch(
-                f"/api/collections/folders/records/{folder_items[0]['id']}",
-                {"unread_count": new_unread},
-            )
-
     await asyncio.gather(*[
-        _update_folder_count(account_id, folder)
+        _update_folder_unread_count(account_id, folder)
         for account_id, folder in affected_groups.keys()
     ])
 
@@ -980,6 +982,11 @@ async def mark_read(email_id: str, is_read: bool = True):
         await _imap_set_read(result, is_read)
     except Exception as e:
         logger.warning(f"IMAP mark-read failed for {email_id}: {e}")
+    # Ordner-Zähler aktualisieren
+    try:
+        await _update_folder_unread_count(result["account"], result["folder"])
+    except Exception as e:
+        logger.warning(f"folder unread_count update failed for {email_id}: {e}")
     return result
 
 
@@ -987,6 +994,7 @@ async def mark_read(email_id: str, is_read: bool = True):
 async def move_to_spam(email_id: str):
     """Verschiebt E-Mail in den Spam-Ordner (IMAP + PocketBase)."""
     email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
+    source_folder = email.get("folder", "INBOX")
     new_folder, new_uid = "Spam", None
     try:
         new_folder, new_uid = await _imap_move_to_spam(email)
@@ -996,6 +1004,10 @@ async def move_to_spam(email_id: str):
     if new_uid:
         patch["imap_uid"] = new_uid
     await pb_client.pb_patch(f"/api/collections/emails/records/{email_id}", patch)
+    try:
+        await _update_folder_unread_count(email["account"], source_folder)
+    except Exception as e:
+        logger.warning(f"folder unread_count update failed after spam move {email_id}: {e}")
     return {"moved_to": new_folder}
 
 
@@ -1061,6 +1073,7 @@ async def move_email(email_id: str, data: dict):
     _TRASH_NAMES = {"trash", "papierkorb", "deleted", "deleted items", "deleted messages"}
     is_trash = target_folder.lower() in _TRASH_NAMES
 
+    source_folder = email.get("folder", "INBOX")
     patch = {"folder": target_folder}
     if new_uid:
         patch["imap_uid"] = new_uid
@@ -1074,6 +1087,13 @@ async def move_email(email_id: str, data: dict):
             except Exception as ex:
                 logger.warning("move_email: IMAP mark-read after trash move fehlgeschlagen: %s", ex)
     await pb_client.pb_patch(f"/api/collections/emails/records/{email_id}", patch)
+    try:
+        await asyncio.gather(
+            _update_folder_unread_count(email["account"], source_folder),
+            _update_folder_unread_count(email["account"], target_folder),
+        )
+    except Exception as e:
+        logger.warning("move_email: folder unread_count update fehlgeschlagen: %s", e)
     return {"moved_to": target_folder, "marked_read": is_trash}
 
 
@@ -1107,8 +1127,9 @@ async def _imap_move(email: dict, target_folder: str) -> int | None:
 async def delete_email(email_id: str):
     """Löscht E-Mail in PocketBase und verschiebt sie auf dem IMAP-Server in den Papierkorb."""
     email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
-    # is_read=True setzen bevor Löschung, damit Ungelesen-Zähler sofort stimmt
-    if not email.get("is_read"):
+    source_folder = email.get("folder", "INBOX")
+    was_unread = not email.get("is_read", True)
+    if was_unread:
         try:
             await pb_client.pb_patch(
                 f"/api/collections/emails/records/{email_id}", {"is_read": True}
@@ -1126,6 +1147,11 @@ async def delete_email(email_id: str):
         )
         resp.raise_for_status()
     fts_delete(settings.PB_DATA_PATH, email_id)
+    if was_unread:
+        try:
+            await _update_folder_unread_count(email["account"], source_folder)
+        except Exception as e:
+            logger.warning(f"folder unread_count update failed after delete {email_id}: {e}")
     return {"deleted": email_id}
 
 
