@@ -1,6 +1,36 @@
 const PAGE_SIZE = 500;
 const MAX_AUTO_LOAD = 1500; // Automatisch bis zu dieser Anzahl laden
 
+// ── Folder-Cache ─────────────────────────────────────────────
+const _folderCache = {};
+const FOLDER_CACHE_TTL = 3 * 60 * 1000; // 3 Minuten
+
+function _cacheKey() {
+  return `${state.activeAccount}|${state.activeFolder}|${state.readFilter}|${state.groupMode}`;
+}
+function _saveToCache() {
+  if (state.searchQuery) return;
+  _folderCache[_cacheKey()] = {
+    emails: [...state.emails],
+    totalItems: state.totalItems,
+    threadCount: { ...state.threadCount },
+    threadFirstSeen: { ...state.threadFirstSeen },
+    ts: Date.now(),
+  };
+}
+function _getFromCache() {
+  const key = _cacheKey();
+  const entry = _folderCache[key];
+  if (!entry) return null;
+  if (Date.now() - entry.ts > FOLDER_CACHE_TTL) { delete _folderCache[key]; return null; }
+  return entry;
+}
+function _invalidateFolderCache(accountId, folder) {
+  Object.keys(_folderCache).forEach(k => {
+    if (k.startsWith(`${accountId}|${folder}|`)) delete _folderCache[k];
+  });
+}
+
 const STANDARD_FOLDER_ORDER = ['INBOX', 'Sent', 'Drafts', 'Trash', 'Spam'];
 
 const KI_REFINE_ACTIONS = [
@@ -387,6 +417,7 @@ async function silentRefresh() {
 
     if (atTop) listEl.scrollTop = 0;
     loadUnreadCounts();
+    _saveToCache();
   } catch (e) {
     console.error('silentRefresh:', e);
   } finally {
@@ -596,6 +627,27 @@ function _addEmailBatch(newEmails, isReset) {
 
 async function loadEmails(reset = false) {
   if (reset) {
+    // Cache-Treffer: sofort aus Speicher laden, kein API-Call
+    const cached = _getFromCache();
+    if (cached) {
+      _loadGen++;
+      state.emails        = cached.emails;
+      state.totalItems    = cached.totalItems;
+      state.threadCount   = cached.threadCount;
+      state.threadFirstSeen = cached.threadFirstSeen;
+      state.allLoaded     = true;
+      state.loadingMore   = false;
+      state.page          = Math.ceil(cached.emails.length / PAGE_SIZE) + 1;
+      state.activeEmailId = null;
+      state.selectedEmails.clear();
+      state.lastClickedEl = null;
+      showEmpty();
+      renderEmails(true);
+      updateListHeader();
+      updateFooter();
+      loadUnreadCounts();
+      return;
+    }
     _loadGen++;
     state.emails = [];
     state.page = 1;
@@ -665,6 +717,7 @@ async function loadEmails(reset = false) {
         state.allLoaded = !first.hasMore;
       }
     }
+    _saveToCache();
   } catch (e) {
     document.getElementById('email-list').innerHTML =
       '<div class="loading">Fehler beim Laden.</div>';
@@ -1067,6 +1120,8 @@ function moveEmailsToFolder(emailIds, targetImapPath) {
     state.activeEmailId = null;
     showEmpty();
   }
+  _saveToCache();
+  _invalidateFolderCache(state.activeAccount, targetImapPath);
 
   // API-Calls parallel im Hintergrund — kein await, Funktion kehrt sofort zurück
   Promise.allSettled(emailIds.map(id => api.moveEmail(id, targetImapPath)))
@@ -1078,6 +1133,7 @@ function moveEmailsToFolder(emailIds, targetImapPath) {
         state.emails = [...failedEmails, ...state.emails];
         renderEmails(true);
         loadUnreadCounts();
+        _saveToCache();
         alert(`Fehler beim Verschieben von ${failed.length} E-Mail(s).`);
       }
     });
@@ -1362,10 +1418,12 @@ function spamEmail(email, itemEl) {
   }
 
   // API im Hintergrund — kein await
+  _saveToCache();
   api.spamEmail(email.id).catch(e => {
     state.emails = [email, ...state.emails];
     renderEmails(true);
     loadUnreadCounts();
+    _saveToCache();
     alert('Spam-Verschiebung fehlgeschlagen: ' + e.message);
   });
 }
@@ -1391,11 +1449,13 @@ function deleteEmail(email, itemEl) {
   }
 
   // API im Hintergrund — kein await
+  _saveToCache();
   api.deleteEmail(email.id).catch(e => {
     email.is_read = wasRead;
     state.emails = [email, ...state.emails];
     renderEmails(true);
     loadUnreadCounts();
+    _saveToCache();
     alert('Löschen fehlgeschlagen: ' + e.message);
   });
 }
@@ -1844,6 +1904,7 @@ document.getElementById('btn-new-email').addEventListener('click', () => {
 });
 
 document.getElementById('btn-sync').addEventListener('click', async () => {
+  _invalidateFolderCache(state.activeAccount, state.activeFolder);
   await api.syncRun();
   await loadEmails(true);
 });
