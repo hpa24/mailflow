@@ -154,9 +154,9 @@ async def _sync_folder(server: IMAPClient, account_id: str,
 
     if not uids:
         logger.info(f"No new messages in '{folder_name}' (stored as '{stored_folder_name}')")
-        await _update_folder(folder_record["id"], current_uidvalidity, last_sync_uid,
-                             unread_count=_count_unread(server))
         await _sync_flags_recent(server, account_id, stored_folder_name, last_sync_uid)
+        await _update_folder(folder_record["id"], current_uidvalidity, last_sync_uid,
+                             unread_count=await _count_unread(account_id, stored_folder_name))
         return
 
     # Neueste zuerst (für Erst-Import: wichtigste E-Mails früh verfügbar)
@@ -177,9 +177,9 @@ async def _sync_folder(server: IMAPClient, account_id: str,
                 _import_status["errors"] += 1
             continue
 
-    await _update_folder(folder_record["id"], current_uidvalidity, new_last_uid,
-                         unread_count=_count_unread(server))
     await _sync_flags_recent(server, account_id, stored_folder_name, new_last_uid)
+    await _update_folder(folder_record["id"], current_uidvalidity, new_last_uid,
+                         unread_count=await _count_unread(account_id, stored_folder_name))
 
 
 async def _fetch_and_save(server: IMAPClient, account_id: str,
@@ -280,9 +280,15 @@ async def _fetch_and_save(server: IMAPClient, account_id: str,
         raise
 
 
-def _count_unread(server: IMAPClient) -> int:
+async def _count_unread(account_id: str, folder_name: str) -> int:
+    """Zählt is_read=false in PocketBase — konsistent mit dem, was das UI anzeigt."""
     try:
-        return len(server.search(["UNSEEN"]))
+        result = await pb_client.pb_get("/api/collections/emails/records", params={
+            "filter": f'account="{account_id}" && folder="{folder_name}" && is_read=false',
+            "perPage": 1,
+            "fields": "id",
+        })
+        return result.get("totalItems", 0)
     except Exception:
         return 0
 
