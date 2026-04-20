@@ -657,6 +657,9 @@ flex: 0 0 175px;
 .action-btn.danger:hover { opacity: 0.85; }
 .action-btn.danger.primary{margin-left: auto;} 
 
+#confirm-actions .action-btn {
+flex: 0 0 130px;}
+
 #detail-body {
   flex: 1;
   /* overflow-y: auto; */
