@@ -806,7 +806,7 @@ function renderSidebar() {
           let dragIds;
           try { dragIds = JSON.parse(e.dataTransfer.getData('text/plain')); } catch { return; }
           if (!Array.isArray(dragIds) || dragIds.length === 0) return;
-          await moveEmailsToFolder(dragIds, f.imap_path);
+          moveEmailsToFolder(dragIds, f.imap_path);
         });
       }
 
@@ -1040,7 +1040,7 @@ function rangeSelectEmail(item) {
 // ── E-Mails verschieben ──────────────────────────────────────
 const _TRASH_FOLDER_NAMES = new Set(['trash', 'papierkorb', 'deleted', 'deleted items', 'deleted messages']);
 
-async function moveEmailsToFolder(emailIds, targetImapPath) {
+function moveEmailsToFolder(emailIds, targetImapPath) {
   const isTrash = _TRASH_FOLDER_NAMES.has((targetImapPath || '').toLowerCase());
 
   // Snapshot für Rollback
@@ -1062,17 +1062,19 @@ async function moveEmailsToFolder(emailIds, targetImapPath) {
     showEmpty();
   }
 
-  // API-Calls parallel im Hintergrund
-  const results = await Promise.allSettled(emailIds.map(id => api.moveEmail(id, targetImapPath)));
-  const failed = emailIds.filter((_, i) => results[i].status === 'rejected');
-  if (failed.length > 0) {
-    const failedEmails = snapshot.filter(e => failed.includes(e.id));
-    failedEmails.forEach(e => { if (isTrash) e.is_read = false; });
-    state.emails = [...failedEmails, ...state.emails];
-    renderEmails(true);
-    loadUnreadCounts();
-    alert(`Fehler beim Verschieben von ${failed.length} E-Mail(s).`);
-  }
+  // API-Calls parallel im Hintergrund — kein await, Funktion kehrt sofort zurück
+  Promise.allSettled(emailIds.map(id => api.moveEmail(id, targetImapPath)))
+    .then(results => {
+      const failed = emailIds.filter((_, i) => results[i].status === 'rejected');
+      if (failed.length > 0) {
+        const failedEmails = snapshot.filter(e => failed.includes(e.id));
+        failedEmails.forEach(e => { if (isTrash) e.is_read = false; });
+        state.emails = [...failedEmails, ...state.emails];
+        renderEmails(true);
+        loadUnreadCounts();
+        alert(`Fehler beim Verschieben von ${failed.length} E-Mail(s).`);
+      }
+    });
 }
 
 async function openEmail(email, itemEl) {
@@ -1338,7 +1340,7 @@ async function openEmail(email, itemEl) {
   }
 }
 
-async function spamEmail(email, itemEl) {
+function spamEmail(email, itemEl) {
   const next = itemEl.nextElementSibling || itemEl.previousElementSibling;
 
   // Sofort aus DOM und State entfernen (Optimistic UI)
@@ -1353,18 +1355,16 @@ async function spamEmail(email, itemEl) {
     showEmpty();
   }
 
-  // API im Hintergrund
-  try {
-    await api.spamEmail(email.id);
-  } catch (e) {
+  // API im Hintergrund — kein await
+  api.spamEmail(email.id).catch(e => {
     state.emails = [email, ...state.emails];
     renderEmails(true);
     loadUnreadCounts();
     alert('Spam-Verschiebung fehlgeschlagen: ' + e.message);
-  }
+  });
 }
 
-async function deleteEmail(email, itemEl) {
+function deleteEmail(email, itemEl) {
   const next = itemEl.nextElementSibling || itemEl.previousElementSibling;
   const wasRead = email.is_read;
 
@@ -1384,16 +1384,14 @@ async function deleteEmail(email, itemEl) {
     showEmpty();
   }
 
-  // API im Hintergrund
-  try {
-    await api.deleteEmail(email.id);
-  } catch (e) {
+  // API im Hintergrund — kein await
+  api.deleteEmail(email.id).catch(e => {
     email.is_read = wasRead;
     state.emails = [email, ...state.emails];
     renderEmails(true);
     loadUnreadCounts();
     alert('Löschen fehlgeschlagen: ' + e.message);
-  }
+  });
 }
 
 function updateReadToggle(email, itemEl) {
