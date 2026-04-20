@@ -274,9 +274,15 @@ async def search_emails(q: str, account: str | None = None,
     if not q or not q.strip():
         return {"items": [], "totalItems": 0}
 
-    # FTS5-Suche: gibt relevante Email-IDs sortiert nach Relevanz zurück
+    # FTS5-Suche: Mehrwort-Anfragen als Phrase suchen ("Felix Kugel"),
+    # Einzelwörter direkt. Fallback: AND-Suche wenn Phrase nichts findet.
+    raw = q.strip()
+    phrase = f'"{raw.replace(chr(34), "")}"' if " " in raw else raw
     try:
-        fts_ids = fts_search(settings.PB_DATA_PATH, q.strip())
+        fts_ids = fts_search(settings.PB_DATA_PATH, phrase)
+        if not fts_ids and " " in raw:
+            # Fallback: AND-Suche (beide Wörter, nicht notwendig benachbart)
+            fts_ids = fts_search(settings.PB_DATA_PATH, raw)
     except Exception as e:
         logger.warning(f"FTS5 search failed: {e}")
         return {"items": [], "totalItems": 0}
