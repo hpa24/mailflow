@@ -596,9 +596,18 @@ async function loadUnreadCounts() {
         el.style.display = 'none';
       }
     });
+    _updateDocumentTitle();
   } catch (e) {
     console.error('loadUnreadCounts:', e);
   }
+}
+
+function _updateDocumentTitle() {
+  let total = 0;
+  document.querySelectorAll('.folder-count').forEach(el => {
+    total += parseInt(el.textContent, 10) || 0;
+  });
+  document.title = total > 0 ? `(${total}) Mailflow` : 'Mailflow';
 }
 
 function _adjustFolderCount(accountId, folder, delta) {
@@ -613,6 +622,7 @@ function _adjustFolderCount(accountId, folder, delta) {
   } else {
     el.style.display = 'none';
   }
+  _updateDocumentTitle();
 }
 
 let _loadGen = 0;  // Jeder reset() erhöht den Zähler — veraltete Fetches werden verworfen
