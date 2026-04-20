@@ -701,7 +701,12 @@ async function loadEmails(reset = false) {
     if (state.readFilter === 'read')   baseParams.is_read = 'true';
 
     if (state.searchQuery) {
-      const data = await api.search({ q: state.searchQuery, ...baseParams });
+      // Suche ordnerübergreifend — kein folder-Parameter
+      const searchParams = { q: state.searchQuery };
+      if (state.activeAccount) searchParams.account = state.activeAccount;
+      if (state.readFilter === 'unread') searchParams.is_read = 'false';
+      if (state.readFilter === 'read')   searchParams.is_read = 'true';
+      const data = await api.search(searchParams);
       if (myGen !== _loadGen) return;
       state.totalItems = data.totalItems || 0;
       state.allLoaded = true;

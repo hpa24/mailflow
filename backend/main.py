@@ -270,29 +270,34 @@ async def get_folders(account: str | None = None):
 @app.get("/search")
 async def search_emails(q: str, account: str | None = None,
                         folder: str | None = None, is_read: str | None = None):
-    """Volltextsuche via PocketBase-Filter (contains). Gibt max. 200 Treffer zurück."""
+    """Volltextsuche via FTS5-Index. Gibt max. 100 Treffer zurück."""
     if not q or not q.strip():
         return {"items": [], "totalItems": 0}
 
-    # Sonderzeichen für PocketBase-Filter escapen
-    safe = _pb_safe(q)
+    # FTS5-Suche: gibt relevante Email-IDs sortiert nach Relevanz zurück
+    try:
+        fts_ids = fts_search(settings.PB_DATA_PATH, q.strip())
+    except Exception as e:
+        logger.warning(f"FTS5 search failed: {e}")
+        return {"items": [], "totalItems": 0}
 
-    filters = [
-        f'(subject ~ "{safe}" || body_plain ~ "{safe}" || '
-        f'from_email ~ "{safe}" || from_name ~ "{safe}")'
-    ]
+    if not fts_ids:
+        return {"items": [], "totalItems": 0}
+
+    # Ergebnisse aus PocketBase laden (max. 100 IDs als OR-Filter)
+    top_ids = fts_ids[:100]
+    id_filter = " || ".join(f'id="{i}"' for i in top_ids)
+    filters = [f"({id_filter})"]
     if account:
         filters.append(f'account="{account}"')
-    if folder:
-        filters.append(f'folder="{folder}"')
     if is_read == "true":
-        filters.append('is_read=true')
+        filters.append("is_read=true")
     elif is_read == "false":
-        filters.append('is_read=false')
+        filters.append("is_read=false")
 
     data = await pb_client.pb_get("/api/collections/emails/records", params={
         "filter": " && ".join(filters),
-        "perPage": 200,
+        "perPage": 100,
         "sort": "-date_sent",
         "fields": ("id,account,folder,message_id,thread_id,from_email,from_name,"
                    "reply_to,to_emails,subject,snippet,date_sent,is_read,is_flagged,"
