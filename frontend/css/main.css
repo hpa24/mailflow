@@ -732,7 +732,7 @@ background: var(--bg4);
   margin-left: 4px;
 }
 
-.compose-inner-container, .view-inner-container {overflow-y:auto;}
+.compose-inner-container, .view-inner-container {overflow-y:auto;display:flex;flex-direction:column;flex:1;}
 
 .compose-field-row {
   display: flex;
