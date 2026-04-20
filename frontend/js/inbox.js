@@ -20,6 +20,7 @@ function _saveToCache() {
   };
 }
 function _getFromCache() {
+  if (state.searchQuery) return null;
   const key = _cacheKey();
   const entry = _folderCache[key];
   if (!entry) return null;
