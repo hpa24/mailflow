@@ -1,3 +1,4 @@
+const FIRST_PAGE_SIZE = 50;  // Erste Seite klein → sofort sichtbar
 const PAGE_SIZE = 500;
 const MAX_AUTO_LOAD = 1500; // Automatisch bis zu dieser Anzahl laden
 
@@ -711,34 +712,49 @@ async function loadEmails(reset = false) {
         ? api.getEmailsBySender.bind(api)
         : api.getThreadedEmails.bind(api);
 
-      // Erste Seite laden und sofort rendern
-      const first = await fetchFn({ ...baseParams, page: state.page, limit: PAGE_SIZE });
+      // Stage 1: erste 50 sofort anzeigen
+      const quick = await fetchFn({ ...baseParams, page: 1, limit: FIRST_PAGE_SIZE });
       if (myGen !== _loadGen) return;
 
-      state.totalItems = first.totalItems || 0;
-      _addEmailBatch(first.items || [], reset);
-      state.page++;
+      state.totalItems = quick.totalItems || 0;
+      _addEmailBatch(quick.items || [], reset);
+      state.page = 2;
       updateListHeader();
       updateFooter();
 
-      // Restliche Seiten parallel laden
-      if (first.hasMore && state.emails.length < MAX_AUTO_LOAD) {
-        const toLoad = Math.min(MAX_AUTO_LOAD, state.totalItems);
-        const pagesNeeded = Math.ceil((toLoad - state.emails.length) / PAGE_SIZE);
-        const results = await Promise.all(
-          Array.from({ length: pagesNeeded }, (_, i) =>
-            fetchFn({ ...baseParams, page: state.page + i, limit: PAGE_SIZE })
-          )
-        );
+      if (!quick.hasMore) {
+        state.allLoaded = true;
+      } else {
+        // Stage 2: Seite 1 nochmal mit voller Größe laden (ersetzt die 50)
+        const fullFirst = await fetchFn({ ...baseParams, page: 1, limit: PAGE_SIZE });
         if (myGen !== _loadGen) return;
 
-        results.forEach(pageData => {
-          _addEmailBatch(pageData.items || [], false);
-          if (!pageData.hasMore) state.allLoaded = true;
-        });
-        state.page += pagesNeeded;
-      } else {
-        state.allLoaded = !first.hasMore;
+        state.threadCount = {};
+        state.threadFirstSeen = {};
+        _addEmailBatch(fullFirst.items || [], true);
+        state.page = 2;
+        updateListHeader();
+        updateFooter();
+
+        // Restliche Seiten parallel laden
+        if (fullFirst.hasMore && state.emails.length < MAX_AUTO_LOAD) {
+          const toLoad = Math.min(MAX_AUTO_LOAD, state.totalItems);
+          const pagesNeeded = Math.ceil((toLoad - state.emails.length) / PAGE_SIZE);
+          const results = await Promise.all(
+            Array.from({ length: pagesNeeded }, (_, i) =>
+              fetchFn({ ...baseParams, page: state.page + i, limit: PAGE_SIZE })
+            )
+          );
+          if (myGen !== _loadGen) return;
+
+          results.forEach(pageData => {
+            _addEmailBatch(pageData.items || [], false);
+            if (!pageData.hasMore) state.allLoaded = true;
+          });
+          state.page += pagesNeeded;
+        } else {
+          state.allLoaded = !fullFirst.hasMore;
+        }
       }
     }
     _saveToCache();
