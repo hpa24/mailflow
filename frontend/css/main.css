@@ -675,6 +675,8 @@ flex: 0 0 175px;
 }
 #detail-body a:hover { text-decoration: underline; }
 
+#detail-body iframe {flex:1;}
+
 #detail-empty {
   flex: 0;
   display: flex;
