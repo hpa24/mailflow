@@ -1430,12 +1430,13 @@ async function openEmail(email, itemEl) {
 
 function spamEmail(email, itemEl) {
   const next = itemEl.nextElementSibling || itemEl.previousElementSibling;
+  const wasUnread = !email.is_read;
 
   // Sofort aus DOM und State entfernen (Optimistic UI)
+  if (wasUnread) _adjustFolderCount(email.account, email.folder, -1);
   itemEl.remove();
   state.emails = state.emails.filter(em => em.id !== email.id);
   cleanupThreadStyling();
-  loadUnreadCounts();
   if (next && next.dataset.id) {
     const nextEmail = state.emails.find(em => em.id === next.dataset.id);
     if (nextEmail) openEmail(nextEmail, next);
@@ -1448,7 +1449,7 @@ function spamEmail(email, itemEl) {
   api.spamEmail(email.id).catch(e => {
     state.emails = [email, ...state.emails];
     renderEmails(true);
-    loadUnreadCounts();
+    if (wasUnread) _adjustFolderCount(email.account, email.folder, +1);
     _saveToCache();
     alert('Spam-Verschiebung fehlgeschlagen: ' + e.message);
   });
@@ -1462,11 +1463,11 @@ function deleteEmail(email, itemEl) {
   if (!email.is_read) {
     email.is_read = true;
     itemEl?.classList.remove('unread');
+    _adjustFolderCount(email.account, email.folder, -1);
   }
   itemEl.remove();
   state.emails = state.emails.filter(em => em.id !== email.id);
   cleanupThreadStyling();
-  loadUnreadCounts();
   if (next && next.dataset.id) {
     const nextEmail = state.emails.find(em => em.id === next.dataset.id);
     if (nextEmail) openEmail(nextEmail, next);
@@ -1480,7 +1481,7 @@ function deleteEmail(email, itemEl) {
     email.is_read = wasRead;
     state.emails = [email, ...state.emails];
     renderEmails(true);
-    loadUnreadCounts();
+    if (!wasRead) _adjustFolderCount(email.account, email.folder, +1);
     _saveToCache();
     alert('Löschen fehlgeschlagen: ' + e.message);
   });
