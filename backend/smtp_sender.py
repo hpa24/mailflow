@@ -106,11 +106,8 @@ async def send_email(
     )
     logger.info("SMTP-Versand erfolgreich: message_id=%s", message_id)
 
-    # IMAP APPEND in Sent-Ordner (best-effort)
-    try:
-        await loop.run_in_executor(None, _imap_append_sent, acc, msg_bytes)
-    except Exception as exc:
-        logger.warning("IMAP APPEND in Sent fehlgeschlagen: %s", exc)
+    # IMAP APPEND in Sent-Ordner (best-effort, im Hintergrund)
+    loop.run_in_executor(None, _imap_append_sent, acc, msg_bytes)
 
     return message_id
 
