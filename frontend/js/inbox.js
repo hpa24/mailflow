@@ -601,6 +601,20 @@ async function loadUnreadCounts() {
   }
 }
 
+function _adjustFolderCount(accountId, folder, delta) {
+  const el = document.querySelector(
+    `.folder-item[data-account="${accountId}"][data-folder="${folder}"] .folder-count`
+  );
+  if (!el) return;
+  const next = Math.max(0, (parseInt(el.textContent, 10) || 0) + delta);
+  if (next > 0) {
+    el.textContent = next;
+    el.style.display = '';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
 let _loadGen = 0;  // Jeder reset() erhöht den Zähler — veraltete Fetches werden verworfen
 
 function _addEmailBatch(newEmails, isReset) {
@@ -961,6 +975,7 @@ function buildEmailItem(email) {
     const btn = e.currentTarget;
     btn.classList.toggle('unread', !nowRead);
     btn.title = nowRead ? 'Als ungelesen markieren' : 'Als gelesen markieren';
+    _adjustFolderCount(email.account, email.folder, nowRead ? -1 : +1);
     try {
       nowRead ? await api.markRead(email.id) : await api.markUnread(email.id);
     } catch (_) {
@@ -969,6 +984,7 @@ function buildEmailItem(email) {
       item.classList.toggle('unread', nowRead);
       btn.classList.toggle('unread', nowRead);
       btn.title = !nowRead ? 'Als ungelesen markieren' : 'Als gelesen markieren';
+      _adjustFolderCount(email.account, email.folder, nowRead ? +1 : -1);
     }
   });
 
@@ -1465,20 +1481,17 @@ function updateReadToggle(email, itemEl) {
   btn.textContent = email.is_read ? 'Als ungelesen markieren' : 'Als gelesen markieren';
   btn.onclick = async () => {
     const newState = !email.is_read;
-    // Sofort aktualisieren
     email.is_read = newState;
     itemEl.classList.toggle('unread', !newState);
     updateReadToggle(email, itemEl);
-    loadUnreadCounts();
-    // API im Hintergrund
+    _adjustFolderCount(email.account, email.folder, newState ? -1 : +1);
     try {
       await (newState ? api.markRead(email.id) : api.markUnread(email.id));
     } catch (_) {
-      // Rollback
       email.is_read = !newState;
       itemEl.classList.toggle('unread', newState);
       updateReadToggle(email, itemEl);
-      loadUnreadCounts();
+      _adjustFolderCount(email.account, email.folder, newState ? +1 : -1);
     }
   };
 }
@@ -2061,20 +2074,17 @@ document.addEventListener('contextmenu', e => {
 
   const setRead = async (newState) => {
     ctxMenu.style.display = 'none';
-    // Sofort aktualisieren
     email.is_read = newState;
     item.classList.toggle('unread', !newState);
     if (state.activeEmailId === email.id) updateReadToggle(email, item);
-    loadUnreadCounts();
-    // API im Hintergrund
+    _adjustFolderCount(email.account, email.folder, newState ? -1 : +1);
     try {
       await (newState ? api.markRead(email.id) : api.markUnread(email.id));
     } catch (_) {
-      // Rollback
       email.is_read = !newState;
       item.classList.toggle('unread', newState);
       if (state.activeEmailId === email.id) updateReadToggle(email, item);
-      loadUnreadCounts();
+      _adjustFolderCount(email.account, email.folder, newState ? +1 : -1);
     }
   };
 
