@@ -676,7 +676,7 @@ flex: 0 0 175px;
 #detail-body a:hover { text-decoration: underline; }
 
 #detail-empty {
-  flex: 1;
+  flex: 0;
   display: flex;
   align-items: center;
   justify-content: center;
