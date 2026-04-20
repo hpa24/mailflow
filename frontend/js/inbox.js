@@ -1,4 +1,4 @@
-const PAGE_SIZE = 200;
+const PAGE_SIZE = 500;
 const MAX_AUTO_LOAD = 1500; // Automatisch bis zu dieser Anzahl laden
 
 const STANDARD_FOLDER_ORDER = ['INBOX', 'Sent', 'Drafts', 'Trash', 'Spam'];
@@ -572,6 +572,28 @@ async function loadUnreadCounts() {
 
 let _loadGen = 0;  // Jeder reset() erhöht den Zähler — veraltete Fetches werden verworfen
 
+function _addEmailBatch(newEmails, isReset) {
+  newEmails.forEach(email => {
+    const tid = getThreadId(email);
+    state.threadCount[tid] = (state.threadCount[tid] || 0) + 1;
+    if (state.threadCount[tid] === 2) {
+      const firstItem = document.querySelector(`.email-item[data-thread="${CSS.escape(tid)}"]`);
+      if (firstItem) {
+        firstItem.classList.add('thread-member', 'thread-first');
+        firstItem.classList.remove('thread-last');
+      }
+    }
+  });
+  if (isReset) {
+    state.emails = newEmails;
+    renderEmails(true);
+  } else {
+    const prevLength = state.emails.length;
+    state.emails = state.emails.concat(newEmails);
+    appendEmails(newEmails, prevLength);
+  }
+}
+
 async function loadEmails(reset = false) {
   if (reset) {
     _loadGen++;
@@ -591,73 +613,57 @@ async function loadEmails(reset = false) {
 
   if (state.loadingMore || state.allLoaded) return;
   state.loadingMore = true;
-  const myGen = _loadGen;  // Generation dieser Anfrage merken
+  const myGen = _loadGen;
   updateFooter();
 
   try {
-    const params = { page: state.page, limit: PAGE_SIZE };
-    if (state.activeAccount) params.account = state.activeAccount;
-    if (state.activeFolder)  params.folder  = state.activeFolder;
-    if (state.readFilter === 'unread') params.is_read = 'false';
-    if (state.readFilter === 'read')   params.is_read = 'true';
+    const baseParams = {};
+    if (state.activeAccount) baseParams.account = state.activeAccount;
+    if (state.activeFolder)  baseParams.folder  = state.activeFolder;
+    if (state.readFilter === 'unread') baseParams.is_read = 'false';
+    if (state.readFilter === 'read')   baseParams.is_read = 'true';
 
-    let data;
     if (state.searchQuery) {
-      // Suche über alle Ordner des Accounts (kein folder-Filter)
-      const searchParams = { q: state.searchQuery };
-      if (state.activeAccount) searchParams.account = state.activeAccount;
-      if (state.readFilter === 'unread') searchParams.is_read = 'false';
-      if (state.readFilter === 'read')   searchParams.is_read = 'true';
-      data = await api.search(searchParams);
+      const data = await api.search({ q: state.searchQuery, ...baseParams });
+      if (myGen !== _loadGen) return;
+      state.totalItems = data.totalItems || 0;
+      state.allLoaded = true;
+      _addEmailBatch(data.items || [], reset);
+      updateListHeader();
     } else {
       const fetchFn = state.groupMode === 'sender'
         ? api.getEmailsBySender.bind(api)
         : api.getThreadedEmails.bind(api);
-      data = await fetchFn(params);
-    }
 
-    // Veraltete Antwort verwerfen — ein neuerer Reset hat bereits begonnen
-    if (myGen !== _loadGen) return;
+      // Erste Seite laden und sofort rendern
+      const first = await fetchFn({ ...baseParams, page: state.page, limit: PAGE_SIZE });
+      if (myGen !== _loadGen) return;
 
-    const newEmails = data.items || [];
-    state.totalItems = data.totalItems || 0;
-    if (state.searchQuery) {
-      state.allLoaded = true;
-    } else {
-      state.allLoaded = !data.hasMore;
-    }
+      state.totalItems = first.totalItems || 0;
+      _addEmailBatch(first.items || [], reset);
+      state.page++;
+      updateListHeader();
+      updateFooter();
 
-    // Gruppen-Zähler aktualisieren
-    newEmails.forEach(email => {
-      const tid = getThreadId(email);
-      state.threadCount[tid] = (state.threadCount[tid] || 0) + 1;
+      // Restliche Seiten parallel laden
+      if (first.hasMore && state.emails.length < MAX_AUTO_LOAD) {
+        const toLoad = Math.min(MAX_AUTO_LOAD, state.totalItems);
+        const pagesNeeded = Math.ceil((toLoad - state.emails.length) / PAGE_SIZE);
+        const results = await Promise.all(
+          Array.from({ length: pagesNeeded }, (_, i) =>
+            fetchFn({ ...baseParams, page: state.page + i, limit: PAGE_SIZE })
+          )
+        );
+        if (myGen !== _loadGen) return;
 
-      if (state.threadCount[tid] === 2) {
-        // Zweite E-Mail: erste E-Mail im DOM nachträglich als Konversation markieren
-        const firstItem = document.querySelector(`.email-item[data-thread="${CSS.escape(tid)}"]`);
-        if (firstItem) {
-          firstItem.classList.add('thread-member', 'thread-first');
-          // Vorherige thread-last-Markierung entfernen falls nötig
-          firstItem.classList.remove('thread-last');
-        }
+        results.forEach(pageData => {
+          _addEmailBatch(pageData.items || [], false);
+          if (!pageData.hasMore) state.allLoaded = true;
+        });
+        state.page += pagesNeeded;
+      } else {
+        state.allLoaded = !first.hasMore;
       }
-    });
-
-    if (reset) {
-      state.emails = newEmails;
-      renderEmails(true);
-    } else {
-      const prevLength = state.emails.length;
-      state.emails = state.emails.concat(newEmails);
-      appendEmails(newEmails, prevLength);
-    }
-
-    state.page++;
-    updateListHeader();
-
-    // Auto-Load: weitere Seiten nachladen bis MAX_AUTO_LOAD oder allLoaded
-    if (!state.allLoaded && state.emails.length < MAX_AUTO_LOAD) {
-      setTimeout(() => loadEmails(false), 0);
     }
   } catch (e) {
     document.getElementById('email-list').innerHTML =
