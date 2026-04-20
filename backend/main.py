@@ -434,7 +434,7 @@ async def get_emails_threaded(account: str | None = None, folder: str | None = N
             continue
         norm = _normalize_subject(members[0].get("subject", ""))
 
-        if len(norm) > 4 and norm in norm_index:
+        if len(norm) > 1 and norm in norm_index:
             existing = merged[norm_index[norm]]
             if _can_merge(existing, members):
                 # Merge: unified display_thread_id, re-sort newest-first
@@ -450,7 +450,7 @@ async def get_emails_threaded(account: str | None = None, folder: str | None = N
         for e in members:
             e["display_thread_id"] = root_tid
         merged.append(members)
-        if len(norm) > 4:
+        if len(norm) > 1:
             norm_index[norm] = len(merged) - 1
 
     # Sort merged groups by newest email descending (members[0] is now newest)
