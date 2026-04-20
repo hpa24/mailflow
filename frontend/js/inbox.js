@@ -1042,22 +1042,14 @@ const _TRASH_FOLDER_NAMES = new Set(['trash', 'papierkorb', 'deleted', 'deleted 
 
 async function moveEmailsToFolder(emailIds, targetImapPath) {
   const isTrash = _TRASH_FOLDER_NAMES.has((targetImapPath || '').toLowerCase());
-  const failed = [];
-  for (const id of emailIds) {
-    try {
-      await api.moveEmail(id, targetImapPath);
-    } catch (e) {
-      failed.push(id);
-      console.error(`Move failed for ${id}:`, e);
-    }
-  }
-  if (failed.length > 0) {
-    alert(`Fehler beim Verschieben von ${failed.length} E-Mail(s).`);
-  }
-  const moved = emailIds.filter(id => !failed.includes(id));
-  moved.forEach(id => {
+
+  // Snapshot für Rollback
+  const snapshot = emailIds.map(id => state.emails.find(e => e.id === id)).filter(Boolean);
+
+  // Sofort aus DOM und State entfernen (Optimistic UI)
+  emailIds.forEach(id => {
     const em = state.emails.find(e => e.id === id);
-    if (em && isTrash) em.is_read = true;  // lokal als gelesen markieren
+    if (em && isTrash) em.is_read = true;
     document.querySelector(`.email-item[data-id="${id}"]`)?.remove();
     state.emails = state.emails.filter(em => em.id !== id);
   });
@@ -1065,9 +1057,21 @@ async function moveEmailsToFolder(emailIds, targetImapPath) {
   state.lastClickedEl = null;
   cleanupThreadStyling();
   loadUnreadCounts();
-  if (moved.includes(state.activeEmailId)) {
+  if (emailIds.includes(state.activeEmailId)) {
     state.activeEmailId = null;
     showEmpty();
+  }
+
+  // API-Calls parallel im Hintergrund
+  const results = await Promise.allSettled(emailIds.map(id => api.moveEmail(id, targetImapPath)));
+  const failed = emailIds.filter((_, i) => results[i].status === 'rejected');
+  if (failed.length > 0) {
+    const failedEmails = snapshot.filter(e => failed.includes(e.id));
+    failedEmails.forEach(e => { if (isTrash) e.is_read = false; });
+    state.emails = [...failedEmails, ...state.emails];
+    renderEmails(true);
+    loadUnreadCounts();
+    alert(`Fehler beim Verschieben von ${failed.length} E-Mail(s).`);
   }
 }
 
@@ -1335,51 +1339,61 @@ async function openEmail(email, itemEl) {
 }
 
 async function spamEmail(email, itemEl) {
-  try {
-    await api.spamEmail(email.id);
-  } catch (e) {
-    alert('Spam-Verschiebung fehlgeschlagen: ' + e.message);
-    return;
-  }
   const next = itemEl.nextElementSibling || itemEl.previousElementSibling;
+
+  // Sofort aus DOM und State entfernen (Optimistic UI)
   itemEl.remove();
   state.emails = state.emails.filter(em => em.id !== email.id);
   cleanupThreadStyling();
   loadUnreadCounts();
   if (next && next.dataset.id) {
     const nextEmail = state.emails.find(em => em.id === next.dataset.id);
-    if (nextEmail) { openEmail(nextEmail, next); return; }
+    if (nextEmail) openEmail(nextEmail, next);
+  } else {
+    showEmpty();
   }
-  showEmpty();
+
+  // API im Hintergrund
+  try {
+    await api.spamEmail(email.id);
+  } catch (e) {
+    state.emails = [email, ...state.emails];
+    renderEmails(true);
+    loadUnreadCounts();
+    alert('Spam-Verschiebung fehlgeschlagen: ' + e.message);
+  }
 }
 
 async function deleteEmail(email, itemEl) {
-  // Lokal als gelesen markieren bevor Löschung (Sidebar-Zähler stimmt sofort)
+  const next = itemEl.nextElementSibling || itemEl.previousElementSibling;
+  const wasRead = email.is_read;
+
+  // Sofort aus DOM und State entfernen (Optimistic UI)
   if (!email.is_read) {
     email.is_read = true;
     itemEl?.classList.remove('unread');
   }
-  try {
-    await api.deleteEmail(email.id);
-  } catch (e) {
-    alert('Löschen fehlgeschlagen: ' + e.message);
-    return;
-  }
-
-  // Nächste E-Mail in der Liste öffnen (oder leere Ansicht)
-  const next = itemEl.nextElementSibling || itemEl.previousElementSibling;
-
-  // Aus DOM und State entfernen
   itemEl.remove();
   state.emails = state.emails.filter(em => em.id !== email.id);
   cleanupThreadStyling();
   loadUnreadCounts();
-
   if (next && next.dataset.id) {
     const nextEmail = state.emails.find(em => em.id === next.dataset.id);
-    if (nextEmail) { openEmail(nextEmail, next); return; }
+    if (nextEmail) openEmail(nextEmail, next);
+  } else {
+    showEmpty();
   }
-  showEmpty();
+
+  // API im Hintergrund
+  try {
+    await api.deleteEmail(email.id);
+  } catch (e) {
+    email.is_read = wasRead;
+    state.emails = [email, ...state.emails];
+    renderEmails(true);
+    loadUnreadCounts();
+    alert('Löschen fehlgeschlagen: ' + e.message);
+  }
 }
 
 function updateReadToggle(email, itemEl) {
@@ -1387,11 +1401,21 @@ function updateReadToggle(email, itemEl) {
   btn.textContent = email.is_read ? 'Als ungelesen markieren' : 'Als gelesen markieren';
   btn.onclick = async () => {
     const newState = !email.is_read;
-    await (newState ? api.markRead(email.id) : api.markUnread(email.id));
+    // Sofort aktualisieren
     email.is_read = newState;
     itemEl.classList.toggle('unread', !newState);
     updateReadToggle(email, itemEl);
     loadUnreadCounts();
+    // API im Hintergrund
+    try {
+      await (newState ? api.markRead(email.id) : api.markUnread(email.id));
+    } catch (_) {
+      // Rollback
+      email.is_read = !newState;
+      itemEl.classList.toggle('unread', newState);
+      updateReadToggle(email, itemEl);
+      loadUnreadCounts();
+    }
   };
 }
 
@@ -1908,45 +1932,45 @@ document.addEventListener('contextmenu', e => {
     const bulkSetRead = async (newState) => {
       ctxMenu.style.display = 'none';
       const ids = [...state.selectedEmails];
-      const footer = document.getElementById('list-status');
-      const label = newState ? 'gelesen' : 'ungelesen';
-      footer.textContent = `${ids.length} E-Mails werden als ${label} markiert…`;
       clearSelection();
+
+      // Sofort State und UI aktualisieren
       const emailRefs = ids.map(id => {
         const em = state.emails.find(e => e.id === id);
-        return { id, account: em?.account ?? '', folder: em?.folder ?? '', imap_uid: em?.imap_uid ?? null };
-      });
-      await api.bulkMarkRead(emailRefs, newState);
-      // State aktualisieren
-      ids.forEach(id => {
-        const em = state.emails.find(em => em.id === id);
         if (em) em.is_read = newState;
         if (state.activeEmailId === id && em) {
           const el = document.querySelector(`.email-item[data-id="${id}"]`);
           if (el) updateReadToggle(em, el);
         }
+        return { id, account: em?.account ?? '', folder: em?.folder ?? '', imap_uid: em?.imap_uid ?? null };
       });
-      // Liste neu rendern (wendet readFilter korrekt an)
       renderEmails(true);
       updateFooter();
       loadUnreadCounts();
+
+      // API im Hintergrund
+      try {
+        await api.bulkMarkRead(emailRefs, newState);
+      } catch (e) {
+        console.error('Bulk-Markierung fehlgeschlagen:', e);
+      }
     };
 
     const bulkDelete = async () => {
       ctxMenu.style.display = 'none';
       const ids = [...state.selectedEmails];
-      const footer = document.getElementById('list-status');
-      footer.textContent = `${ids.length} E-Mails werden gelöscht…`;
       clearSelection();
-      await Promise.all(ids.map(id => api.deleteEmail(id).catch(() => {})));
-      ids.forEach(id => {
-        state.emails = state.emails.filter(em => em.id !== id);
-      });
+
+      // Sofort aus State und DOM entfernen
+      ids.forEach(id => { state.emails = state.emails.filter(em => em.id !== id); });
       renderEmails(true);
       cleanupThreadStyling();
       updateFooter();
       loadUnreadCounts();
       if (!document.querySelector('.email-item.active')) showEmpty();
+
+      // API im Hintergrund
+      await Promise.allSettled(ids.map(id => api.deleteEmail(id)));
     };
 
     ctxMenu.querySelector('[data-action="bulk-read"]').onclick   = () => bulkSetRead(true);
@@ -1971,12 +1995,22 @@ document.addEventListener('contextmenu', e => {
   ctxMenu.style.top  = posTop;
 
   const setRead = async (newState) => {
-    await (newState ? api.markRead(email.id) : api.markUnread(email.id));
+    ctxMenu.style.display = 'none';
+    // Sofort aktualisieren
     email.is_read = newState;
     item.classList.toggle('unread', !newState);
     if (state.activeEmailId === email.id) updateReadToggle(email, item);
     loadUnreadCounts();
-    ctxMenu.style.display = 'none';
+    // API im Hintergrund
+    try {
+      await (newState ? api.markRead(email.id) : api.markUnread(email.id));
+    } catch (_) {
+      // Rollback
+      email.is_read = !newState;
+      item.classList.toggle('unread', newState);
+      if (state.activeEmailId === email.id) updateReadToggle(email, item);
+      loadUnreadCounts();
+    }
   };
 
   ctxMenu.querySelector('[data-action="mark-read"]').onclick   = () => setRead(true);
