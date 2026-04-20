@@ -77,8 +77,35 @@ async def setup_pocketbase_schema(token: str) -> None:
                 _field("xano_context", "text", max=MAX_UNLIMITED),
                 _field("xano_synced_at", "date"),
             ])
+        if "emails" in existing:
+            await _ensure_indexes(client, headers, "emails", existing["emails"], [
+                "CREATE INDEX IF NOT EXISTS idx_emails_account_folder_date ON emails (account, folder, date_sent DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_emails_account_folder_read_date ON emails (account, folder, is_read, date_sent DESC)",
+            ])
 
     logger.info("PocketBase schema setup complete")
+
+
+async def _ensure_indexes(
+    client: httpx.AsyncClient, headers: dict,
+    collection_name: str, collection_id: str, new_indexes: list
+) -> None:
+    """Fügt fehlende Indizes zu einer bestehenden Collection hinzu."""
+    resp = await client.get(f"/api/collections/{collection_id}", headers=headers)
+    if not resp.is_success:
+        logger.warning(f"Could not fetch collection '{collection_name}': {resp.text}")
+        return
+    coll = resp.json()
+    existing_indexes = set(coll.get("indexes") or [])
+    to_add = [idx for idx in new_indexes if idx not in existing_indexes]
+    if not to_add:
+        return
+    coll["indexes"] = list(existing_indexes) + to_add
+    patch = await client.patch(f"/api/collections/{collection_id}", headers=headers, json=coll)
+    if patch.is_success:
+        logger.info(f"Added {len(to_add)} index(es) to '{collection_name}'")
+    else:
+        logger.warning(f"Failed to add indexes to '{collection_name}': {patch.text[:300]}")
 
 
 async def _add_missing_fields(
@@ -194,6 +221,8 @@ def _emails_schema(accounts_id: str) -> dict:
         "indexes": [
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_message_id ON emails (message_id)",
             "CREATE INDEX IF NOT EXISTS idx_emails_account_uid ON emails (account, imap_uid)",
+            "CREATE INDEX IF NOT EXISTS idx_emails_account_folder_date ON emails (account, folder, date_sent DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_emails_account_folder_read_date ON emails (account, folder, is_read, date_sent DESC)",
         ],
         "fields": [
             _field("account", "relation", required=True,
