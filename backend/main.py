@@ -270,30 +270,34 @@ async def get_folders(account: str | None = None):
 @app.get("/search")
 async def search_emails(q: str, account: str | None = None,
                         folder: str | None = None, is_read: str | None = None):
-    """Volltextsuche via FTS5-Index. Gibt max. 100 Treffer zurück."""
+    """Volltextsuche via FTS5-Index mit PocketBase-Fallback."""
     if not q or not q.strip():
         return {"items": [], "totalItems": 0}
 
-    # FTS5-Suche: Mehrwort-Anfragen als Phrase suchen ("Felix Kugel"),
-    # Einzelwörter direkt. Fallback: AND-Suche wenn Phrase nichts findet.
     raw = q.strip()
+    safe = _pb_safe(raw)
+    fts_ids: list[str] = []
+    use_fts = False
+
+    # FTS5-Suche: Phrase bei Mehrwort, sonst Einzelwort; Fallback AND-Suche
     phrase = f'"{raw.replace(chr(34), "")}"' if " " in raw else raw
     try:
         fts_ids = fts_search(settings.PB_DATA_PATH, phrase)
         if not fts_ids and " " in raw:
-            # Fallback: AND-Suche (beide Wörter, nicht notwendig benachbart)
             fts_ids = fts_search(settings.PB_DATA_PATH, raw)
+        use_fts = bool(fts_ids)
     except Exception as e:
         logger.warning(f"FTS5 search failed: {e}")
-        return {"items": [], "totalItems": 0}
 
-    if not fts_ids:
-        return {"items": [], "totalItems": 0}
+    if use_fts:
+        top_ids = fts_ids[:100]
+        id_filter = " || ".join(f'id="{i}"' for i in top_ids)
+        filters = [f"({id_filter})"]
+    else:
+        # Fallback: PocketBase-LIKE auf Betreff + Absender (kein body_plain → keine Zitatttreffer)
+        logger.info(f"FTS5 empty for '{raw}', falling back to PocketBase LIKE search")
+        filters = [f'(subject ~ "{safe}" || from_email ~ "{safe}" || from_name ~ "{safe}")']
 
-    # Ergebnisse aus PocketBase laden (max. 100 IDs als OR-Filter)
-    top_ids = fts_ids[:100]
-    id_filter = " || ".join(f'id="{i}"' for i in top_ids)
-    filters = [f"({id_filter})"]
     if account:
         filters.append(f'account="{account}"')
     if is_read == "true":
