@@ -1134,14 +1134,16 @@ function moveEmailsToFolder(emailIds, targetImapPath) {
   // Sofort aus DOM und State entfernen (Optimistic UI)
   emailIds.forEach(id => {
     const em = state.emails.find(e => e.id === id);
-    if (em && isTrash) em.is_read = true;
+    if (em && !em.is_read) {
+      em.is_read = true;
+      _adjustFolderCount(em.account, em.folder, -1);
+    }
     document.querySelector(`.email-item[data-id="${id}"]`)?.remove();
-    state.emails = state.emails.filter(em => em.id !== id);
+    state.emails = state.emails.filter(e => e.id !== id);
   });
   clearSelection();
   state.lastClickedEl = null;
   cleanupThreadStyling();
-  loadUnreadCounts();
   if (emailIds.includes(state.activeEmailId)) {
     state.activeEmailId = null;
     showEmpty();
@@ -1155,10 +1157,12 @@ function moveEmailsToFolder(emailIds, targetImapPath) {
       const failed = emailIds.filter((_, i) => results[i].status === 'rejected');
       if (failed.length > 0) {
         const failedEmails = snapshot.filter(e => failed.includes(e.id));
-        failedEmails.forEach(e => { if (isTrash) e.is_read = false; });
+        failedEmails.forEach(e => {
+          if (!e.is_read) _adjustFolderCount(e.account, e.folder, +1);
+          e.is_read = false;
+        });
         state.emails = [...failedEmails, ...state.emails];
         renderEmails(true);
-        loadUnreadCounts();
         _saveToCache();
         alert(`Fehler beim Verschieben von ${failed.length} E-Mail(s).`);
       }

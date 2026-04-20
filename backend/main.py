@@ -1070,22 +1070,17 @@ async def move_email(email_id: str, data: dict):
         logger.warning(f"IMAP move failed for {email_id}: {e}")
         raise HTTPException(status_code=502, detail=f"IMAP-Fehler: {e}")
 
-    _TRASH_NAMES = {"trash", "papierkorb", "deleted", "deleted items", "deleted messages"}
-    is_trash = target_folder.lower() in _TRASH_NAMES
-
     source_folder = email.get("folder", "INBOX")
-    patch = {"folder": target_folder}
+    patch = {"folder": target_folder, "is_read": True}
     if new_uid:
         patch["imap_uid"] = new_uid
         logger.info("move_email: %s → '%s', neue imap_uid=%s", email_id, target_folder, new_uid)
-    if is_trash:
-        patch["is_read"] = True
-        # IMAP: \Seen auf neuer UID setzen
-        if new_uid:
-            try:
-                await _imap_set_read({"account": email["account"], "imap_uid": new_uid, "folder": target_folder}, True)
-            except Exception as ex:
-                logger.warning("move_email: IMAP mark-read after trash move fehlgeschlagen: %s", ex)
+    # IMAP: \Seen auf neuer UID setzen
+    if new_uid:
+        try:
+            await _imap_set_read({"account": email["account"], "imap_uid": new_uid, "folder": target_folder}, True)
+        except Exception as ex:
+            logger.warning("move_email: IMAP mark-read fehlgeschlagen: %s", ex)
     await pb_client.pb_patch(f"/api/collections/emails/records/{email_id}", patch)
     try:
         await asyncio.gather(
@@ -1094,7 +1089,7 @@ async def move_email(email_id: str, data: dict):
         )
     except Exception as e:
         logger.warning("move_email: folder unread_count update fehlgeschlagen: %s", e)
-    return {"moved_to": target_folder, "marked_read": is_trash}
+    return {"moved_to": target_folder, "marked_read": True}
 
 
 async def _imap_move(email: dict, target_folder: str) -> int | None:
