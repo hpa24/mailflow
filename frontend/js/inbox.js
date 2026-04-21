@@ -1744,7 +1744,8 @@ async function openCompose({ to = '', subject = '', body = null, quote = '', quo
   ).join('');
   fromSel.value = fromAccountId || state.activeAccount || (state.accounts[0]?.id ?? '');
 
-  // SMTP-Dropdown befüllen
+  // SMTP-Dropdown befüllen (ggf. nachladen wenn beim Start fehlgeschlagen)
+  if (state.smtpServers.length === 0) await loadSmtpServers();
   const smtpSel = document.getElementById('ci-smtp-server');
   if (state.smtpServers.length > 0) {
     smtpSel.innerHTML = state.smtpServers.map(s =>
