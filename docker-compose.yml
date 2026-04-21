@@ -36,7 +36,7 @@ services:
     image: nginx:alpine
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
-      - ./frontend/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./nginx-templates:/etc/nginx/templates:ro
     environment:
       - MAILFLOW_API_KEY=${MAILFLOW_API_KEY}
     ports:
