@@ -1,12 +1,31 @@
 const API = 'https://mailflow-api.barres.de';
 
-// API-Key muss mit API_KEY in backend/.env übereinstimmen.
-// Für lokale Entwicklung kann er leer bleiben — Backend ignoriert den Key,
-// wenn API_KEY in .env nicht gesetzt ist.
-const API_KEY = window.MAILFLOW_API_KEY || '';
+let API_KEY = '';
+let _apiKeyPromise = null;
 
+async function _loadApiKey() {
+  const authData = (typeof auth !== 'undefined') ? auth.getAuth() : null;
+  const pbToken = authData?.token;
+  if (!pbToken) return;
+  try {
+    const res = await fetch(`${API}/config.js`, {
+      headers: { 'Authorization': `Bearer ${pbToken}` },
+    });
+    if (res.ok) {
+      const text = await res.text();
+      const m = text.match(/MAILFLOW_API_KEY='([^']*)'/);
+      if (m && m[1]) API_KEY = m[1];
+    }
+  } catch (_) {}
+}
+
+function _ensureApiKey() {
+  if (!_apiKeyPromise) _apiKeyPromise = _loadApiKey();
+  return _apiKeyPromise;
+}
 
 async function apiFetch(path, options = {}) {
+  await _ensureApiKey();
   if (API_KEY) {
     options.headers = { 'X-API-Key': API_KEY, ...(options.headers || {}) };
   }

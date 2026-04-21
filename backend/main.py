@@ -169,12 +169,28 @@ async def health():
 
 
 @app.get("/config.js", include_in_schema=False)
-async def frontend_config():
+async def frontend_config(authorization: str = Header(None, alias="Authorization")):
     from fastapi.responses import PlainTextResponse
-    return PlainTextResponse(
-        f"window.MAILFLOW_API_KEY='{settings.API_KEY}';",
-        media_type="application/javascript",
-    )
+    empty = PlainTextResponse("window.MAILFLOW_API_KEY='';", media_type="application/javascript")
+    if not settings.API_KEY:
+        return empty
+    pb_token = authorization[7:] if authorization and authorization.startswith("Bearer ") else None
+    if not pb_token:
+        return empty
+    try:
+        async with httpx.AsyncClient(base_url=settings.PB_URL, timeout=5) as client:
+            resp = await client.post(
+                "/api/collections/users/auth-refresh",
+                headers={"Authorization": f"Bearer {pb_token}"},
+            )
+            if resp.status_code == 200:
+                return PlainTextResponse(
+                    f"window.MAILFLOW_API_KEY='{settings.API_KEY}';",
+                    media_type="application/javascript",
+                )
+    except Exception:
+        pass
+    return empty
 
 
 @app.post("/sync/run")
