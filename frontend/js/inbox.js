@@ -1293,7 +1293,10 @@ async function openEmail(email, itemEl) {
   // Zoom-State für neue E-Mail zurücksetzen
   _activeIframe = null;
   _activeIframeBaseHtml = null;
+  _iframeZoom = 1.0;
   body.style.zoom = '';
+  const _zoomBtn = document.getElementById('btn-zoom');
+  if (_zoomBtn) _zoomBtn.textContent = '100%';
 
   empty.style.display = 'none';
   header.style.display = 'block';
