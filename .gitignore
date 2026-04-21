@@ -36,6 +36,9 @@ MAILFLOW-KIINTEGRATION-PLAN.md
 MAILFLOW-PLAN.md
 context/
 
+# Generiert beim Container-Start aus Env-Variable
+frontend/js/config.js
+
 # Lokale Hilfsskripte
 backfill_reply_to.py
 reset_emails.py

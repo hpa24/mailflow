@@ -1042,20 +1042,8 @@ def _imap_search_by_msgid(srv, folder: str, message_id: str) -> int | None:
         return None
 
 
-async def _imap_move_to_spam(email: dict) -> tuple[str, int | None]:
-    """Verschiebt E-Mail per IMAP in den Spam-Ordner.
-    Gibt (spam_folder, neue_imap_uid) zurück."""
+def _imap_move_to_spam_sync(acc: dict, imap_uid: int, folder: str, message_id: str) -> tuple[str, int | None]:
     from imapclient import IMAPClient
-    account_id = email.get("account")
-    imap_uid = email.get("imap_uid")
-    folder = email.get("folder", "INBOX")
-    if not account_id or not imap_uid:
-        return "Spam", None
-
-    acc = await _get_imap_account(account_id)
-    if acc is None:
-        return "Spam", None
-
     with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
         srv.login(acc["imap_user"], acc["imap_pass"])
         srv.select_folder(folder)
@@ -1068,9 +1056,26 @@ async def _imap_move_to_spam(email: dict) -> tuple[str, int | None]:
                 srv.copy([imap_uid], spam)
                 srv.set_flags([imap_uid], [b"\\Deleted"])
                 srv.expunge()
-            new_uid = _imap_search_by_msgid(srv, spam, email.get("message_id", ""))
+            new_uid = _imap_search_by_msgid(srv, spam, message_id)
             return spam or "Spam", new_uid
         return spam or "Spam", None
+
+
+async def _imap_move_to_spam(email: dict) -> tuple[str, int | None]:
+    """Verschiebt E-Mail per IMAP in den Spam-Ordner.
+    Gibt (spam_folder, neue_imap_uid) zurück."""
+    account_id = email.get("account")
+    imap_uid = email.get("imap_uid")
+    folder = email.get("folder", "INBOX")
+    if not account_id or not imap_uid:
+        return "Spam", None
+
+    acc = await _get_imap_account(account_id)
+    if acc is None:
+        return "Spam", None
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _imap_move_to_spam_sync, acc, imap_uid, folder, email.get("message_id", ""))
 
 
 @app.post("/emails/{email_id}/move")
@@ -1109,19 +1114,8 @@ async def move_email(email_id: str, data: dict):
     return {"moved_to": target_folder, "marked_read": True}
 
 
-async def _imap_move(email: dict, target_folder: str) -> int | None:
-    """Verschiebt E-Mail per IMAP in den Zielordner. Gibt neue UID zurück."""
+def _imap_move_sync(acc: dict, imap_uid: int, source_folder: str, target_folder: str, message_id: str) -> int | None:
     from imapclient import IMAPClient
-    account_id = email.get("account")
-    imap_uid = email.get("imap_uid")
-    source_folder = email.get("folder", "INBOX")
-    if not account_id or not imap_uid:
-        return None
-
-    acc = await _get_imap_account(account_id)
-    if acc is None:
-        return None
-
     with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
         srv.login(acc["imap_user"], acc["imap_pass"])
         srv.select_folder(source_folder)
@@ -1132,7 +1126,23 @@ async def _imap_move(email: dict, target_folder: str) -> int | None:
             srv.copy([imap_uid], target_folder)
             srv.set_flags([imap_uid], [b"\\Deleted"])
             srv.expunge()
-        return _imap_search_by_msgid(srv, target_folder, email.get("message_id", ""))
+        return _imap_search_by_msgid(srv, target_folder, message_id)
+
+
+async def _imap_move(email: dict, target_folder: str) -> int | None:
+    """Verschiebt E-Mail per IMAP in den Zielordner. Gibt neue UID zurück."""
+    account_id = email.get("account")
+    imap_uid = email.get("imap_uid")
+    source_folder = email.get("folder", "INBOX")
+    if not account_id or not imap_uid:
+        return None
+
+    acc = await _get_imap_account(account_id)
+    if acc is None:
+        return None
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _imap_move_sync, acc, imap_uid, source_folder, target_folder, email.get("message_id", ""))
 
 
 @app.delete("/emails/{email_id}")
@@ -1167,9 +1177,28 @@ async def delete_email(email_id: str):
     return {"deleted": email_id}
 
 
+def _imap_trash_sync(acc: dict, imap_uid: int, folder: str, message_id: str) -> None:
+    from imapclient import IMAPClient
+    with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
+        srv.login(acc["imap_user"], acc["imap_pass"])
+        srv.select_folder(folder)
+        caps = srv.capabilities()
+        if b"MOVE" in caps:
+            trash = find_imap_folder(srv, [b"\\Trash", b"\\Deleted"], ["Trash", "Deleted", "Deleted Items", "Papierkorb", "INBOX.Trash"])
+            if trash and trash.lower() != folder.lower():
+                srv.move([imap_uid], trash)
+                new_uid = _imap_search_by_msgid(srv, trash, message_id)
+                if new_uid:
+                    srv.select_folder(trash)
+                    srv.set_flags([new_uid], [b"\\Seen"])
+                    logger.info("_imap_trash: \\Seen gesetzt auf neuer UID %s in '%s'", new_uid, trash)
+                return
+        srv.set_flags([imap_uid], [b"\\Deleted"])
+        srv.expunge()
+
+
 async def _imap_trash(email: dict) -> None:
     """Verschiebt E-Mail auf dem IMAP-Server in den Papierkorb."""
-    from imapclient import IMAPClient
     account_id = email.get("account")
     imap_uid = email.get("imap_uid")
     folder = email.get("folder", "INBOX")
@@ -1180,25 +1209,8 @@ async def _imap_trash(email: dict) -> None:
     if acc is None:
         return
 
-    with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
-        srv.login(acc["imap_user"], acc["imap_pass"])
-        srv.select_folder(folder)
-        # Trash-Ordner ermitteln: IMAP-Flag \Trash oder Fallback-Namen
-        caps = srv.capabilities()
-        if b"MOVE" in caps:
-            trash = find_imap_folder(srv, [b"\\Trash", b"\\Deleted"], ["Trash", "Deleted", "Deleted Items", "Papierkorb", "INBOX.Trash"])
-            if trash and trash.lower() != folder.lower():
-                srv.move([imap_uid], trash)
-                # \Seen auf neuer UID im Papierkorb setzen
-                new_uid = _imap_search_by_msgid(srv, trash, email.get("message_id", ""))
-                if new_uid:
-                    srv.select_folder(trash)
-                    srv.set_flags([new_uid], [b"\\Seen"])
-                    logger.info("_imap_trash: \\Seen gesetzt auf neuer UID %s in '%s'", new_uid, trash)
-                return
-        # Fallback: \Deleted setzen + expunge (bereits gelöscht, kein \Seen nötig)
-        srv.set_flags([imap_uid], [b"\\Deleted"])
-        srv.expunge()
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _imap_trash_sync, acc, imap_uid, folder, email.get("message_id", ""))
 
 
 
@@ -1575,9 +1587,19 @@ async def ai_refine(req: RefineRequest):
 
 # ---------------------------------------------------------------------------
 
+def _imap_set_read_sync(acc: dict, imap_uid: int, folder: str, is_read: bool) -> None:
+    from imapclient import IMAPClient
+    with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
+        srv.login(acc["imap_user"], acc["imap_pass"])
+        srv.select_folder(folder)
+        if is_read:
+            srv.set_flags([imap_uid], [b"\\Seen"])
+        else:
+            srv.remove_flags([imap_uid], [b"\\Seen"])
+
+
 async def _imap_set_read(email: dict, is_read: bool) -> None:
     """Setzt \\Seen-Flag auf dem IMAP-Server."""
-    from imapclient import IMAPClient
     account_id = email.get("account")
     imap_uid = email.get("imap_uid")
     folder = email.get("folder", "INBOX")
@@ -1588,13 +1610,8 @@ async def _imap_set_read(email: dict, is_read: bool) -> None:
     if acc is None:
         return
 
-    with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
-        srv.login(acc["imap_user"], acc["imap_pass"])
-        srv.select_folder(folder)
-        if is_read:
-            srv.set_flags([imap_uid], [b"\\Seen"])
-        else:
-            srv.remove_flags([imap_uid], [b"\\Seen"])
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _imap_set_read_sync, acc, imap_uid, folder, is_read)
 
 
 async def _imap_set_answered_safe(email: dict) -> None:
