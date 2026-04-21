@@ -2,6 +2,29 @@ const FIRST_PAGE_SIZE = 50;  // Erste Seite klein → sofort sichtbar
 const PAGE_SIZE = 500;
 const MAX_AUTO_LOAD = 1500; // Automatisch bis zu dieser Anzahl laden
 
+// ── Zoom ──────────────────────────────────────────────────────
+const ZOOM_LEVELS = [0.75, 1.0, 1.25, 1.5];
+let _iframeZoom = 1.0;
+let _activeIframe = null;
+let _activeIframeBaseHtml = null; // srcdoc nach CID-Ersatz, ohne Zoom-CSS
+
+function _withZoom(html) {
+  const style = `<style>html,body{zoom:${_iframeZoom}}</style>`;
+  return html.includes('</head>') ? html.replace('</head>', style + '</head>') : style + html;
+}
+
+function _applyZoom() {
+  const btn = document.getElementById('btn-zoom');
+  if (btn) btn.textContent = Math.round(_iframeZoom * 100) + '%';
+  if (_activeIframe && _activeIframeBaseHtml) {
+    _activeIframe.srcdoc = _withZoom(_activeIframeBaseHtml);
+  } else {
+    // Plain-Text-E-Mail
+    const body = document.getElementById('detail-body');
+    if (body) body.style.zoom = _iframeZoom;
+  }
+}
+
 // ── Folder-Cache ─────────────────────────────────────────────
 const _folderCache = {};
 const FOLDER_CACHE_TTL = 3 * 60 * 1000; // 3 Minuten
@@ -1267,6 +1290,11 @@ async function openEmail(email, itemEl) {
   const empty = document.getElementById('detail-empty');
   const actions = document.getElementById('detail-actions');
 
+  // Zoom-State für neue E-Mail zurücksetzen
+  _activeIframe = null;
+  _activeIframeBaseHtml = null;
+  body.style.zoom = '';
+
   empty.style.display = 'none';
   header.style.display = 'block';
   actions.style.display = 'flex';
@@ -1385,11 +1413,16 @@ async function openEmail(email, itemEl) {
       htmlToRender = htmlToRender.replace(/src=["']cid:([^"']+)["']/gi, (_, cid) =>
         `src="${api.inlineImageUrl(full.id, cid)}"`
       );
-      iframe.srcdoc = htmlToRender;
+      _activeIframe = iframe;
+      _activeIframeBaseHtml = htmlToRender;
+      iframe.srcdoc = _withZoom(htmlToRender);
       body.innerHTML = '';
       body.style.display = 'flex';
       body.appendChild(iframe);
     } else {
+      _activeIframe = null;
+      _activeIframeBaseHtml = null;
+      body.style.zoom = _iframeZoom;
       body.innerHTML = text ? linkify(escHtml(text)) : '<em style="color:#999">Kein Inhalt</em>';
     }
 
@@ -2070,6 +2103,13 @@ document.getElementById('btn-sync').addEventListener('click', async () => {
   _invalidateFolderCache(state.activeAccount, state.activeFolder);
   await api.syncRun();
   await loadEmails(true);
+});
+
+// ── Zoom ──────────────────────────────────────────────────────
+document.getElementById('btn-zoom').addEventListener('click', () => {
+  const idx = ZOOM_LEVELS.indexOf(_iframeZoom);
+  _iframeZoom = ZOOM_LEVELS[(idx + 1) % ZOOM_LEVELS.length];
+  _applyZoom();
 });
 
 // ── KI-Event-Listener ────────────────────────────────────────
