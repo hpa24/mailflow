@@ -1354,10 +1354,11 @@ async function openEmail(email, itemEl) {
     } else {
       // Antworten-Button
       const replyTo = full.reply_to || full.from_email || '';
+      const replyToFromEmail = (full.reply_to && full.reply_to !== full.from_email) ? full.from_email : null;
       const replySubject = (full.subject || '').startsWith('Re:')
         ? full.subject : `Re: ${full.subject || ''}`;
       document.getElementById('btn-reply').onclick = () =>
-        openCompose({ to: replyTo, subject: replySubject, quote: text, quoteHtml: full.body_html || '', replyToEmailId: email.id });
+        openCompose({ to: replyTo, subject: replySubject, quote: text, quoteHtml: full.body_html || '', replyToEmailId: email.id, replyToFromEmail });
 
       // Weiterleiten-Button
       const fwdSubject = (full.subject || '').startsWith('Fwd:')
@@ -1378,7 +1379,7 @@ async function openEmail(email, itemEl) {
           try {
             // Schritt 1: Compose wie bei „Antworten" öffnen (mit Quote-Text)
             const opened = await openCompose({
-              to: replyTo, subject: replySubject, quote: text, quoteHtml: full.body_html || '', replyToEmailId: email.id,
+              to: replyTo, subject: replySubject, quote: text, quoteHtml: full.body_html || '', replyToEmailId: email.id, replyToFromEmail,
             });
             if (opened === false) return;
 
@@ -1724,7 +1725,7 @@ function showTab(tab) {
   document.getElementById('tab-compose').classList.toggle('active', isCompose);
 }
 
-async function openCompose({ to = '', subject = '', body = null, quote = '', quoteHtml = '', fromAccountId = null, existingDraftId = null, replyToEmailId = null } = {}) {
+async function openCompose({ to = '', subject = '', body = null, quote = '', quoteHtml = '', fromAccountId = null, existingDraftId = null, replyToEmailId = null, replyToFromEmail = null } = {}) {
   // Wenn bereits ein Entwurf mit Inhalt offen ist → nachfragen
   if (composeHasContent()) {
     const discard = await confirmDiscard(
@@ -1766,6 +1767,15 @@ async function openCompose({ to = '', subject = '', body = null, quote = '', quo
   _toField.setAddresses(to ? [to] : []);
   _ccField.clear();
   document.getElementById('ci-subject').value = subject;
+
+  const replytoWarn = document.getElementById('ci-replyto-warning');
+  if (replyToFromEmail) {
+    replytoWarn.textContent = `Hinweis: Diese E-Mail wird an die Reply-To-Adresse gesendet (${to}), nicht an die Absenderadresse (${replyToFromEmail}).`;
+    replytoWarn.style.display = 'block';
+  } else {
+    replytoWarn.textContent = '';
+    replytoWarn.style.display = 'none';
+  }
 
   // Body: explizit übergeben (bei Draft-Bearbeitung) oder Signatur einsetzen (neue E-Mail)
   const account = state.accounts.find(a => a.id === state.activeAccount);
@@ -1889,6 +1899,9 @@ async function closeCompose() {
   }
 
   _replyToEmailId = null;
+  const _w = document.getElementById('ci-replyto-warning');
+  _w.textContent = '';
+  _w.style.display = 'none';
   document.getElementById('btn-compose-cancel').textContent = 'Abbrechen';
   document.getElementById('detail-tabs').style.display = 'none';
   showTab('email');

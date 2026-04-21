@@ -736,6 +736,14 @@ background: var(--bg4);
   color: var(--text2);
   margin-left: 4px;
 }
+#ci-replyto-warning {
+  font-size: 12px;
+  color: #7a5800;
+  background: #fff8e1;
+  border-left: 3px solid #f0b429;
+  padding: 6px 10px;
+  flex-shrink: 0;
+}
 
 .compose-inner-container, .view-inner-container {overflow-y:auto;display:flex;flex-direction:column;flex:1;}
 
