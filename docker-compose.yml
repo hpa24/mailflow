@@ -33,7 +33,10 @@ services:
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    image: nginx:alpine
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./frontend/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
     environment:
       - MAILFLOW_API_KEY=${MAILFLOW_API_KEY}
     ports:
