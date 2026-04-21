@@ -33,11 +33,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: nginx:alpine
-    volumes:
-      - ./frontend:/usr/share/nginx/html
-      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./frontend/docker-entrypoint.sh:/docker-entrypoint.d/40-generate-config-js.sh
+    build: ./frontend
     environment:
       - MAILFLOW_API_KEY=${MAILFLOW_API_KEY}
     ports:
