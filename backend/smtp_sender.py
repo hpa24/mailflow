@@ -14,6 +14,15 @@ from imap_utils import find_imap_folder
 logger = logging.getLogger(__name__)
 
 
+import re as _re
+
+
+def _extract_html_body(html: str) -> str:
+    """Aus einem vollständigen HTML-Dokument nur den <body>-Inhalt extrahieren."""
+    m = _re.search(r'<body[^>]*>([\s\S]*?)</body>', html, _re.IGNORECASE)
+    return m.group(1) if m else html
+
+
 async def send_email(
     smtp_server_id: str,
     from_account_id: str,
@@ -22,6 +31,7 @@ async def send_email(
     body: str,
     body_html: str = "",
     quote: str = "",
+    quote_html: str = "",
     cc: str = "",
     attachments: list[dict] | None = None,
 ) -> str:
@@ -46,9 +56,16 @@ async def send_email(
         full_body += "\n\n" + quote
 
     if body_html:
-        # HTML-Zitat anhängen
         full_html = body_html
-        if quote:
+        if quote_html:
+            # HTML-Zitat direkt einbinden (bereits HTML, kein Escaping nötig)
+            q_content = _extract_html_body(quote_html)
+            full_html += (
+                '<br><br><blockquote style="border-left:3px solid #ccc;'
+                'margin-left:0;padding-left:12px;color:#555">'
+                + q_content + "</blockquote>"
+            )
+        elif quote:
             q_escaped = (quote
                          .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                          .replace("\n", "<br>"))

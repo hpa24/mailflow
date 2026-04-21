@@ -553,6 +553,7 @@ async def send_email_endpoint(data: dict):
     body = data.get("body", "")
     body_html = data.get("body_html", "")
     quote = data.get("quote", "")
+    quote_html = data.get("quote_html", "")
     from_account = data.get("from_account", "")
     smtp_server = data.get("smtp_server", "")
 
@@ -577,6 +578,7 @@ async def send_email_endpoint(data: dict):
             body=body,
             body_html=body_html,
             quote=quote,
+            quote_html=quote_html,
             attachments=attachments or None,
         )
     except Exception as exc:

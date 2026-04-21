@@ -1351,13 +1351,13 @@ async function openEmail(email, itemEl) {
       const replySubject = (full.subject || '').startsWith('Re:')
         ? full.subject : `Re: ${full.subject || ''}`;
       document.getElementById('btn-reply').onclick = () =>
-        openCompose({ to: replyTo, subject: replySubject, quote: text, replyToEmailId: email.id });
+        openCompose({ to: replyTo, subject: replySubject, quote: text, quoteHtml: full.body_html || '', replyToEmailId: email.id });
 
       // Weiterleiten-Button
       const fwdSubject = (full.subject || '').startsWith('Fwd:')
         ? full.subject : `Fwd: ${full.subject || ''}`;
       document.getElementById('btn-forward').onclick = () =>
-        openCompose({ to: '', subject: fwdSubject, quote: text });
+        openCompose({ to: '', subject: fwdSubject, quote: text, quoteHtml: full.body_html || '' });
 
       // Read-Toggle-Button aktualisieren
       updateReadToggle(email, itemEl);
@@ -1372,7 +1372,7 @@ async function openEmail(email, itemEl) {
           try {
             // Schritt 1: Compose wie bei „Antworten" öffnen (mit Quote-Text)
             const opened = await openCompose({
-              to: replyTo, subject: replySubject, quote: text, replyToEmailId: email.id,
+              to: replyTo, subject: replySubject, quote: text, quoteHtml: full.body_html || '', replyToEmailId: email.id,
             });
             if (opened === false) return;
 
@@ -1718,7 +1718,7 @@ function showTab(tab) {
   document.getElementById('tab-compose').classList.toggle('active', isCompose);
 }
 
-async function openCompose({ to = '', subject = '', body = null, quote = '', fromAccountId = null, existingDraftId = null, replyToEmailId = null } = {}) {
+async function openCompose({ to = '', subject = '', body = null, quote = '', quoteHtml = '', fromAccountId = null, existingDraftId = null, replyToEmailId = null } = {}) {
   // Wenn bereits ein Entwurf mit Inhalt offen ist → nachfragen
   if (composeHasContent()) {
     const discard = await confirmDiscard(
@@ -1776,10 +1776,22 @@ async function openCompose({ to = '', subject = '', body = null, quote = '', fro
   }
 
   const quoteEl = document.getElementById('ci-quote');
-  if (quote) {
+  quoteEl.classList.remove('has-html');
+  delete quoteEl.dataset.quoteHtml;
+  if (quoteHtml) {
+    // HTML-Dokument auf Body-Inhalt reduzieren, Scripts entfernen
+    const _bodyMatch = quoteHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    const _htmlContent = (_bodyMatch ? _bodyMatch[1] : quoteHtml)
+      .replace(/<script\b[\s\S]*?<\/script>/gi, '');
+    quoteEl.innerHTML = _htmlContent;
+    quoteEl.dataset.quoteHtml = quoteHtml;
+    quoteEl.classList.add('has-html');
+    quoteEl.style.display = 'block';
+  } else if (quote) {
     quoteEl.textContent = quote;
     quoteEl.style.display = 'block';
   } else {
+    quoteEl.innerHTML = '';
     quoteEl.style.display = 'none';
   }
 
@@ -1888,7 +1900,9 @@ async function saveDraft() {
   const ciBody      = document.getElementById('ci-body');
   const body        = ciBody.innerText || '';
   const body_html   = ciBody.innerHTML || '';
-  const quote       = document.getElementById('ci-quote').textContent;
+  const _quoteEl    = document.getElementById('ci-quote');
+  const quote       = _quoteEl.textContent;
+  const quote_html  = _quoteEl.dataset.quoteHtml || '';
   const from_account = document.getElementById('ci-from-account').value;
 
   if (!to && !subject && !body.trim()) return;
@@ -1898,7 +1912,7 @@ async function saveDraft() {
   statusEl.textContent = 'Speichert…';
 
   try {
-    const result = await api.saveDraft({ id: _draftId, to, cc, subject, body, body_html, quote, from_account });
+    const result = await api.saveDraft({ id: _draftId, to, cc, subject, body, body_html, quote, quote_html, from_account });
     if (result && result.id) _draftId = result.id;
     statusEl.textContent = 'Entwurf gespeichert';
     setTimeout(() => { statusEl.textContent = ''; }, 2000);
@@ -1920,7 +1934,9 @@ document.getElementById('btn-send-inline').addEventListener('click', async () =>
   const ciBodyEl   = document.getElementById('ci-body');
   const body       = (ciBodyEl.innerText || '').trim();
   const body_html  = ciBodyEl.innerHTML || '';
-  const quote      = document.getElementById('ci-quote').textContent;
+  const _qEl       = document.getElementById('ci-quote');
+  const quote      = _qEl.textContent;
+  const quote_html = _qEl.dataset.quoteHtml || '';
   const fromAccId  = document.getElementById('ci-from-account').value;
   const smtpId     = document.getElementById('ci-smtp-server').value;
   const statusEl   = document.getElementById('draft-status');
@@ -1937,7 +1953,7 @@ document.getElementById('btn-send-inline').addEventListener('click', async () =>
   try {
     const attachment_ids = _composeAttachments.map(a => a.id);
     const sentReplyToId = _replyToEmailId;
-    await api.sendEmail({ to, cc, subject, body, body_html, quote, from_account: fromAccId, smtp_server: smtpId, attachment_ids, in_reply_to_email_id: sentReplyToId });
+    await api.sendEmail({ to, cc, subject, body, body_html, quote, quote_html, from_account: fromAccId, smtp_server: smtpId, attachment_ids, in_reply_to_email_id: sentReplyToId });
     // Zugehörigen Entwurf löschen (falls E-Mail aus Drafts-Ordner geöffnet wurde)
     if (_draftId) {
       try { await api.deleteEmail(_draftId); } catch (_) {}
