@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import quote as _url_quote
 
 import httpx
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Request, UploadFile, File
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
