@@ -309,6 +309,7 @@ function renderKiRefineBar() {
 let _refreshing = false;
 async function silentRefresh() {
   if (_refreshing) return;
+  if (state.searchQuery) { loadUnreadCounts(); return; }
   _refreshing = true;
   try {
     const params = { page: 1, limit: PAGE_SIZE };
@@ -1814,6 +1815,18 @@ async function openCompose({ to = '', subject = '', body = null, quote = '', fro
 
   // KI-Refinement-Bar rendern (nur sichtbar wenn KI-Modus aktiv)
   renderKiRefineBar();
+
+  // Tab im Subject-Feld → direkt ins Body-Feld springen
+  const subjectEl = document.getElementById('ci-subject');
+  const subjectTabHandler = (e) => {
+    if (e.key === 'Tab' && !e.shiftKey) {
+      e.preventDefault();
+      document.getElementById('ci-body').focus();
+    }
+  };
+  subjectEl.removeEventListener('keydown', subjectEl._tabHandler);
+  subjectEl._tabHandler = subjectTabHandler;
+  subjectEl.addEventListener('keydown', subjectTabHandler);
 
   // Auto-Save beim Tippen (alte Listener zuerst entfernen, damit keine Duplikate entstehen)
   ['ci-to-input', 'ci-cc-input', 'ci-subject'].forEach(id => {
