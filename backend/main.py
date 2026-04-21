@@ -35,6 +35,9 @@ logger = logging.getLogger(__name__)
 # Temporärer Speicher für hochgeladene Anhänge (in-memory, max. 25 MB pro Datei)
 _temp_uploads: dict[str, dict] = {}  # {temp_id: {filename, content_type, data: bytes}}
 
+# Hintergrund-Sendejobs: {job_id: {status, to, subject}}
+_send_jobs: dict[str, dict] = {}
+
 
 def _pb_safe(q: str) -> str:
     """Entfernt Sonderzeichen für PocketBase-Filter."""
@@ -567,70 +570,72 @@ async def get_emails_by_sender(account: str | None = None, folder: str | None = 
     }
 
 
-@app.post("/emails/send")
-async def send_email_endpoint(data: dict):
-    """Sendet eine E-Mail via SMTP und speichert sie im Sent-Ordner."""
-    logger.info("POST /emails/send empfangen: to=%s subject=%s smtp=%s account=%s",
-                data.get("to"), data.get("subject"), data.get("smtp_server"), data.get("from_account"))
-    to = data.get("to", "").strip()
-    cc = data.get("cc", "").strip()
-    subject = data.get("subject", "").strip()
-    body = data.get("body", "")
-    body_html = data.get("body_html", "")
-    quote = data.get("quote", "")
-    quote_html = data.get("quote_html", "")
-    from_account = data.get("from_account", "")
-    smtp_server = data.get("smtp_server", "")
+def _sse_notify_all(event: dict) -> None:
+    """Schickt ein Event an alle verbundenen SSE-Clients."""
+    for q in list(get_sse_queues()):
+        try:
+            q.put_nowait(event)
+        except asyncio.QueueFull:
+            pass
 
-    if not to:
-        raise HTTPException(status_code=400, detail="Empfänger (to) fehlt")
-    if not from_account:
-        raise HTTPException(status_code=400, detail="Absender-Account fehlt")
-    if not smtp_server:
-        raise HTTPException(status_code=400, detail="SMTP-Server fehlt")
 
-    # Temporäre Uploads zu Anhängen zusammenstellen
-    attachment_ids = data.get("attachment_ids") or []
-    attachments = [_temp_uploads[aid] for aid in attachment_ids if aid in _temp_uploads]
+async def _do_send_job(job_id: str, data: dict, attachments: list) -> None:
+    """Führt den SMTP-Versand im Hintergrund aus und meldet das Ergebnis via SSE."""
+    to      = data["to"]
+    subject = data["subject"]
+    cc      = data.get("cc", "")
+    from_account = data["from_account"]
+    smtp_server  = data["smtp_server"]
 
     try:
-        message_id = await smtp_send_email(
+        await smtp_send_email(
             smtp_server_id=smtp_server,
             from_account_id=from_account,
             to=to,
             cc=cc,
             subject=subject,
-            body=body,
-            body_html=body_html,
-            quote=quote,
-            quote_html=quote_html,
+            body=data.get("body", ""),
+            body_html=data.get("body_html", ""),
+            quote=data.get("quote", ""),
+            quote_html=data.get("quote_html", ""),
             attachments=attachments or None,
         )
     except Exception as exc:
-        logger.error("SMTP-Versand fehlgeschlagen: %s", exc)
-        raise HTTPException(status_code=502, detail=f"SMTP-Fehler: {exc}")
+        logger.error("SMTP-Versand fehlgeschlagen (job=%s): %s", job_id, exc)
+        _send_jobs[job_id]["status"] = "error"
+        _sse_notify_all({"type": "send-result", "job_id": job_id,
+                         "success": False, "to": to, "subject": subject,
+                         "error": str(exc)})
+        return
 
-    # Temporäre Uploads nach erfolgreichem Versand bereinigen
-    for aid in attachment_ids:
+    # Temporäre Uploads bereinigen
+    for aid in data.get("attachment_ids") or []:
         _temp_uploads.pop(aid, None)
 
-    # Empfänger in Contacts-Collection anlegen oder aktualisieren
-    # Empfänger-Adresse aus "Name <email>" oder "email" extrahieren
+    # Entwurf löschen falls vorhanden
+    draft_id = data.get("draft_id")
+    if draft_id:
+        try:
+            await pb_client.pb_delete(f"/api/collections/emails/records/{draft_id}")
+        except Exception:
+            pass
+
+    # Empfänger in Contacts upserten
     _m = re.search(r'[\w.+-]+@[\w.-]+\.\w+', to)
     if _m:
         _name_m = re.match(r'^(.+?)\s*<', to.strip())
         _to_name = _name_m.group(1).strip().strip('"') if _name_m else ""
         from datetime import datetime, timezone as _tz
-        asyncio.create_task(upsert_contact(_m.group(0).lower(), _to_name, datetime.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")))
+        asyncio.create_task(upsert_contact(_m.group(0).lower(), _to_name,
+                                           datetime.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")))
 
-    # Ursprungs-E-Mail als beantwortet markieren (PocketBase + IMAP)
+    # Ursprungs-E-Mail als beantwortet markieren
     in_reply_to_email_id = data.get("in_reply_to_email_id")
     if in_reply_to_email_id:
         try:
             original = await pb_client.pb_get(
                 f"/api/collections/emails/records/{in_reply_to_email_id}"
             )
-            # Sicherstellen, dass die E-Mail zum selben Account gehört
             if original.get("account") == from_account:
                 original = await pb_client.pb_patch(
                     f"/api/collections/emails/records/{in_reply_to_email_id}",
@@ -641,9 +646,45 @@ async def send_email_endpoint(data: dict):
                 logger.warning("IDOR-Versuch: in_reply_to_email_id %s gehört nicht zu Account %s",
                                in_reply_to_email_id, from_account)
         except Exception as exc:
-            logger.warning("is_answered konnte nicht gesetzt werden für %s: %s", in_reply_to_email_id, exc)
+            logger.warning("is_answered konnte nicht gesetzt werden für %s: %s",
+                           in_reply_to_email_id, exc)
 
-    return {"sent": True, "message_id": message_id}
+    _send_jobs[job_id]["status"] = "done"
+    logger.info("Sendejob %s abgeschlossen: to=%s subject=%s", job_id, to, subject)
+    _sse_notify_all({"type": "send-result", "job_id": job_id,
+                     "success": True, "to": to, "subject": subject})
+
+
+@app.post("/emails/send")
+async def send_email_endpoint(data: dict):
+    """Startet den E-Mail-Versand im Hintergrund und gibt sofort eine Job-ID zurück."""
+    to           = (data.get("to") or "").strip()
+    from_account = (data.get("from_account") or "").strip()
+    smtp_server  = (data.get("smtp_server") or "").strip()
+    subject      = (data.get("subject") or "").strip()
+
+    if not to:
+        raise HTTPException(status_code=400, detail="Empfänger (to) fehlt")
+    if not from_account:
+        raise HTTPException(status_code=400, detail="Absender-Account fehlt")
+    if not smtp_server:
+        raise HTTPException(status_code=400, detail="SMTP-Server fehlt")
+
+    data["to"] = to
+    data["from_account"] = from_account
+    data["smtp_server"]  = smtp_server
+    data["subject"]      = subject
+
+    attachment_ids = data.get("attachment_ids") or []
+    attachments = [_temp_uploads[aid] for aid in attachment_ids if aid in _temp_uploads]
+
+    job_id = str(_uuid_mod.uuid4())
+    _send_jobs[job_id] = {"status": "sending", "to": to, "subject": subject}
+    logger.info("Sendejob %s gestartet: to=%s subject=%s", job_id, to, subject)
+
+    asyncio.create_task(_do_send_job(job_id, data, attachments))
+
+    return {"job_id": job_id, "status": "sending"}
 
 
 

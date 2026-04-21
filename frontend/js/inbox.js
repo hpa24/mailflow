@@ -220,6 +220,8 @@ function startEventSource() {
         const data = JSON.parse(e.data);
         if (data.type === 'new-mail') {
           await silentRefresh();
+        } else if (data.type === 'send-result') {
+          _handleSendResult(data);
         }
       } catch (_) {}
     };
@@ -232,6 +234,58 @@ function startEventSource() {
 
   connect();
   window.addEventListener('beforeunload', () => { if (es) es.close(); }, { once: true });
+}
+
+// ── Versand-Benachrichtigungen ───────────────────────────────
+
+const _sendNotifContainer = document.getElementById('send-notifications');
+
+function _addSendNotif(jobId, to, subject) {
+  const shortTo      = to.length > 35 ? to.slice(0, 35) + '…' : to;
+  const shortSubject = subject.length > 40 ? subject.slice(0, 40) + '…' : subject;
+
+  const el = document.createElement('div');
+  el.className = 'send-notif pending';
+  el.dataset.jobId = jobId;
+  el.innerHTML = `
+    <span class="send-notif-icon">⏳</span>
+    <span class="send-notif-text">Wird gesendet an <strong>${_escHtml(shortTo)}</strong> — ${_escHtml(shortSubject)}</span>
+  `;
+  _sendNotifContainer.appendChild(el);
+}
+
+function _handleSendResult(data) {
+  const el = _sendNotifContainer.querySelector(`[data-job-id="${data.job_id}"]`);
+  if (!el) return;
+
+  const shortTo      = (data.to      || '').length > 35 ? data.to.slice(0, 35) + '…' : (data.to || '');
+  const shortSubject = (data.subject || '').length > 40 ? data.subject.slice(0, 40) + '…' : (data.subject || '');
+
+  if (data.success) {
+    el.className = 'send-notif success';
+    el.innerHTML = `
+      <span class="send-notif-icon">✓</span>
+      <span class="send-notif-text">Gesendet an <strong>${_escHtml(shortTo)}</strong> — ${_escHtml(shortSubject)}</span>
+    `;
+    setTimeout(() => el.remove(), 4000);
+  } else {
+    const errMsg = (data.error || 'Unbekannter Fehler').slice(0, 80);
+    el.className = 'send-notif error';
+    const dismiss = document.createElement('button');
+    dismiss.className = 'send-notif-dismiss';
+    dismiss.title = 'Schließen';
+    dismiss.textContent = '×';
+    dismiss.onclick = () => el.remove();
+    el.innerHTML = `
+      <span class="send-notif-icon">✗</span>
+      <span class="send-notif-text">Fehler an <strong>${_escHtml(shortTo)}</strong> — ${_escHtml(shortSubject)}: ${_escHtml(errMsg)}</span>
+    `;
+    el.appendChild(dismiss);
+  }
+}
+
+function _escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ── KI-Modus ────────────────────────────────────────────────
@@ -1970,34 +2024,40 @@ document.getElementById('btn-send-inline').addEventListener('click', async () =>
     statusEl.style.color = 'var(--danger)';
     return;
   }
-  statusEl.style.color = 'var(--text2)';
-  document.getElementById('btn-send-inline').disabled = true;
-  statusEl.textContent = 'Wird gesendet…';
+
+  // Beantwortet-Symbol sofort im UI aktualisieren (optimistic)
+  const sentReplyToId = _replyToEmailId;
+  if (sentReplyToId) {
+    const local = state.emails.find(e => e.id === sentReplyToId);
+    if (local) local.is_answered = true;
+    const itemEl = document.querySelector(`.email-item[data-id="${sentReplyToId}"]`);
+    itemEl?.querySelector('.flag-answered')?.classList.add('active');
+  }
+
+  const attachment_ids   = _composeAttachments.map(a => a.id);
+  const draftIdToDelete  = _draftId;
+
+  // Compose sofort schließen — Versand läuft im Hintergrund weiter
+  _composeAttachments = [];
+  _editingDraftItemEl = null;
+  closeCompose();
 
   try {
-    const attachment_ids = _composeAttachments.map(a => a.id);
-    const sentReplyToId = _replyToEmailId;
-    await api.sendEmail({ to, cc, subject, body, body_html, quote, quote_html, from_account: fromAccId, smtp_server: smtpId, attachment_ids, in_reply_to_email_id: sentReplyToId });
-    // Zugehörigen Entwurf löschen (falls E-Mail aus Drafts-Ordner geöffnet wurde)
-    if (_draftId) {
-      try { await api.deleteEmail(_draftId); } catch (_) {}
+    const res = await api.sendEmail({
+      to, cc, subject, body, body_html, quote, quote_html,
+      from_account: fromAccId, smtp_server: smtpId,
+      attachment_ids, in_reply_to_email_id: sentReplyToId,
+      draft_id: draftIdToDelete,
+    });
+    // Notification-Zeile anlegen (SSE-Event aktualisiert sie später)
+    if (res && res.job_id) {
+      _addSendNotif(res.job_id, to, subject);
     }
-    // Beantwortet-Symbol sofort im UI aktualisieren
-    if (sentReplyToId) {
-      const local = state.emails.find(e => e.id === sentReplyToId);
-      if (local) local.is_answered = true;
-      const el = document.querySelector(`.email-item[data-id="${sentReplyToId}"]`);
-      el?.querySelector('.flag-answered')?.classList.add('active');
-    }
-    _composeAttachments = [];
-    _editingDraftItemEl = null;
-    statusEl.style.color = 'var(--success)';
-    statusEl.textContent = 'Gesendet ✓';
-    setTimeout(closeCompose, 1000);
   } catch (e) {
-    statusEl.textContent = 'Senden fehlgeschlagen: ' + e.message;
-    statusEl.style.color = 'var(--danger)';
-    document.getElementById('btn-send-inline').disabled = false;
+    // Validierungsfehler vom Backend (400/502) — sofort als Fehler anzeigen
+    const jobId = 'err-' + Date.now();
+    _addSendNotif(jobId, to, subject);
+    _handleSendResult({ job_id: jobId, success: false, to, subject, error: e.message });
   }
 });
 // ────────────────────────────────────────────────────────────
