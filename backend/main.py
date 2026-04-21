@@ -133,7 +133,7 @@ app.add_middleware(
 async def _api_key_middleware(request: Request, call_next):
     """Erzwingt API-Key-Auth auf allen Routen außer /health.
     Wenn API_KEY in .env leer ist, ist Auth deaktiviert (lokale Entwicklung)."""
-    if request.url.path == "/health" or request.method == "OPTIONS":
+    if request.url.path in ("/health", "/config.js") or request.method == "OPTIONS":
         return await call_next(request)
     expected = settings.API_KEY
     if not expected:
@@ -166,6 +166,15 @@ async def _global_exception_handler(request: Request, exc: Exception):
 @app.get("/health", response_model=HealthResponse)
 async def health():
     return HealthResponse(status="ok")
+
+
+@app.get("/config.js", include_in_schema=False)
+async def frontend_config():
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(
+        f"window.MAILFLOW_API_KEY='{settings.API_KEY}';",
+        media_type="application/javascript",
+    )
 
 
 @app.post("/sync/run")

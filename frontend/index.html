@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mailflow</title>
   <link rel="stylesheet" href="css/main.css">
-  <!-- config.js setzt window.MAILFLOW_API_KEY — gitignored, manuell auf dem Server anlegen -->
-  <script src="js/config.js" onerror="void 0"></script>
+  <!-- config.js wird vom Backend geliefert (API-Key kommt aus Backend-Env-Variable) -->
+  <script src="https://mailflow-api.barres.de/config.js" onerror="void 0"></script>
   <script src="js/auth.js"></script>
   <script>auth.requireAuth();</script>
 </head>
