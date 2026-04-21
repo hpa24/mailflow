@@ -880,6 +880,59 @@ def _imap_fetch_attachment(acc: dict, folder: str, imap_uid: int, part_index: in
     return payload
 
 
+def _imap_fetch_inline_cid(acc: dict, folder: str, imap_uid: int, cid: str) -> tuple[bytes, str]:
+    """Blockierende IMAP-Verbindung zum Abruf eines Inline-Bildes per Content-ID."""
+    from imapclient import IMAPClient
+    from mime_parser import get_inline_part_by_cid
+
+    host = acc.get("imap_host")
+    port = int(acc.get("imap_port") or 993)
+    user = acc.get("imap_user")
+    password = acc.get("imap_pass")
+
+    with IMAPClient(host, port=port, ssl=True) as srv:
+        srv.login(user, password)
+        srv.select_folder(folder, readonly=True)
+        data = srv.fetch([imap_uid], [b"BODY[]"])
+        raw = data.get(imap_uid, {}).get(b"BODY[]") or b""
+
+    return get_inline_part_by_cid(raw, cid)
+
+
+@app.get("/emails/{email_id}/inline")
+async def get_inline_image(email_id: str, cid: str):
+    """Gibt ein Inline-Bild (cid:-Referenz) aus einer E-Mail zurück."""
+    email_rec = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
+    account_id = email_rec.get("account")
+    folder = email_rec.get("folder", "INBOX")
+    imap_uid = email_rec.get("imap_uid")
+
+    if not imap_uid:
+        raise HTTPException(status_code=404, detail="E-Mail hat keine IMAP-UID")
+
+    acc = await _get_imap_account(account_id)
+    if not acc:
+        raise HTTPException(status_code=404, detail="Account nicht gefunden")
+
+    loop = asyncio.get_running_loop()
+    try:
+        payload, mime_type = await loop.run_in_executor(
+            None, _imap_fetch_inline_cid, acc, folder, int(imap_uid), cid
+        )
+    except Exception as exc:
+        logger.error("Inline-Bild-Download fehlgeschlagen: %s", exc)
+        raise HTTPException(status_code=502, detail=f"IMAP-Fehler: {exc}")
+
+    if not payload:
+        raise HTTPException(status_code=404, detail="Inline-Bild nicht gefunden")
+
+    return Response(
+        content=payload,
+        media_type=mime_type,
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
 @app.post("/attachments/upload")
 async def upload_attachment(file: UploadFile = File(...)):
     """Lädt eine Datei temporär in den Arbeitsspeicher (max. 25 MB)."""

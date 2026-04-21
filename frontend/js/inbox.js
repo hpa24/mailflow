@@ -1281,7 +1281,7 @@ async function openEmail(email, itemEl) {
         if(document.readyState==='complete'){report();}else{window.addEventListener('load',report);}
         new MutationObserver(report).observe(document.body||document.documentElement,{childList:true,subtree:true,attributes:true});
       }());<\/script>`;
-      const injectCss = `<style>img[src^="cid:"]{display:none}img{max-width:100%!important;height:auto!important}</style>`;
+      const injectCss = `<style>img{max-width:100%!important;height:auto!important}</style>`;
       const injectBase = `<base target="_blank">`;
 
       let htmlToRender;
@@ -1327,6 +1327,10 @@ async function openEmail(email, itemEl) {
       });
       cleanup.observe(document.body, { childList: true, subtree: true });
 
+      // cid:-Referenzen durch Backend-Proxy ersetzen
+      htmlToRender = htmlToRender.replace(/src=["']cid:([^"']+)["']/gi, (_, cid) =>
+        `src="${api.inlineImageUrl(full.id, cid)}"`
+      );
       iframe.srcdoc = htmlToRender;
       body.innerHTML = '';
       body.style.display = 'flex';

@@ -95,7 +95,8 @@ window.api = {
   },
 
   getAttachments(emailId)        { return apiGet(`/emails/${emailId}/attachments`); },
-  attachmentDownloadUrl(id)      { return `${API}/attachments/${id}/download`; },
+  attachmentDownloadUrl(id)      { return `${API}/attachments/${id}/download?key=${API_KEY}`; },
+  inlineImageUrl(emailId, cid)   { return `${API}/emails/${emailId}/inline?cid=${encodeURIComponent(cid)}&key=${API_KEY}`; },
   uploadAttachment(formData)     { return apiFetch('/attachments/upload', { method: 'POST', body: formData }); },
   deleteUpload(tempId)           { return apiFetch(`/attachments/upload/${tempId}`, { method: 'DELETE' }); },
 

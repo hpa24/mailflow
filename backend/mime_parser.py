@@ -162,6 +162,24 @@ def get_attachment_payload(raw_bytes: bytes, part_index: int) -> tuple[bytes, st
     return b"", "anhang", "application/octet-stream"
 
 
+def get_inline_part_by_cid(raw_bytes: bytes, content_id: str) -> tuple[bytes, str]:
+    """Gibt (payload_bytes, mime_type) für ein Inline-Part mit der angegebenen Content-ID zurück."""
+    try:
+        msg = _email_stdlib.message_from_bytes(raw_bytes)
+    except Exception:
+        return b"", "application/octet-stream"
+    cid_clean = content_id.strip("<>")
+    for part in msg.walk():
+        if part.get_content_maintype() == "multipart":
+            continue
+        part_cid = (part.get("Content-ID") or "").strip("<>")
+        if part_cid == cid_clean:
+            payload = part.get_payload(decode=True) or b""
+            mime_type = part.get_content_type() or "application/octet-stream"
+            return payload, mime_type
+    return b"", "application/octet-stream"
+
+
 def find_plain_text_part(bodystructure: dict) -> str:
     """
     Rekursiv die MIME-Teil-ID des ersten text/plain-Teils finden.
