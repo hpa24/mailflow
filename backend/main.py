@@ -1139,7 +1139,10 @@ async def move_to_spam(email_id: str):
     patch = {"folder": new_folder or "Spam"}
     if new_uid:
         patch["imap_uid"] = new_uid
-    await pb_client.pb_patch(f"/api/collections/emails/records/{email_id}", patch)
+    try:
+        await pb_client.pb_patch(f"/api/collections/emails/records/{email_id}", patch)
+    except Exception as e:
+        logger.warning(f"move_to_spam: pb_patch fehlgeschlagen (wahrscheinlich Race mit imap_sync): {e}")
     try:
         await _update_folder_unread_count(email["account"], source_folder)
     except Exception as e:
@@ -1222,7 +1225,12 @@ async def move_email(email_id: str, data: dict):
             await _imap_set_read({"account": email["account"], "imap_uid": new_uid, "folder": target_folder}, True)
         except Exception as ex:
             logger.warning("move_email: IMAP mark-read fehlgeschlagen: %s", ex)
-    await pb_client.pb_patch(f"/api/collections/emails/records/{email_id}", patch)
+    try:
+        await pb_client.pb_patch(f"/api/collections/emails/records/{email_id}", patch)
+    except Exception as e:
+        # Race condition: imap_sync hat den Record bereits gelöscht (UID weg aus Quellordner)
+        # IMAP-Move ist trotzdem erfolgt — nächster Sync legt Record im Zielordner neu an
+        logger.warning("move_email: pb_patch fehlgeschlagen (wahrscheinlich Race mit imap_sync): %s", e)
     try:
         await asyncio.gather(
             _update_folder_unread_count(email["account"], source_folder),
