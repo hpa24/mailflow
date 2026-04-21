@@ -249,6 +249,12 @@ function toggleKiMode() {
   // Suggest-Button zurücksetzen wenn KI-Modus verlassen wird
   if (!state.kiModeActive) {
     document.getElementById('btn-ki-suggest').style.display = 'none';
+    // Aktiven Kategorie-Filter zurücksetzen
+    if (state.kiCategoryFilter) {
+      state.kiCategoryFilter = '';
+      document.querySelectorAll('.ki-filter-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.filter === ''));
+    }
   }
 
   // Liste neu rendern, damit Badges erscheinen/verschwinden
@@ -2311,10 +2317,10 @@ function makeAddressField(fieldId, inputId, suggestionsId, defaultPlaceholder) {
   // Autocomplete
   function renderSuggestions(contacts) {
     _acItems = contacts;
-    _acActive = -1;
+    _acActive = 0;
     if (!contacts.length) { box.classList.remove('open'); return; }
     box.innerHTML = contacts.map((c, i) =>
-      `<div class="contact-suggestion" data-i="${i}">
+      `<div class="contact-suggestion${i === 0 ? ' active' : ''}" data-i="${i}">
         ${c.name ? `<span class="cs-name">${escHtml(c.name)}</span>` : ''}
         <span class="cs-email">${escHtml(c.email)}</span>
       </div>`

@@ -794,6 +794,15 @@ background: var(--bg4);
   flex: 1;
   height: 24px;
 }
+.ci-addr-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.ci-addr-wrap .address-suggestions {
+  left: 0;
+}
+
 .address-suggestions {
   display: none;
   position: absolute;

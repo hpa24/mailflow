@@ -145,19 +145,21 @@
               <span class="compose-lbl-mid">SMTP</span>
               <select id="ci-smtp-server" class="compose-select"></select>
             </div>
-            <div class="compose-field-row" style="position:relative">
+            <div class="compose-field-row">
               <span class="compose-lbl">An</span>
-              <div class="address-field" id="ci-to-field">
-                <input type="text" class="address-chips-input" id="ci-to-input" placeholder="empfaenger@beispiel.de" autocomplete="off">
+              <div class="ci-addr-wrap">
+                <div class="address-field" id="ci-to-field">
+                  <input type="text" class="address-chips-input" id="ci-to-input" placeholder="empfaenger@beispiel.de" autocomplete="off">
+                </div>
+                <div class="address-suggestions" id="ci-to-suggestions"></div>
               </div>
-              <div class="address-suggestions" id="ci-to-suggestions"></div>
-            </div>
-            <div class="compose-field-row" style="position:relative">
-              <span class="compose-lbl">CC</span>
-              <div class="address-field" id="ci-cc-field">
-                <input type="text" class="address-chips-input" id="ci-cc-input" placeholder="" autocomplete="off">
+              <span class="compose-lbl-mid">CC</span>
+              <div class="ci-addr-wrap">
+                <div class="address-field" id="ci-cc-field">
+                  <input type="text" class="address-chips-input" id="ci-cc-input" placeholder="" autocomplete="off">
+                </div>
+                <div class="address-suggestions" id="ci-cc-suggestions"></div>
               </div>
-              <div class="address-suggestions" id="ci-cc-suggestions"></div>
             </div>
             <div class="compose-field-row">
               <span class="compose-lbl">Betreff</span>
