@@ -34,7 +34,7 @@ services:
 
   frontend:
     image: nginx:alpine
-    entrypoint: ["/start.sh"]
+    entrypoint: ["/bin/sh", "/start.sh"]
     volumes:
       - ./frontend:/usr/share/nginx/html
       - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
