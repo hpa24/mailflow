@@ -32,3 +32,13 @@ Vier Funktionen in `backend/main.py` blockierten den asyncio-Event-Loop direkt w
 | `_imap_set_read` | — |
 
 Lösung: synchrone IMAP-Logik in je eine `_*_sync`-Hilfsfunktion ausgelagert, async-Wrapper ruft sie per `await loop.run_in_executor(None, _*_sync, ...)` auf. Entspricht dem bereits etablierten Muster aus `imap_sync.py` und Draft-Append.
+
+### Reply-To-Warnung im Compose
+
+Wenn eine eingehende E-Mail einen `Reply-To`-Header hat, der sich von der `From`-Adresse unterscheidet (z. B. interne Routing-Adressen wie `Gerhard@smtp2.mailbox.org`), wird beim Öffnen der Antwort ein gelber Hinweisbalken eingeblendet:
+
+> „Hinweis: Diese E-Mail wird an die Reply-To-Adresse gesendet (X), nicht an die Absenderadresse (Y)."
+
+- **Datei:** `frontend/js/inbox.js` — `openCompose()` bekommt Parameter `replyToFromEmail`; Reply-Handler berechnet `replyToFromEmail = (full.reply_to && full.reply_to !== full.from_email) ? full.from_email : null`
+- **HTML:** `<div id="ci-replyto-warning">` in `index.html` nach den Compose-Feldern
+- **CSS:** `#ci-replyto-warning` in `main.css` (gelb, Border-left)
