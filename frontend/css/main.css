@@ -11,6 +11,7 @@
   --bg5: #626269; /* TabLeiste */
   --bg6: #1c1c1e; /* header tab active */
   --bg7: #B0C4DE; /* KI-Leiste */
+  --bg8: #005a93; /* Dunkles Blau */
   --border: #d1d1d6;
   --border-strong: #b0b0b8;
   --text: #1c1c1e;
@@ -1168,7 +1169,7 @@ font-size: 22px;
     color: #fff;
     height: 48px;
   position: relative;
-background: var(--bg5);
+background: var(--bg8);
 margin-bottom:5px;
 }
 .account-settings-btn {
