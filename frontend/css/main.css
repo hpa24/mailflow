@@ -116,7 +116,7 @@ padding-right: 20px;
   display: grid;
   border-top: 1px solid #ddd;
   grid-template-columns: var(--sidebar-width) var(--list-width) 1fr;
-  overflow: hidden;
+  overflow-y: hidden;
 }
 
 #app.ki-open {border-top:none;}
