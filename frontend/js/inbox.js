@@ -1365,7 +1365,7 @@ async function openEmail(email, itemEl) {
       // HTML in sandboxiertem Iframe rendern
       const iframe = document.createElement('iframe');
       iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-scripts');
-      iframe.style.cssText = 'width:100%;border:none;min-height:300px;display:block;';
+      iframe.style.cssText = 'width:100%;border:none;display:block;';
 
       // Script, das nach dem Laden die tatsächliche Dokumenthöhe per postMessage meldet
       const injectHeightScript = `<script>(function(){
