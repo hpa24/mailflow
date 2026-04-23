@@ -9,7 +9,7 @@ let _activeIframe = null;
 let _activeIframeBaseHtml = null; // srcdoc nach CID-Ersatz, ohne Zoom-CSS
 
 function _withZoom(html) {
-  const style = `<style>html,body{zoom:${_iframeZoom}}</style>`;
+  const style = `<style>html,body{zoom:${_iframeZoom};overflow:hidden!important}</style>`;
   return html.includes('</head>') ? html.replace('</head>', style + '</head>') : style + html;
 }
 
@@ -1373,7 +1373,7 @@ async function openEmail(email, itemEl) {
         if(document.readyState==='complete'){report();}else{window.addEventListener('load',report);}
         new MutationObserver(report).observe(document.body||document.documentElement,{childList:true,subtree:true,attributes:true});
       }());<\/script>`;
-      const injectCss = `<style>img{max-width:100%!important;height:auto!important}</style>`;
+      const injectCss = `<style>html,body{overflow:hidden!important}img{max-width:100%!important;height:auto!important}</style>`;
       const injectBase = `<base target="_blank">`;
 
       let htmlToRender;
