@@ -750,7 +750,8 @@ width: 250px;
 #view-mode, #compose-mode {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 #compose-fields {
