@@ -324,15 +324,20 @@ function toggleKiMode() {
   document.getElementById('topbar').classList.toggle('ki-open', state.kiModeActive);
   document.getElementById('app').classList.toggle('ki-open', state.kiModeActive);
 
-  // Suggest-Button zurücksetzen wenn KI-Modus verlassen wird
   if (!state.kiModeActive) {
+    // KI-Elemente ausblenden wenn Modus verlassen wird
     document.getElementById('btn-ki-suggest').style.display = 'none';
-    // Aktiven Kategorie-Filter zurücksetzen
+    document.getElementById('detail-ki-bar').style.display = 'none';
     if (state.kiCategoryFilter) {
       state.kiCategoryFilter = '';
       document.querySelectorAll('.ki-filter-btn').forEach(b =>
         b.classList.toggle('active', b.dataset.filter === ''));
     }
+  } else if (state.activeEmailId) {
+    // KI-Modus aktiviert mit bereits geöffneter E-Mail → neu öffnen damit KI-Elemente erscheinen
+    const email  = state.emails.find(e => e.id === state.activeEmailId);
+    const itemEl = document.querySelector('.email-item.active');
+    if (email && itemEl) openEmail(email, itemEl);
   }
 
   // Liste neu rendern, damit Badges erscheinen/verschwinden
