@@ -697,7 +697,7 @@ flex: 0 0 175px;
 flex: 0 0 130px;}
 
 #detail-body {
-  flex: 1;
+  flex-shrink: 0;
   padding: 20px;
   display: flex;
   flex-direction: column;
@@ -713,7 +713,7 @@ flex: 0 0 130px;}
 }
 #detail-body a:hover { text-decoration: underline; }
 
-#detail-body iframe {flex:1;}
+#detail-body iframe {display:block;width:100%;}
 
 #detail-empty {
   flex: 0;
