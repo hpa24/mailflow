@@ -1365,16 +1365,15 @@ async function openEmail(email, itemEl) {
       // HTML in sandboxiertem Iframe rendern
       const iframe = document.createElement('iframe');
       iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-scripts');
-      iframe.setAttribute('scrolling', 'no');
       iframe.style.cssText = 'width:100%;border:none;min-height:300px;display:block;';
 
       // Script, das nach dem Laden die tatsächliche Dokumenthöhe per postMessage meldet
       const injectHeightScript = `<script>(function(){
-        function report(){parent.postMessage({type:'mf-iframe-h',h:document.documentElement.scrollHeight||document.body.scrollHeight},'*');}
+        function report(){parent.postMessage({type:'mf-iframe-h',h:document.body.scrollHeight||document.documentElement.scrollHeight},'*');}
         if(document.readyState==='complete'){report();}else{window.addEventListener('load',report);}
         new MutationObserver(report).observe(document.body||document.documentElement,{childList:true,subtree:true,attributes:true});
       }());<\/script>`;
-      const injectCss = `<style>img{max-width:100%!important;height:auto!important}</style>`;
+      const injectCss = `<style>html{overflow:hidden!important}img{max-width:100%!important;height:auto!important}</style>`;
       const injectBase = `<base target="_blank">`;
 
       let htmlToRender;
