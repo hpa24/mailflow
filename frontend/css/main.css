@@ -556,6 +556,8 @@ margin-top: 3px;
 min-width: 1200px;
 }
 
+.ki-open #detail-panel {min-width:1400px;}
+
 /* Versand-Benachrichtigungen */
 #send-notifications {
   flex-shrink: 0;
