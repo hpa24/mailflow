@@ -50,6 +50,7 @@ async def setup_pocketbase_schema(token: str) -> None:
                 _field("reply_to", "text"),
                 _field("is_answered", "bool"),
                 _field("body_html", "text", max=0),
+                _field("is_new", "bool"),
             ])
             # body_html darf kein Zeichenlimit haben (Standard-PATCH setzt max=5000)
             await _fix_text_field_max(client, headers, "emails", existing["emails"], "body_html")

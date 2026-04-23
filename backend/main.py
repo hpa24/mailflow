@@ -419,11 +419,17 @@ def _can_merge(existing: list, members: list) -> bool:
 
 @app.get("/folders/counts")
 async def get_folder_counts():
-    """Ungelesen-Zähler aller Ordner aus der folders-Collection."""
-    return await pb_client.pb_get(
+    """Ungelesen-Zähler aller Ordner + Gesamt-Neu-Zähler (is_new=true)."""
+    folders = await pb_client.pb_get(
         "/api/collections/folders/records",
-        params={"perPage": 200, "fields": "id,account,imap_path,unread_count"}
+        params={"perPage": 200, "fields": "id,account,imap_path,email_folder,unread_count"}
     )
+    new_data = await pb_client.pb_get(
+        "/api/collections/emails/records",
+        params={"filter": "is_new=true", "perPage": 1, "fields": "id"}
+    )
+    folders["new_count"] = new_data.get("totalItems", 0)
+    return folders
 
 
 @app.get("/emails/threaded")
@@ -1004,8 +1010,15 @@ async def delete_upload(temp_id: str):
 
 
 @app.get("/emails/{email_id}")
-async def get_email(email_id: str):
-    return await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
+async def get_email(email_id: str, background_tasks: BackgroundTasks):
+    email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
+    if email.get("is_new"):
+        background_tasks.add_task(
+            pb_client.pb_patch,
+            f"/api/collections/emails/records/{email_id}",
+            {"is_new": False},
+        )
+    return email
 
 
 @app.patch("/emails/{email_id}/category")

@@ -682,17 +682,22 @@ async function loadUnreadCounts() {
         el.style.display = 'none';
       }
     });
-    _updateDocumentTitle();
+    _updateDocumentTitle(data.new_count ?? null);
   } catch (e) {
     console.error('loadUnreadCounts:', e);
   }
 }
 
-function _updateDocumentTitle() {
-  let total = 0;
-  document.querySelectorAll('.folder-count').forEach(el => {
-    total += parseInt(el.textContent, 10) || 0;
-  });
+function _updateDocumentTitle(newCount = null) {
+  let total;
+  if (newCount !== null) {
+    total = newCount;
+  } else {
+    total = 0;
+    document.querySelectorAll('.folder-count').forEach(el => {
+      total += parseInt(el.textContent, 10) || 0;
+    });
+  }
   document.title = total > 0 ? `(${Math.min(total, 99)}) Mailflow` : 'Mailflow';
   if ('setAppBadge' in navigator) {
     total > 0 ? navigator.setAppBadge(total) : navigator.clearAppBadge();

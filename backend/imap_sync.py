@@ -236,6 +236,7 @@ async def _fetch_and_save(server: IMAPClient, account_id: str,
         "snippet": parsed.get("snippet", ""),
         "date_sent": parsed.get("date_sent"),
         "is_read": is_read,
+        "is_new": not is_read,
         "is_flagged": is_flagged,
         "is_answered": is_answered,
         "has_attachments": parsed.get("has_attachments", False),
@@ -463,6 +464,8 @@ async def _sync_flags_recent(server: IMAPClient, account_id: str,
         updates = {}
         if pb_email["is_read"]     != imap_is_read:
             updates["is_read"]     = imap_is_read
+            if imap_is_read and pb_email.get("is_new"):
+                updates["is_new"] = False
         if pb_email["is_flagged"]  != imap_is_flagged:
             updates["is_flagged"]  = imap_is_flagged
         if pb_email.get("is_answered") != imap_is_answered:
