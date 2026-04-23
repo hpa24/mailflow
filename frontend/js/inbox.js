@@ -143,6 +143,7 @@ let state = {
   activeFolder: 'INBOX',
   groupMode: 'thread',   // 'thread' | 'sender'
   readFilter: 'all',     // 'all' | 'unread' | 'read'
+  newCount: 0,           // is_new=true Zähler — für Tab-Badge
   searchQuery: '',
   emails: [],
   page: 1,
@@ -682,22 +683,15 @@ async function loadUnreadCounts() {
         el.style.display = 'none';
       }
     });
-    _updateDocumentTitle(data.new_count ?? null);
+    state.newCount = data.new_count ?? 0;
+    _updateDocumentTitle();
   } catch (e) {
     console.error('loadUnreadCounts:', e);
   }
 }
 
-function _updateDocumentTitle(newCount = null) {
-  let total;
-  if (newCount !== null) {
-    total = newCount;
-  } else {
-    total = 0;
-    document.querySelectorAll('.folder-count').forEach(el => {
-      total += parseInt(el.textContent, 10) || 0;
-    });
-  }
+function _updateDocumentTitle() {
+  const total = state.newCount;
   document.title = total > 0 ? `(${Math.min(total, 99)}) Mailflow` : 'Mailflow';
   if ('setAppBadge' in navigator) {
     total > 0 ? navigator.setAppBadge(total) : navigator.clearAppBadge();
