@@ -29,11 +29,10 @@ html, body {
   background: var(--bg2);
   color: var(--text);
 }
-html { overflow: hidden; }
+html { overflow-y: hidden; }
 
 /* Layout */
 #layout {
-  overflow-x: auto;
   display: grid;
   grid-template-rows: auto auto 1fr;
   height: 100vh;
@@ -661,7 +660,7 @@ padding: 5px 20px;
 }
 
 #detail-ki-bar {
-    border-top: 1px solid #dd
+  border-top: 1px solid #ddd;
   display: flex;
 flex: 0 0 48px;
   align-items: center;
