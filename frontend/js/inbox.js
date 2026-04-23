@@ -693,7 +693,7 @@ function _updateDocumentTitle() {
   document.querySelectorAll('.folder-count').forEach(el => {
     total += parseInt(el.textContent, 10) || 0;
   });
-  document.title = total > 0 ? `Mailflow – ${total}` : 'Mailflow';
+  document.title = total > 0 ? `(${total}) Mailflow` : 'Mailflow';
   if ('setAppBadge' in navigator) {
     total > 0 ? navigator.setAppBadge(total) : navigator.clearAppBadge();
   }
