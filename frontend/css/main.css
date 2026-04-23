@@ -719,7 +719,7 @@ flex: 0 0 130px;}
 }
 #detail-body a:hover { text-decoration: underline; }
 
-#detail-body iframe {flex:1;}
+#detail-body iframe {}
 
 #detail-empty {
   flex: 0;
