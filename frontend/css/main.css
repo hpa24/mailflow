@@ -698,7 +698,6 @@ flex: 0 0 130px;}
 
 #detail-body {
   flex: 1;
-  /* overflow-y: auto; */
   padding: 20px;
   display: flex;
   flex-direction: column;
