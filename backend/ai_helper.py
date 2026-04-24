@@ -309,6 +309,68 @@ async def suggest_reply(
     return response.content[0].text.strip()
 
 
+async def analyze_email(subject: str, body: str, from_name: str = "") -> list[dict]:
+    """Analysiert eine E-Mail strukturell und gibt Elemente mit Aktionsvorschlägen zurück.
+
+    Jedes Element hat:
+      - element: Was in der E-Mail steht (kurze Zusammenfassung)
+      - action:  Vorgeschlagene Reaktion/Antwortbaustein
+    """
+    sender = from_name or "der Absender"
+    safe_subject = subject.replace("{", "{{").replace("}", "}}")
+    safe_body = (body[:1500] if body else "(kein Inhalt)").replace("{", "{{").replace("}", "}}")
+
+    prompt = f"""Analysiere diese eingehende E-Mail und erkenne alle inhaltlichen Elemente, auf die Stefan reagieren sollte.
+
+Von: {sender}
+Betreff: {safe_subject}
+
+{safe_body}
+
+---
+
+Gib eine JSON-Liste zurück. Jedes Objekt hat zwei Felder:
+- "element": Was in der E-Mail steht (1–2 Sätze, sachlich)
+- "action": Was Stefan in seiner Antwort dazu tun sollte (1 Satz, konkret)
+
+Wichtig:
+- Nur Elemente die eine Reaktion erfordern oder sinnvoll sind
+- Reihenfolge wie im Text
+- Kein Erklärungstext außerhalb der JSON-Liste
+- Antworte NUR mit der JSON-Liste, nichts davor oder danach
+
+Beispiel:
+[
+  {{"element": "Prüfung gestern bestanden", "action": "Gratulieren"}},
+  {{"element": "Dankeschön für den Kurs", "action": "Dankeschön annehmen"}},
+  {{"element": "Fragt nach Datum für nächsten Kurs", "action": "Termin nennen oder nachfragen"}}
+]"""
+
+    response = await client.messages.create(
+        model=MODEL,
+        max_tokens=512,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = response.content[0].text.strip()
+
+    # JSON aus der Antwort extrahieren
+    import json, re as _re
+    match = _re.search(r"\[.*\]", raw, _re.DOTALL)
+    if not match:
+        logger.warning("analyze_email: Kein JSON in Antwort gefunden: %s", raw[:200])
+        return []
+    try:
+        items = json.loads(match.group())
+        return [
+            {"element": str(i.get("element", "")), "action": str(i.get("action", ""))}
+            for i in items
+            if isinstance(i, dict) and i.get("element")
+        ]
+    except Exception as exc:
+        logger.warning("analyze_email: JSON-Parse-Fehler: %s — %s", exc, raw[:200])
+        return []
+
+
 async def refine_reply(text: str, instruction: str) -> str:
     """Verfeinert einen bestehenden E-Mail-Entwurf."""
     prompt = f"""Überarbeite den folgenden E-Mail-Entwurf gemäß dieser Anweisung: "{instruction}"

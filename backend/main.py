@@ -1666,6 +1666,39 @@ async def _consolidate_rules(account: str, category_slug: str) -> None:
         logger.error("Konsolidierung fehlgeschlagen (%s/%s): %s", account, category_slug, exc)
 
 
+class AnalyzeRequest(BaseModel):
+    email_id: str
+
+
+@app.post("/ai/analyze")
+async def ai_analyze(req: AnalyzeRequest):
+    """Analysiert eine E-Mail strukturell: Elemente + Aktionsvorschläge."""
+    try:
+        email = await pb_client.pb_get(f"/api/collections/emails/records/{req.email_id}")
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"E-Mail nicht gefunden: {exc}")
+
+    body = email.get("body_plain") or ""
+    if not body and email.get("body_html"):
+        html = email["body_html"]
+        html = re.sub(r'<br\s*/?>', '\n', html, flags=re.IGNORECASE)
+        html = re.sub(r'</(p|div|tr|li)>', '\n', html, flags=re.IGNORECASE)
+        html = re.sub(r'<[^>]+>', '', html)
+        body = re.sub(r'\n{3,}', '\n\n', html).strip()[:5000]
+
+    try:
+        items = await ai_helper.analyze_email(
+            subject=email.get("subject") or "",
+            body=body,
+            from_name=email.get("from_name") or email.get("from_email") or "",
+        )
+    except Exception as exc:
+        logger.error("ai_analyze fehlgeschlagen: %s", exc)
+        raise HTTPException(status_code=500, detail=f"KI-Fehler: {exc}")
+
+    return {"items": items}
+
+
 @app.post("/ai/suggest")
 async def ai_suggest(req: SuggestRequest):
     """Generiert einen Antwortvorschlag für eine E-Mail."""
