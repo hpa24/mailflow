@@ -255,6 +255,7 @@ async def suggest_reply(
     thread_emails: list,
     contact_history: list,
     tone: str = "neutral",
+    context_elements: list[str] | None = None,
 ) -> str:
     """Generiert einen Antwortvorschlag auf eine E-Mail."""
     company_knowledge = load_optional_context("company_knowledge.md")
@@ -297,6 +298,9 @@ async def suggest_reply(
         f"Betreff: {email.get('subject', '')}\n\n"
         f"{(email.get('body_plain') or '')[:1200]}"
     )
+    if context_elements:
+        elements_text = "\n".join(f"- {e}" for e in context_elements)
+        sections.append(f"\n## Gewünschte Antwort-Elemente\nStefan möchte in seiner Antwort folgende Punkte ansprechen (in dieser Reihenfolge):\n{elements_text}")
     sections.append("\n## Aufgabe\nSchreibe jetzt die Antwort (nur den E-Mail-Text, ohne Betreff und ohne Kommentar):")
 
     prompt = "\n".join(sections)

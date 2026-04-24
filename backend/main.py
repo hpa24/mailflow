@@ -1500,6 +1500,7 @@ class TriageRequest(BaseModel):
 class SuggestRequest(BaseModel):
     email_id: str
     tone: str = "neutral"
+    context_elements: list[str] | None = None
 
 
 class RefineRequest(BaseModel):
@@ -1766,6 +1767,7 @@ async def ai_suggest(req: SuggestRequest):
                 thread_emails=thread_emails,
                 contact_history=contact_history,
                 tone=req.tone,
+                context_elements=req.context_elements,
             )
             return {"text": result}
         except Exception as exc:

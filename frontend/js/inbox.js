@@ -157,6 +157,7 @@ let state = {
   lastClickedEl: null,       // DOM-Element des letzten Klicks (Shift+Click-Anker)
   kiModeActive: false,
   kiCategoryFilter: '',      // '' = alle anzeigen
+  _currentReplyOpts: null,   // Compose-Optionen der aktuell geöffneten E-Mail (für KI-Sidebar)
 };
 
 async function init() {
@@ -1469,6 +1470,7 @@ async function openEmail(email, itemEl) {
       const replyToFromEmail = (full.reply_to && full.reply_to !== full.from_email) ? full.from_email : null;
       const replySubject = (full.subject || '').startsWith('Re:')
         ? full.subject : `Re: ${full.subject || ''}`;
+      state._currentReplyOpts = { to: replyTo, subject: replySubject, quote: text, quoteHtml: full.body_html || '', replyToEmailId: email.id, replyToFromEmail };
       document.getElementById('btn-reply').onclick = () =>
         openCompose({ to: replyTo, subject: replySubject, quote: text, quoteHtml: full.body_html || '', replyToEmailId: email.id, replyToFromEmail });
 
@@ -1481,70 +1483,9 @@ async function openEmail(email, itemEl) {
       // Read-Toggle-Button aktualisieren
       updateReadToggle(email, itemEl);
 
-      // KI-Suggest-Handler: hier setzen, weil replyTo, replySubject und text aus `full` benötigt werden
+      // KI-Suggest-Handler
       if (state.kiModeActive) {
-        kiSuggestBtn.onclick = async () => {
-          const origBtnText = kiSuggestBtn.textContent;
-          kiSuggestBtn.disabled = true;
-          kiSuggestBtn.classList.add('btn-loading');
-          kiSuggestBtn.textContent = 'Öffne Antwort…';
-          try {
-            // Schritt 1: Compose wie bei „Antworten" öffnen (mit Quote-Text)
-            const opened = await openCompose({
-              to: replyTo, subject: replySubject, quote: text, quoteHtml: full.body_html || '', replyToEmailId: email.id, replyToFromEmail,
-            });
-            if (opened === false) return;
-
-            // Schritt 2: Ladezustand im Compose-Body anzeigen
-            const bodyEl = document.getElementById('ci-body');
-            const statusEl = document.getElementById('draft-status');
-            bodyEl.contentEditable = 'false';
-            bodyEl.innerHTML = '<span style="color:var(--text2);font-style:italic">KI generiert Antwort…</span>';
-            statusEl.textContent = 'KI generiert Antwort…';
-            statusEl.style.color = 'var(--text2)';
-
-            // Schritt 3: KI-Antwort generieren
-            const result = await api.ai.suggest(email.id, 'neutral');
-            if (!result.text) throw new Error('KI hat keinen Text generiert.');
-
-            // Schritt 4: KI-Text + Signatur in Body einsetzen
-            const account = state.accounts.find(a => a.id === state.activeAccount);
-            const sig = account && account.signature ? account.signature.trim() : '';
-            const aiHtml = escHtml(result.text).replace(/\n/g, '<br>');
-            const sigHtml = sig ? '<br><br>' + escHtml(sig).replace(/\n/g, '<br>') : '';
-            bodyEl.innerHTML = aiHtml + sigHtml;
-
-            // Schritt 5: Cursor an Anfang, nach oben scrollen
-            try {
-              const range = document.createRange();
-              range.setStart(bodyEl, 0);
-              range.collapse(true);
-              const sel = window.getSelection();
-              if (sel) { sel.removeAllRanges(); sel.addRange(range); }
-            } catch (_) {}
-            requestAnimationFrame(() => {
-              document.getElementById('compose-mode').scrollTop = 0;
-            });
-
-            // Schritt 6: Entwurf mit vollständigem Inhalt speichern
-            scheduleDraftSave();
-            statusEl.textContent = '';
-            statusEl.style.color = '';
-
-          } catch (e) {
-            const msg = e.message || '';
-            if (msg.includes('529') || msg.includes('overloaded') || msg.includes('überlastet')) {
-              alert('Die KI ist gerade überlastet. Bitte in einem Moment erneut versuchen.');
-            } else {
-              alert('KI-Antwort fehlgeschlagen: ' + msg);
-            }
-          } finally {
-            kiSuggestBtn.disabled = false;
-            kiSuggestBtn.classList.remove('btn-loading');
-            kiSuggestBtn.textContent = origBtnText;
-            document.getElementById('ci-body').contentEditable = 'true';
-          }
-        };
+        kiSuggestBtn.onclick = () => _runKiSuggest(kiSuggestBtn, []);
       }
     }
 
@@ -1714,6 +1655,64 @@ function formatDate(iso) {
     return time;
   }
   return weekday + ' ' + d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' + time;
+}
+
+async function _runKiSuggest(triggerBtn, contextElements) {
+  const opts = state._currentReplyOpts;
+  if (!opts || !state.activeEmailId) return;
+
+  const origText = triggerBtn.textContent;
+  triggerBtn.disabled = true;
+  triggerBtn.classList.add('btn-loading');
+  triggerBtn.textContent = 'Öffne Antwort…';
+  closeKiAnalyzeSidebar();
+
+  try {
+    const opened = await openCompose(opts);
+    if (opened === false) return;
+
+    const bodyEl = document.getElementById('ci-body');
+    const statusEl = document.getElementById('draft-status');
+    bodyEl.contentEditable = 'false';
+    bodyEl.innerHTML = '<span style="color:var(--text2);font-style:italic">KI generiert Antwort…</span>';
+    statusEl.textContent = 'KI generiert Antwort…';
+    statusEl.style.color = 'var(--text2)';
+
+    const result = await api.ai.suggest(state.activeEmailId, 'neutral', contextElements.length ? contextElements : null);
+    if (!result.text) throw new Error('KI hat keinen Text generiert.');
+
+    const account = state.accounts.find(a => a.id === state.activeAccount);
+    const sig = account && account.signature ? account.signature.trim() : '';
+    const aiHtml = escHtml(result.text).replace(/\n/g, '<br>');
+    const sigHtml = sig ? '<br><br>' + escHtml(sig).replace(/\n/g, '<br>') : '';
+    bodyEl.innerHTML = aiHtml + sigHtml;
+
+    try {
+      const range = document.createRange();
+      range.setStart(bodyEl, 0);
+      range.collapse(true);
+      const sel = window.getSelection();
+      if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+    } catch (_) {}
+    requestAnimationFrame(() => { document.getElementById('compose-mode').scrollTop = 0; });
+
+    scheduleDraftSave();
+    statusEl.textContent = '';
+    statusEl.style.color = '';
+
+  } catch (e) {
+    const msg = e.message || '';
+    if (msg.includes('529') || msg.includes('overloaded') || msg.includes('überlastet')) {
+      alert('Die KI ist gerade überlastet. Bitte in einem Moment erneut versuchen.');
+    } else {
+      alert('KI-Antwort fehlgeschlagen: ' + msg);
+    }
+  } finally {
+    triggerBtn.disabled = false;
+    triggerBtn.classList.remove('btn-loading');
+    triggerBtn.textContent = origText;
+    document.getElementById('ci-body').contentEditable = 'true';
+  }
 }
 
 function closeKiAnalyzeSidebar() {
@@ -2225,6 +2224,12 @@ document.getElementById('detail-ki-bar').addEventListener('click', async (e) => 
 // ─────────────────────────────────────────────────────────────
 
 document.getElementById('ki-analyze-close').addEventListener('click', closeKiAnalyzeSidebar);
+document.getElementById('ki-analyze-cancel').addEventListener('click', closeKiAnalyzeSidebar);
+document.getElementById('ki-analyze-ok').addEventListener('click', () => {
+  const selected = [...document.querySelectorAll('.ki-analyze-item.selected')];
+  const actions = selected.map(el => el.querySelector('.ki-analyze-action')?.textContent || '').filter(Boolean);
+  _runKiSuggest(document.getElementById('ki-analyze-ok'), actions);
+});
 
 // Kontext-Menü
 const ctxMenu = document.getElementById('ctx-menu');

@@ -1493,6 +1493,15 @@ justify-content: center;
   color: var(--accent);
   font-weight: 500;
 }
+#ki-analyze-footer {
+  flex-shrink: 0;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+}
+#ki-analyze-footer .action-btn { flex: 1; padding: 8px 0; }
+
 .ki-analyze-empty, .ki-analyze-error {
   font-size: 14px;
   color: var(--text2);

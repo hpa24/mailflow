@@ -107,8 +107,10 @@ window.api = {
       if (folder)    body.folder     = folder;
       return apiJson('/ai/triage', 'POST', body);
     },
-    suggest(emailId, tone = 'neutral') {
-      return apiJson('/ai/suggest', 'POST', { email_id: emailId, tone });
+    suggest(emailId, tone = 'neutral', contextElements = null) {
+      const body = { email_id: emailId, tone };
+      if (contextElements && contextElements.length) body.context_elements = contextElements;
+      return apiJson('/ai/suggest', 'POST', body);
     },
     refine(text, instruction) {
       return apiJson('/ai/refine', 'POST', { text, instruction });
