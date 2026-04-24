@@ -39,6 +39,9 @@ async def setup_pocketbase_schema(token: str) -> None:
         # 7. triage_rules (depends on accounts)
         await _ensure_collection(client, headers, existing, _triage_rules_schema(accounts_id))
 
+        # 8. response_patterns (depends on accounts)
+        await _ensure_collection(client, headers, existing, _response_patterns_schema(accounts_id))
+
         # Migrations: add fields to existing collections if missing
         if "accounts" in existing:
             await _add_missing_fields(client, headers, "accounts", existing["accounts"], [
@@ -328,6 +331,28 @@ def _triage_rules_schema(accounts_id: str) -> dict:
                    collectionId=accounts_id, maxSelect=1, cascadeDelete=True),
             _field("category_slug", "text", required=True),
             _field("rule_text", "text", max=MAX_UNLIMITED),
+        ],
+    }
+
+
+def _response_patterns_schema(accounts_id: str) -> dict:
+    return {
+        "name": "response_patterns",
+        "type": "base",
+        "listRule": None,
+        "viewRule": None,
+        "createRule": None,
+        "updateRule": None,
+        "deleteRule": None,
+        "fields": [
+            _field("account", "relation", required=True,
+                   collectionId=accounts_id, maxSelect=1, cascadeDelete=True),
+            _field("from_email", "text"),
+            _field("email_id", "text"),
+            _field("element_text", "text", max=MAX_UNLIMITED),
+            _field("action", "text"),
+            _field("draft_text", "text", max=MAX_UNLIMITED),
+            _field("was_edited", "bool"),
         ],
     }
 

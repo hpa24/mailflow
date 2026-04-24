@@ -1515,28 +1515,72 @@ justify-content: center;
 .ki-analyze-item {
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 11px 13px;
-  cursor: pointer;
+  overflow: hidden;
   background: var(--bg);
-  transition: background 0.12s, border-color 0.12s;
-  user-select: none;
+  transition: border-color 0.12s;
 }
-.ki-analyze-item:hover { background: var(--bg3); }
-.ki-analyze-item.selected {
-  border-color: var(--accent);
+.ki-analyze-item.selected { border-color: var(--accent); }
+
+.ki-analyze-top {
+  padding: 11px 13px 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
+}
+.ki-analyze-top:hover { background: var(--bg3); }
+.ki-analyze-item.selected .ki-analyze-top {
   background: color-mix(in srgb, var(--accent) 8%, var(--bg2));
 }
 .ki-analyze-element {
   font-size: 14px;
   color: var(--text);
   line-height: 1.45;
-  margin-bottom: 5px;
+  margin-bottom: 4px;
 }
 .ki-analyze-action {
   font-size: 13px;
   color: var(--accent);
   font-weight: 500;
 }
+.ki-analyze-draft {
+  display: block;
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--border);
+  padding: 9px 13px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg2);
+  resize: vertical;
+  line-height: 1.5;
+  outline: none;
+  min-height: 72px;
+}
+.ki-analyze-draft:focus { background: #f8faff; }
+.ki-analyze-save-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.ki-analyze-save-btn {
+  padding: 3px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text);
+}
+.ki-analyze-save-btn:hover { background: var(--bg3); }
+.ki-analyze-save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ki-analyze-save-status { font-size: 12px; }
+.ki-save-ok  { color: var(--success); }
+.ki-save-err { color: var(--danger); }
 #ki-analyze-footer {
   flex-shrink: 0;
   padding: 12px;

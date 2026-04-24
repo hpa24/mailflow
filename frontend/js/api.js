@@ -104,6 +104,10 @@ window.api = {
     userInfo(email) { return apiGet('/xano/user-info', { email }); },
   },
 
+  responsePatterns: {
+    save(data) { return apiJson('/response-patterns', 'POST', data); },
+  },
+
   ai: {
     triage(accountId, folder) {
       const body = {};

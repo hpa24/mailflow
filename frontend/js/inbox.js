@@ -1719,7 +1719,13 @@ function closeKiAnalyzeSidebar() {
   document.getElementById('ki-analyze-sidebar').classList.remove('open');
 }
 
+let _analyzeSidebarEmailId = null;
+let _analyzeSidebarFromEmail = null;
+
 async function openKiAnalyzeSidebar(emailId, fromEmail) {
+  _analyzeSidebarEmailId = emailId;
+  _analyzeSidebarFromEmail = fromEmail;
+
   const sidebar = document.getElementById('ki-analyze-sidebar');
   const body = document.getElementById('ki-analyze-body');
   sidebar.classList.add('open');
@@ -1753,13 +1759,21 @@ async function openKiAnalyzeSidebar(emailId, fromEmail) {
 
   // KI-Analyse-Items rendern
   let itemsHtml = '';
+  let items = [];
   if (analyzeResult.status === 'fulfilled') {
-    const items = analyzeResult.value.items || [];
+    items = analyzeResult.value.items || [];
     if (items.length) {
       itemsHtml = items.map((item, i) =>
-        `<div class="ki-analyze-item" data-index="${i}">
-          <div class="ki-analyze-element">${escHtml(item.element)}</div>
-          <div class="ki-analyze-action">${escHtml(item.action)}</div>
+        `<div class="ki-analyze-item" data-index="${i}" data-original-draft="${escHtml(item.draft || '')}">
+          <div class="ki-analyze-top">
+            <div class="ki-analyze-element">${escHtml(item.element)}</div>
+            <div class="ki-analyze-action">${escHtml(item.action)}</div>
+          </div>
+          <textarea class="ki-analyze-draft" rows="3">${escHtml(item.draft || '')}</textarea>
+          <div class="ki-analyze-save-row">
+            <button class="ki-analyze-save-btn">Speichern</button>
+            <span class="ki-analyze-save-status"></span>
+          </div>
         </div>`
       ).join('');
     } else {
@@ -1770,8 +1784,45 @@ async function openKiAnalyzeSidebar(emailId, fromEmail) {
   }
 
   body.innerHTML = xanoHtml + itemsHtml;
-  body.querySelectorAll('.ki-analyze-item').forEach(el => {
-    el.addEventListener('click', () => el.classList.toggle('selected'));
+
+  // Click auf oberen Teil → Auswahl togglen
+  body.querySelectorAll('.ki-analyze-top').forEach(top => {
+    top.addEventListener('click', () => top.closest('.ki-analyze-item').classList.toggle('selected'));
+  });
+
+  // Speichern-Buttons
+  body.querySelectorAll('.ki-analyze-item').forEach(card => {
+    const btn = card.querySelector('.ki-analyze-save-btn');
+    const status = card.querySelector('.ki-analyze-save-status');
+    const textarea = card.querySelector('.ki-analyze-draft');
+    const idx = parseInt(card.dataset.index, 10);
+    const item = items[idx] || {};
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      status.textContent = '…';
+      status.className = 'ki-analyze-save-status';
+      const currentDraft = textarea.value.trim();
+      const wasEdited = currentDraft !== (item.draft || '').trim();
+      try {
+        await api.responsePatterns.save({
+          account_id:   state.activeAccount || '',
+          from_email:   _analyzeSidebarFromEmail || '',
+          email_id:     _analyzeSidebarEmailId || '',
+          element_text: item.element || '',
+          action:       item.action || '',
+          draft_text:   currentDraft,
+          was_edited:   wasEdited,
+        });
+        status.textContent = '✓ Gespeichert';
+        status.classList.add('ki-save-ok');
+      } catch (e) {
+        status.textContent = 'Fehler';
+        status.classList.add('ki-save-err');
+      } finally {
+        btn.disabled = false;
+      }
+    });
   });
 }
 
@@ -2257,7 +2308,10 @@ document.getElementById('ki-analyze-close').addEventListener('click', closeKiAna
 document.getElementById('ki-analyze-cancel').addEventListener('click', closeKiAnalyzeSidebar);
 document.getElementById('ki-analyze-ok').addEventListener('click', () => {
   const selected = [...document.querySelectorAll('.ki-analyze-item.selected')];
-  const actions = selected.map(el => el.querySelector('.ki-analyze-action')?.textContent || '').filter(Boolean);
+  const actions = selected.map(el => {
+    const ta = el.querySelector('.ki-analyze-draft');
+    return ta ? ta.value.trim() : (el.querySelector('.ki-analyze-action')?.textContent || '');
+  }).filter(Boolean);
   _runKiSuggest(document.getElementById('ki-analyze-ok'), actions);
 });
 

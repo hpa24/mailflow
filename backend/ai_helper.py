@@ -333,9 +333,10 @@ Betreff: {safe_subject}
 
 ---
 
-Gib eine JSON-Liste zurück. Jedes Objekt hat zwei Felder:
+Gib eine JSON-Liste zurück. Jedes Objekt hat drei Felder:
 - "element": Was in der E-Mail steht (1–2 Sätze, sachlich)
 - "action": Was Stefan in seiner Antwort dazu tun sollte (1 Satz, konkret)
+- "draft": Ein konkreter, kurzer Antworttext nur für diesen einen Punkt (2–3 Sätze, Deutsch, du-Ansprache, warmherzig aber sachlich — kein allgemeiner Einstieg, kein Gruß, direkt zur Sache)
 
 Wichtig:
 - Nur Elemente die eine Reaktion erfordern oder sinnvoll sind
@@ -345,14 +346,14 @@ Wichtig:
 
 Beispiel:
 [
-  {{"element": "Prüfung gestern bestanden", "action": "Gratulieren"}},
-  {{"element": "Dankeschön für den Kurs", "action": "Dankeschön annehmen"}},
-  {{"element": "Fragt nach Datum für nächsten Kurs", "action": "Termin nennen oder nachfragen"}}
+  {{"element": "Prüfung gestern bestanden", "action": "Gratulieren", "draft": "Herzlichen Glückwunsch zur bestandenen Prüfung! Das ist ein toller Erfolg, auf den du wirklich stolz sein kannst."}},
+  {{"element": "Dankeschön für den Kurs", "action": "Dankeschön annehmen", "draft": "Es freut mich sehr, dass dir der Kurs so viel gebracht hat."}},
+  {{"element": "Fragt nach Datum für nächsten Kurs", "action": "Termin nennen oder nachfragen", "draft": "Der nächste Kurs startet am ... — ich schicke dir gerne die genauen Informationen zu."}}
 ]"""
 
     response = await client.messages.create(
         model=MODEL,
-        max_tokens=512,
+        max_tokens=2048,
         messages=[{"role": "user", "content": prompt}],
     )
     raw = response.content[0].text.strip()
@@ -366,7 +367,11 @@ Beispiel:
     try:
         items = json.loads(match.group())
         return [
-            {"element": str(i.get("element", "")), "action": str(i.get("action", ""))}
+            {
+                "element": str(i.get("element", "")),
+                "action":  str(i.get("action", "")),
+                "draft":   str(i.get("draft", "")),
+            }
             for i in items
             if isinstance(i, dict) and i.get("element")
         ]

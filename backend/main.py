@@ -1796,6 +1796,35 @@ async def ai_refine(req: RefineRequest):
     return {"text": result}
 
 
+class SavePatternRequest(BaseModel):
+    account_id: str
+    from_email: str
+    email_id: str
+    element_text: str
+    action: str
+    draft_text: str
+    was_edited: bool = False
+
+
+@app.post("/response-patterns")
+async def save_response_pattern(req: SavePatternRequest):
+    """Speichert ein Antwort-Pattern (Element + Entwurf) in PocketBase."""
+    try:
+        await pb_client.pb_post("/api/collections/response_patterns/records", {
+            "account":       req.account_id,
+            "from_email":    req.from_email,
+            "email_id":      req.email_id,
+            "element_text":  req.element_text,
+            "action":        req.action,
+            "draft_text":    req.draft_text,
+            "was_edited":    req.was_edited,
+        })
+    except Exception as exc:
+        logger.error("response-patterns: Speichern fehlgeschlagen: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Speichern fehlgeschlagen: {exc}")
+    return {"ok": True}
+
+
 @app.get("/xano/user-info")
 async def xano_user_info(email: str):
     """Holt HPA24-Userdaten aus Xano anhand der Absender-E-Mail."""
