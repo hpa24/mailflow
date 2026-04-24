@@ -101,8 +101,11 @@ async def lifespan(app: FastAPI):
     await idle_manager.start()
 
     if settings.QDRANT_URL:
-        from vector_store import ensure_collection
-        await ensure_collection()
+        try:
+            from vector_store import ensure_collection
+            await ensure_collection()
+        except Exception as _e:
+            logger.warning("Qdrant nicht erreichbar beim Start — Vector Store deaktiviert: %s", _e)
 
     for coro in (run_once_if_needed(), rebuild_fts_if_needed(), backfill_html_once()):
         task = asyncio.create_task(coro)
