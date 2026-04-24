@@ -197,6 +197,16 @@ async def embed_status():
     return get_embed_state()
 
 
+@app.get("/admin/embed-search")
+async def embed_search(q: str, limit: int = 5):
+    """Semantische Testsuche in Qdrant. Gibt Top-N ähnliche Threads zurück."""
+    if not settings.QDRANT_URL:
+        raise HTTPException(status_code=503, detail="QDRANT_URL nicht konfiguriert")
+    from vector_store import search_similar
+    results = await search_similar(q, limit=limit)
+    return {"query": q, "results": results}
+
+
 @app.get("/config.js", include_in_schema=False)
 async def frontend_config(authorization: str = Header(None, alias="Authorization")):
     from fastapi.responses import PlainTextResponse
