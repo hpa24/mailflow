@@ -1796,6 +1796,24 @@ async def ai_refine(req: RefineRequest):
     return {"text": result}
 
 
+@app.get("/xano/user-info")
+async def xano_user_info(email: str):
+    """Holt HPA24-Userdaten aus Xano anhand der Absender-E-Mail."""
+    if not settings.XANO_API_KEY or not settings.XANO_USER_ROLES_URL:
+        return {"userdata": None}
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(
+                settings.XANO_USER_ROLES_URL,
+                params={"email": email, "key": settings.XANO_API_KEY},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.warning("Xano-Abfrage fehlgeschlagen für %s: %s", email, exc)
+        return {"userdata": None}
+
+
 # ---------------------------------------------------------------------------
 
 def _imap_set_read_sync(acc: dict, imap_uid: int, folder: str, is_read: bool) -> None:

@@ -1468,6 +1468,50 @@ justify-content: center;
   gap: 10px;
 }
 
+.xano-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 13px;
+  background: #f0f5ff;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.xano-card--none {
+  background: var(--bg);
+  color: var(--text2);
+  font-style: italic;
+}
+.xano-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.xano-lbl {
+  color: var(--text2);
+  font-weight: 500;
+  width: 46px;
+  flex-shrink: 0;
+}
+.xano-roles { display: flex; flex-wrap: wrap; gap: 4px; }
+.xano-role {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg2));
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.xano-mahnstatus {
+  background: #fff0ef;
+  color: var(--danger);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .ki-analyze-item {
   border: 1px solid var(--border);
   border-radius: 8px;

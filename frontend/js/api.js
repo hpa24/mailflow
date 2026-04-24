@@ -100,6 +100,10 @@ window.api = {
   uploadAttachment(formData)     { return apiFetch('/attachments/upload', { method: 'POST', body: formData }); },
   deleteUpload(tempId)           { return apiFetch(`/attachments/upload/${tempId}`, { method: 'DELETE' }); },
 
+  xano: {
+    userInfo(email) { return apiGet('/xano/user-info', { email }); },
+  },
+
   ai: {
     triage(accountId, folder) {
       const body = {};

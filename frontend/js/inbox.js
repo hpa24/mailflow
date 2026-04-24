@@ -1352,7 +1352,7 @@ async function openEmail(email, itemEl) {
   // KI-Analyse-Button: nur anzeigen wenn KI-Modus aktiv und kein Draft
   const kiAnalyzeBtn = document.getElementById('btn-ki-analyze');
   kiAnalyzeBtn.style.display = (state.kiModeActive && !isDraft) ? '' : 'none';
-  kiAnalyzeBtn.onclick = () => openKiAnalyzeSidebar(email.id);
+  kiAnalyzeBtn.onclick = () => openKiAnalyzeSidebar(email.id, email.from_email || '');
 
   // Sidebar schließen wenn neue E-Mail geöffnet wird
   closeKiAnalyzeSidebar();
@@ -1719,30 +1719,60 @@ function closeKiAnalyzeSidebar() {
   document.getElementById('ki-analyze-sidebar').classList.remove('open');
 }
 
-async function openKiAnalyzeSidebar(emailId) {
+async function openKiAnalyzeSidebar(emailId, fromEmail) {
   const sidebar = document.getElementById('ki-analyze-sidebar');
   const body = document.getElementById('ki-analyze-body');
   sidebar.classList.add('open');
   body.innerHTML = '<div class="loading">KI analysiert…</div>';
-  try {
-    const result = await api.ai.analyze(emailId);
-    const items = result.items || [];
-    if (!items.length) {
-      body.innerHTML = '<div class="ki-analyze-empty">Keine Elemente erkannt.</div>';
-      return;
+
+  const [analyzeResult, xanoResult] = await Promise.allSettled([
+    api.ai.analyze(emailId),
+    fromEmail ? api.xano.userInfo(fromEmail) : Promise.resolve(null),
+  ]);
+
+  // Xano-Info-Karte rendern
+  let xanoHtml = '';
+  if (xanoResult.status === 'fulfilled' && xanoResult.value) {
+    const ud = xanoResult.value.userdata;
+    if (Array.isArray(ud) && ud.length) {
+      const u = ud[0];
+      const rollenHtml = (u.rollen || []).map(r =>
+        `<span class="xano-role">${escHtml(r)}</span>`
+      ).join('');
+      const mahnHtml = u.mahnstatus && u.mahnstatus !== '0'
+        ? `<span class="xano-mahnstatus">Mahnstufe ${escHtml(u.mahnstatus)}</span>` : '';
+      xanoHtml = `<div class="xano-card">
+        <div class="xano-row"><span class="xano-lbl">FM-ID</span><span>${escHtml(u.fm_id || '–')}</span></div>
+        ${u.rollen?.length ? `<div class="xano-row"><span class="xano-lbl">Rollen</span><span class="xano-roles">${rollenHtml}</span></div>` : ''}
+        ${mahnHtml ? `<div class="xano-row">${mahnHtml}</div>` : ''}
+      </div>`;
+    } else if (typeof ud === 'string') {
+      xanoHtml = `<div class="xano-card xano-card--none">Kein HPA24-Account</div>`;
     }
-    body.innerHTML = items.map((item, i) =>
-      `<div class="ki-analyze-item" data-index="${i}">
-        <div class="ki-analyze-element">${escHtml(item.element)}</div>
-        <div class="ki-analyze-action">${escHtml(item.action)}</div>
-      </div>`
-    ).join('');
-    body.querySelectorAll('.ki-analyze-item').forEach(el => {
-      el.addEventListener('click', () => el.classList.toggle('selected'));
-    });
-  } catch (e) {
-    body.innerHTML = `<div class="ki-analyze-error">Fehler: ${escHtml(e.message)}</div>`;
   }
+
+  // KI-Analyse-Items rendern
+  let itemsHtml = '';
+  if (analyzeResult.status === 'fulfilled') {
+    const items = analyzeResult.value.items || [];
+    if (items.length) {
+      itemsHtml = items.map((item, i) =>
+        `<div class="ki-analyze-item" data-index="${i}">
+          <div class="ki-analyze-element">${escHtml(item.element)}</div>
+          <div class="ki-analyze-action">${escHtml(item.action)}</div>
+        </div>`
+      ).join('');
+    } else {
+      itemsHtml = '<div class="ki-analyze-empty">Keine Elemente erkannt.</div>';
+    }
+  } else {
+    itemsHtml = `<div class="ki-analyze-error">Fehler: ${escHtml(analyzeResult.reason?.message || '?')}</div>`;
+  }
+
+  body.innerHTML = xanoHtml + itemsHtml;
+  body.querySelectorAll('.ki-analyze-item').forEach(el => {
+    el.addEventListener('click', () => el.classList.toggle('selected'));
+  });
 }
 
 function escHtml(str) {

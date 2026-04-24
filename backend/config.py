@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     API_KEY: str = ""
     # Kommagetrennte Liste erlaubter CORS-Origins, z.B. "https://mailflow.barres.de"
     CORS_ORIGINS: str = "https://mailflow.barres.de"
+    XANO_API_KEY: str = "rnj!wkj7nzj_ezw8QZW"
+    XANO_USER_ROLES_URL: str = "https://xdmv-h2vh-soia.f2.xano.io/api:52vvrgF7/user/get/roles"
 
     model_config = {"env_file": ".env"}
 
