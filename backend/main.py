@@ -124,7 +124,7 @@ async def lifespan(app: FastAPI):
 def _parse_cors_origins(raw: str) -> list[str]:
     """Parst kommagetrennte CORS-Origins; fügt immer localhost hinzu."""
     origins = [o.strip() for o in raw.split(",") if o.strip()]
-    for local in ("http://localhost", "http://127.0.0.1"):
+    for local in ("http://localhost", "http://127.0.0.1", "null"):
         if local not in origins:
             origins.append(local)
     return origins
