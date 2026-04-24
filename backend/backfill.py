@@ -271,7 +271,8 @@ async def _html_backfill_account(account: dict, parse_email_fn) -> int:
 
 # ── Embed-Backfill ────────────────────────────────────────────
 
-_EMBED_BATCH = 100  # E-Mails pro OpenAI-Batch-Request
+_PB_LOAD_BATCH = 500   # E-Mails pro PocketBase-Seite beim Laden
+_EMBED_THREAD_BATCH = 50  # Threads pro OpenAI-Batch-Request
 
 _embed_state: dict = {
     "status": "idle",   # idle | running | done | error
@@ -298,7 +299,7 @@ async def run_embed_backfill() -> None:
         await _do_embed_backfill()
         _embed_state["status"] = "done"
         _embed_state["message"] = (
-            f"Fertig. {_embed_state['done']} eingebettet, {_embed_state['errors']} Fehler."
+            f"Fertig. {_embed_state['done']} Threads eingebettet, {_embed_state['errors']} Fehler."
         )
         logger.info("Embed-Backfill: %s", _embed_state["message"])
     except Exception as e:
@@ -308,35 +309,49 @@ async def run_embed_backfill() -> None:
 
 
 async def _do_embed_backfill() -> None:
-    from vector_store import ensure_collection, upsert_emails_batch
+    from vector_store import ensure_collection, upsert_threads_batch
 
     await ensure_collection()
 
-    page = 1
-    total_pages = 1
+    # Phase 1: Alle E-Mails laden und nach thread_id gruppieren
+    _embed_state["message"] = "Lade E-Mails aus PocketBase…"
+    threads: dict[str, list[dict]] = {}
+    page, total_pages = 1, 1
 
     while page <= total_pages:
         resp = await pb_client.pb_get(
             "/api/collections/emails/records",
             params={
                 "page": page,
-                "perPage": _EMBED_BATCH,
+                "perPage": _PB_LOAD_BATCH,
+                "sort": "date_sent",
                 "fields": "id,account,folder,subject,body_plain,snippet,thread_id,from_email,date_sent",
             },
         )
         if page == 1:
-            _embed_state["total"] = resp.get("totalItems", 0)
+            total_emails = resp.get("totalItems", 0)
             total_pages = resp.get("totalPages", 1)
-            logger.info("Embed-Backfill: %d E-Mails total, %d Seiten", _embed_state["total"], total_pages)
+            logger.info("Embed-Backfill: %d E-Mails geladen, gruppiere nach Threads…", total_emails)
 
-        items = resp.get("items", [])
-        try:
-            count = await upsert_emails_batch(items)
-            _embed_state["done"] += count
-            _embed_state["message"] = f"{_embed_state['done']}/{_embed_state['total']} eingebettet"
-            logger.info("Embed-Backfill: %s", _embed_state["message"])
-        except Exception as e:
-            _embed_state["errors"] += len(items)
-            logger.error("Embed-Backfill: Seite %d fehlgeschlagen: %s", page, e)
+        for email in resp.get("items", []):
+            # E-Mails ohne thread_id werden als eigener Ein-Nachrichten-Thread behandelt
+            tid = email.get("thread_id") or email["id"]
+            threads.setdefault(tid, []).append(email)
 
         page += 1
+
+    # Phase 2: Threads embedden
+    thread_list = list(threads.items())
+    _embed_state["total"] = len(thread_list)
+    logger.info("Embed-Backfill: %d Threads werden eingebettet…", len(thread_list))
+
+    for i in range(0, len(thread_list), _EMBED_THREAD_BATCH):
+        batch = thread_list[i : i + _EMBED_THREAD_BATCH]
+        try:
+            count = await upsert_threads_batch(batch)
+            _embed_state["done"] += count
+            _embed_state["message"] = f"{_embed_state['done']}/{_embed_state['total']} Threads eingebettet"
+            logger.info("Embed-Backfill: %s", _embed_state["message"])
+        except Exception as e:
+            _embed_state["errors"] += len(batch)
+            logger.error("Embed-Backfill: Batch %d fehlgeschlagen: %s", i // _EMBED_THREAD_BATCH, e)

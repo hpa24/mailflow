@@ -13,7 +13,7 @@ from qdrant_client.models import (
 )
 
 from config import settings
-from embed import EMBED_DIMS, build_embed_text, embed_batch, embed_text, split_reply_from_quote
+from embed import EMBED_DIMS, build_thread_embed_text, embed_batch, embed_text, split_reply_from_quote
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +33,8 @@ def _get_client() -> AsyncQdrantClient:
     return _client
 
 
-def _point_id(pb_id: str) -> str:
-    return str(uuid.uuid5(_NS, pb_id))
+def _point_id(thread_id: str) -> str:
+    return str(uuid.uuid5(_NS, thread_id))
 
 
 def _is_sent(folder: str) -> bool:
@@ -50,20 +50,35 @@ def _date_ts(email: dict) -> int:
         return 0
 
 
-def _payload(email: dict) -> dict:
-    body = email.get("body_plain") or ""
-    reply, _ = split_reply_from_quote(body)
+def _thread_payload(thread_id: str, emails: list[dict]) -> dict:
+    """Baut den Payload für einen Thread-Vektor.
+
+    last_reply_text: Stefans letzte gesendete Antwort im Thread (für Prompt-Beispiele).
+    has_reply: True wenn mindestens eine gesendete Nachricht im Thread vorhanden.
+    """
+    sorted_emails = sorted(emails, key=lambda e: e.get("date_sent") or "")
+
+    last_sent = next(
+        (e for e in reversed(sorted_emails) if _is_sent(e.get("folder", ""))),
+        None,
+    )
+    if last_sent:
+        body = last_sent.get("body_plain") or ""
+        reply, _ = split_reply_from_quote(body)
+        last_reply_text = (reply if reply else body)[:1500]
+    else:
+        last_reply_text = ""
+
+    last = sorted_emails[-1]
     return {
-        "pb_id": email["id"],
-        "account_id": email.get("account", ""),
-        "folder": email.get("folder", ""),
-        "is_sent": _is_sent(email.get("folder", "")),
-        "thread_id": email.get("thread_id", ""),
-        "from_email": email.get("from_email", ""),
-        "subject": email.get("subject", ""),
-        "snippet": email.get("snippet", ""),
-        "date_ts": _date_ts(email),
-        "reply_text": reply[:1500] if reply else "",
+        "thread_id": thread_id,
+        "subject": sorted_emails[0].get("subject") or "",
+        "last_reply_text": last_reply_text,
+        "has_reply": bool(last_sent),
+        "last_from_email": last.get("from_email") or "",
+        "message_count": len(sorted_emails),
+        "account_id": sorted_emails[0].get("account") or "",
+        "date_ts": _date_ts(last),
     }
 
 
@@ -80,43 +95,56 @@ async def ensure_collection() -> None:
         logger.info("Qdrant: collection '%s' created", COLLECTION)
 
 
-async def upsert_email(email: dict) -> None:
-    if not settings.QDRANT_URL:
+async def upsert_thread(thread_id: str, emails: list[dict]) -> None:
+    """Bettet einen Thread als einzelnen Vektor ein und upserted ihn in Qdrant."""
+    if not settings.QDRANT_URL or not emails:
         return
-    text = build_embed_text(email)
+    text = build_thread_embed_text(emails)
     if not text.strip():
         return
     vector = await embed_text(text)
+    sorted_emails = sorted(emails, key=lambda e: e.get("date_sent") or "")
+    payload = _thread_payload(thread_id, sorted_emails)
     await _get_client().upsert(
         collection_name=COLLECTION,
-        points=[PointStruct(id=_point_id(email["id"]), vector=vector, payload=_payload(email))],
+        points=[PointStruct(id=_point_id(thread_id), vector=vector, payload=payload)],
     )
 
 
-async def upsert_emails_batch(emails: list[dict]) -> int:
-    if not settings.QDRANT_URL:
-        return 0
-    pairs = [(e, build_embed_text(e)) for e in emails]
-    pairs = [(e, t) for e, t in pairs if t.strip()]
-    if not pairs:
+async def upsert_threads_batch(threads: list[tuple[str, list[dict]]]) -> int:
+    """Bettet eine Liste von (thread_id, emails)-Paaren als Batch ein."""
+    if not settings.QDRANT_URL or not threads:
         return 0
 
-    vectors = await embed_batch([t for _, t in pairs])
+    texts = [build_thread_embed_text(emails) for _, emails in threads]
+    valid = [(t_id, emails, text) for (t_id, emails), text in zip(threads, texts) if text.strip()]
+    if not valid:
+        return 0
+
+    vectors = await embed_batch([text for _, _, text in valid])
+
     points = [
-        PointStruct(id=_point_id(e["id"]), vector=v, payload=_payload(e))
-        for (e, _), v in zip(pairs, vectors)
+        PointStruct(
+            id=_point_id(t_id),
+            vector=vector,
+            payload=_thread_payload(
+                t_id, sorted(emails, key=lambda e: e.get("date_sent") or "")
+            ),
+        )
+        for (t_id, emails, _), vector in zip(valid, vectors)
     ]
     await _get_client().upsert(collection_name=COLLECTION, points=points)
     return len(points)
 
 
-async def search_similar(text: str, limit: int = 5, only_sent: bool = True) -> list[dict]:
+async def search_similar(text: str, limit: int = 5, only_with_reply: bool = True) -> list[dict]:
+    """Sucht semantisch ähnliche Threads. Gibt Payloads mit Score zurück."""
     if not settings.QDRANT_URL:
         return []
     vector = await embed_text(text)
     query_filter = (
-        Filter(must=[FieldCondition(key="is_sent", match=MatchValue(value=True))])
-        if only_sent
+        Filter(must=[FieldCondition(key="has_reply", match=MatchValue(value=True))])
+        if only_with_reply
         else None
     )
     results = await _get_client().search(

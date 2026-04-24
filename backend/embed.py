@@ -10,7 +10,6 @@ EMBED_DIMS = 1536
 
 _client: AsyncOpenAI | None = None
 
-# Marker für den Beginn der zitierten Original-Mail
 _QUOTE_PATTERNS = [
     re.compile(r"^Am .{5,100} schrieb ", re.IGNORECASE),
     re.compile(r"^On .{5,100} wrote:", re.IGNORECASE),
@@ -40,13 +39,34 @@ def split_reply_from_quote(body: str) -> tuple[str, str]:
     return body.strip(), ""
 
 
-def build_embed_text(email: dict) -> str:
-    """Erstellt den Embedding-Text aus Betreff + Stefans eigenem Antworttext."""
-    subject = email.get("subject") or ""
-    body = email.get("body_plain") or ""
-    reply, _ = split_reply_from_quote(body)
-    text = reply if reply else body[:2000]
-    return f"{subject}\n\n{text[:2000]}"
+def build_thread_embed_text(emails: list[dict]) -> str:
+    """Erstellt den Embedding-Text für einen ganzen Thread.
+
+    Format: Betreff oben, dann chronologisch jede Nachricht als [from] + eigenem Text.
+    Jede Nachricht wird auf max. 600 Zeichen begrenzt; Gesamtbudget 4000 Zeichen.
+    """
+    if not emails:
+        return ""
+
+    sorted_emails = sorted(emails, key=lambda e: e.get("date_sent") or "")
+    subject = sorted_emails[0].get("subject") or ""
+    parts = [subject]
+    budget = 4000 - len(subject)
+
+    for email in sorted_emails:
+        if budget < 80:
+            break
+        from_email = email.get("from_email") or ""
+        body = email.get("body_plain") or ""
+        reply, _ = split_reply_from_quote(body)
+        text = (reply if reply else body).strip()
+        if not text:
+            continue
+        entry = f"[{from_email}]\n{text[:min(600, budget - len(from_email) - 4)]}"
+        parts.append(entry)
+        budget -= len(entry)
+
+    return "\n\n---\n\n".join(parts)
 
 
 async def embed_text(text: str) -> list[float]:
