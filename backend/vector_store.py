@@ -147,11 +147,11 @@ async def search_similar(text: str, limit: int = 5, only_with_reply: bool = True
         if only_with_reply
         else None
     )
-    results = await _get_client().search(
+    response = await _get_client().query_points(
         collection_name=COLLECTION,
-        query_vector=vector,
+        query=vector,
         query_filter=query_filter,
         limit=limit,
         with_payload=True,
     )
-    return [{"score": r.score, **r.payload} for r in results]
+    return [{"score": r.score, **r.payload} for r in response.points]
