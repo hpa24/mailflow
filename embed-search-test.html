@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Mailflow · Qdrant Suchtest</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, sans-serif; background: #f5f5f7; color: #1c1c1e; padding: 32px; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 24px; }
+  .form { background: white; border-radius: 12px; padding: 24px; max-width: 800px; margin-bottom: 24px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+  label { display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 6px; margin-top: 16px; }
+  label:first-of-type { margin-top: 0; }
+  input, textarea, select { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; font-family: inherit; }
+  textarea { height: 140px; resize: vertical; }
+  input[type=password] { font-family: monospace; }
+  .row { display: flex; gap: 12px; align-items: flex-end; margin-top: 20px; }
+  button { background: #0a84ff; color: white; border: none; border-radius: 8px; padding: 10px 24px; font-size: 14px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+  button:hover { background: #0070e0; }
+  button:disabled { background: #aaa; cursor: default; }
+  .results { max-width: 800px; }
+  .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+  .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+  .subject { font-weight: 600; font-size: 15px; flex: 1; margin-right: 12px; }
+  .score { background: #e8f4e8; color: #1a7a1a; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 20px; white-space: nowrap; }
+  .score.mid { background: #fff3e0; color: #a05a00; }
+  .score.low { background: #fce8e8; color: #a00000; }
+  .meta { font-size: 12px; color: #888; margin-bottom: 10px; }
+  .reply { font-size: 13px; line-height: 1.6; color: #444; background: #f9f9f9; border-left: 3px solid #0a84ff; padding: 10px 14px; border-radius: 4px; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+  .reply.empty { color: #aaa; font-style: italic; }
+  .status { font-size: 14px; color: #666; padding: 16px 0; }
+  .error { color: #c00; }
+</style>
+</head>
+<body>
+<h1>Qdrant Suchtest — Ähnliche Threads</h1>
+
+<div class="form">
+  <label>API-URL</label>
+  <input type="text" id="apiUrl" value="https://mailflow-api.barres.de">
+
+  <label>API-Key</label>
+  <input type="password" id="apiKey" placeholder="Mailflow API-Key">
+
+  <label>Suchtext (z.B. Text einer eingehenden E-Mail)</label>
+  <textarea id="query" placeholder="Hier den Text einer typischen eingehenden E-Mail einfügen…"></textarea>
+
+  <div class="row">
+    <div style="flex:1">
+      <label>Anzahl Treffer</label>
+      <select id="limit">
+        <option value="3">3</option>
+        <option value="5" selected>5</option>
+        <option value="10">10</option>
+      </select>
+    </div>
+    <button id="btn" onclick="search()">Suchen</button>
+  </div>
+</div>
+
+<div class="results" id="results"></div>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  // API-Key aus localStorage laden
+  const saved = localStorage.getItem('mf_api_key');
+  if (saved) $('apiKey').value = saved;
+  $('apiKey').addEventListener('change', () => localStorage.setItem('mf_api_key', $('apiKey').value));
+
+  async function search() {
+    const url   = $('apiUrl').value.trim();
+    const key   = $('apiKey').value.trim();
+    const q     = $('query').value.trim();
+    const limit = $('limit').value;
+
+    if (!q) { $('results').innerHTML = '<p class="status error">Bitte Suchtext eingeben.</p>'; return; }
+    if (!key) { $('results').innerHTML = '<p class="status error">API-Key fehlt.</p>'; return; }
+
+    $('btn').disabled = true;
+    $('results').innerHTML = '<p class="status">Suche läuft…</p>';
+
+    try {
+      const resp = await fetch(`${url}/admin/embed-search?key=${encodeURIComponent(key)}&limit=${limit}&q=${encodeURIComponent(q)}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      render(data.results);
+    } catch(e) {
+      $('results').innerHTML = `<p class="status error">Fehler: ${e.message}</p>`;
+    } finally {
+      $('btn').disabled = false;
+    }
+  }
+
+  function render(results) {
+    if (!results.length) { $('results').innerHTML = '<p class="status">Keine Treffer.</p>'; return; }
+    $('results').innerHTML = results.map((r, i) => {
+      const pct = Math.round(r.score * 100);
+      const scoreClass = pct >= 70 ? '' : pct >= 50 ? 'mid' : 'low';
+      const reply = r.last_reply_text || '';
+      return `
+        <div class="card">
+          <div class="card-header">
+            <div class="subject">${esc(r.subject || '(kein Betreff)')}</div>
+            <div class="score ${scoreClass}">${pct}% Übereinstimmung</div>
+          </div>
+          <div class="meta">${r.message_count} Nachricht${r.message_count !== 1 ? 'en' : ''} · Thread-ID: ${r.thread_id}</div>
+          <div class="reply ${reply ? '' : 'empty'}">${reply ? esc(reply) : 'Keine gesendete Antwort im Thread'}</div>
+        </div>`;
+    }).join('');
+  }
+
+  function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  // Enter in Textarea: Shift+Enter = Zeilenumbruch, Enter allein = Suche
+  $('query').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); search(); } });
+</script>
+</body>
+</html>
