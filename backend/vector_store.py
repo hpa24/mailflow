@@ -13,12 +13,12 @@ from qdrant_client.models import (
 )
 
 from config import settings
-from embed import EMBED_DIMS, build_embed_text, embed_batch, embed_text
+from embed import EMBED_DIMS, build_embed_text, embed_batch, embed_text, split_reply_from_quote
 
 logger = logging.getLogger(__name__)
 
 COLLECTION = "mailflow_emails"
-_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")  # stable namespace for pb IDs
+_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
 _client: AsyncQdrantClient | None = None
 
@@ -51,6 +51,8 @@ def _date_ts(email: dict) -> int:
 
 
 def _payload(email: dict) -> dict:
+    body = email.get("body_plain") or ""
+    reply, _ = split_reply_from_quote(body)
     return {
         "pb_id": email["id"],
         "account_id": email.get("account", ""),
@@ -61,10 +63,13 @@ def _payload(email: dict) -> dict:
         "subject": email.get("subject", ""),
         "snippet": email.get("snippet", ""),
         "date_ts": _date_ts(email),
+        "reply_text": reply[:1500] if reply else "",
     }
 
 
 async def ensure_collection() -> None:
+    if not settings.QDRANT_URL:
+        return
     client = _get_client()
     existing = await client.get_collections()
     if COLLECTION not in {c.name for c in existing.collections}:
@@ -76,6 +81,8 @@ async def ensure_collection() -> None:
 
 
 async def upsert_email(email: dict) -> None:
+    if not settings.QDRANT_URL:
+        return
     text = build_embed_text(email)
     if not text.strip():
         return
@@ -87,6 +94,8 @@ async def upsert_email(email: dict) -> None:
 
 
 async def upsert_emails_batch(emails: list[dict]) -> int:
+    if not settings.QDRANT_URL:
+        return 0
     pairs = [(e, build_embed_text(e)) for e in emails]
     pairs = [(e, t) for e, t in pairs if t.strip()]
     if not pairs:
@@ -102,6 +111,8 @@ async def upsert_emails_batch(emails: list[dict]) -> int:
 
 
 async def search_similar(text: str, limit: int = 5, only_sent: bool = True) -> list[dict]:
+    if not settings.QDRANT_URL:
+        return []
     vector = await embed_text(text)
     query_filter = (
         Filter(must=[FieldCondition(key="is_sent", match=MatchValue(value=True))])

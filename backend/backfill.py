@@ -1,8 +1,8 @@
 """
-Einmaliger Backfill: \Answered + \Flagged für alle UIDs pro Ordner aus IMAP
-holen und in PocketBase aktualisieren.
-
-Läuft nur einmal. Der Marker /tmp/mailflow_backfill_done verhindert Wiederholungen.
+Backfill-Aufgaben:
+- is_answered/is_flagged aus IMAP nachfüllen (einmalig, Marker-Datei)
+- HTML-Inhalte nachfüllen (einmalig, Marker-Datei)
+- Embed-Backfill: alle E-Mails in Qdrant einbetten (manuell per API-Endpoint)
 """
 import logging
 import os
@@ -267,3 +267,76 @@ async def _html_backfill_account(account: dict, parse_email_fn) -> int:
             logger.info(f"HTML-Backfill: Ordner '{folder}' — {updated} gesamt aktualisiert bisher")
 
     return updated
+
+
+# ── Embed-Backfill ────────────────────────────────────────────
+
+_EMBED_BATCH = 100  # E-Mails pro OpenAI-Batch-Request
+
+_embed_state: dict = {
+    "status": "idle",   # idle | running | done | error
+    "total": 0,
+    "done": 0,
+    "errors": 0,
+    "message": "",
+}
+
+
+def get_embed_state() -> dict:
+    return dict(_embed_state)
+
+
+async def run_embed_backfill() -> None:
+    """Startet den Embed-Backfill als Hintergrund-Task.
+    Idempotent: läuft nicht doppelt wenn bereits aktiv."""
+    global _embed_state
+    if _embed_state["status"] == "running":
+        logger.warning("Embed-Backfill: läuft bereits, ignoriere neuen Aufruf")
+        return
+    _embed_state = {"status": "running", "total": 0, "done": 0, "errors": 0, "message": "Starte…"}
+    try:
+        await _do_embed_backfill()
+        _embed_state["status"] = "done"
+        _embed_state["message"] = (
+            f"Fertig. {_embed_state['done']} eingebettet, {_embed_state['errors']} Fehler."
+        )
+        logger.info("Embed-Backfill: %s", _embed_state["message"])
+    except Exception as e:
+        _embed_state["status"] = "error"
+        _embed_state["message"] = str(e)
+        logger.error("Embed-Backfill fehlgeschlagen: %s", e)
+
+
+async def _do_embed_backfill() -> None:
+    from vector_store import ensure_collection, upsert_emails_batch
+
+    await ensure_collection()
+
+    page = 1
+    total_pages = 1
+
+    while page <= total_pages:
+        resp = await pb_client.pb_get(
+            "/api/collections/emails/records",
+            params={
+                "page": page,
+                "perPage": _EMBED_BATCH,
+                "fields": "id,account,folder,subject,body_plain,snippet,thread_id,from_email,date_sent",
+            },
+        )
+        if page == 1:
+            _embed_state["total"] = resp.get("totalItems", 0)
+            total_pages = resp.get("totalPages", 1)
+            logger.info("Embed-Backfill: %d E-Mails total, %d Seiten", _embed_state["total"], total_pages)
+
+        items = resp.get("items", [])
+        try:
+            count = await upsert_emails_batch(items)
+            _embed_state["done"] += count
+            _embed_state["message"] = f"{_embed_state['done']}/{_embed_state['total']} eingebettet"
+            logger.info("Embed-Backfill: %s", _embed_state["message"])
+        except Exception as e:
+            _embed_state["errors"] += len(items)
+            logger.error("Embed-Backfill: Seite %d fehlgeschlagen: %s", page, e)
+
+        page += 1

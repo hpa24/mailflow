@@ -16,7 +16,7 @@ import json
 import pb_client
 from pb_client import start_token_refresh, stop_token_refresh
 import pb_setup
-from backfill import run_once_if_needed, rebuild_fts_if_needed, backfill_html_once
+from backfill import run_once_if_needed, rebuild_fts_if_needed, backfill_html_once, run_embed_backfill, get_embed_state
 from config import settings
 from fts import fts_setup, fts_search, fts_rebuild, fts_delete
 from idle_manager import idle_manager, get_sse_queues
@@ -99,6 +99,11 @@ async def lifespan(app: FastAPI):
     fts_setup(settings.PB_DATA_PATH)
     start_scheduler()
     await idle_manager.start()
+
+    if settings.QDRANT_URL:
+        from vector_store import ensure_collection
+        await ensure_collection()
+
     for coro in (run_once_if_needed(), rebuild_fts_if_needed(), backfill_html_once()):
         task = asyncio.create_task(coro)
         task.add_done_callback(
@@ -169,6 +174,24 @@ async def _global_exception_handler(request: Request, exc: Exception):
 @app.get("/health", response_model=HealthResponse)
 async def health():
     return HealthResponse(status="ok")
+
+
+@app.post("/admin/embed-backfill")
+async def start_embed_backfill(background_tasks: BackgroundTasks):
+    """Startet den Embed-Backfill aller E-Mails in Qdrant (API-Key-geschützt)."""
+    if not settings.QDRANT_URL:
+        raise HTTPException(status_code=503, detail="QDRANT_URL nicht konfiguriert")
+    state = get_embed_state()
+    if state["status"] == "running":
+        return {"detail": "Backfill läuft bereits", "state": state}
+    background_tasks.add_task(run_embed_backfill)
+    return {"detail": "Backfill gestartet — Fortschritt via GET /admin/embed-status"}
+
+
+@app.get("/admin/embed-status")
+async def embed_status():
+    """Gibt den aktuellen Fortschritt des Embed-Backfills zurück."""
+    return get_embed_state()
 
 
 @app.get("/config.js", include_in_schema=False)
