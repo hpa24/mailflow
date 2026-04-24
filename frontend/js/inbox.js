@@ -1352,7 +1352,7 @@ async function openEmail(email, itemEl) {
   // KI-Analyse-Button: nur anzeigen wenn KI-Modus aktiv und kein Draft
   const kiAnalyzeBtn = document.getElementById('btn-ki-analyze');
   kiAnalyzeBtn.style.display = (state.kiModeActive && !isDraft) ? '' : 'none';
-  kiAnalyzeBtn.onclick = () => openKiAnalyzeSidebar(email.id, email.from_email || '');
+  kiAnalyzeBtn.onclick = () => openKiAnalyzeSidebar(email.id);
 
   // Sidebar schließen wenn neue E-Mail geöffnet wird
   closeKiAnalyzeSidebar();
@@ -1719,12 +1719,7 @@ function closeKiAnalyzeSidebar() {
   document.getElementById('ki-analyze-sidebar').classList.remove('open');
 }
 
-let _analyzeSidebarEmailId = null;
-let _analyzeSidebarFromEmail = null;
-
-async function openKiAnalyzeSidebar(emailId, fromEmail) {
-  _analyzeSidebarEmailId = emailId;
-  _analyzeSidebarFromEmail = fromEmail;
+async function openKiAnalyzeSidebar(emailId) {
 
   const sidebar = document.getElementById('ki-analyze-sidebar');
   const body = document.getElementById('ki-analyze-body');
@@ -1811,8 +1806,6 @@ async function openKiAnalyzeSidebar(emailId, fromEmail) {
       try {
         await api.responsePatterns.save({
           account_id:   state.activeAccount || '',
-          from_email:   _analyzeSidebarFromEmail || '',
-          email_id:     _analyzeSidebarEmailId || '',
           element_text: item.element || '',
           action:       item.action || '',
           draft_text:   currentDraft,

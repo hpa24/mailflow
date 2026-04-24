@@ -1798,8 +1798,6 @@ async def ai_refine(req: RefineRequest):
 
 class SavePatternRequest(BaseModel):
     account_id: str
-    from_email: str
-    email_id: str
     element_text: str
     action: str
     draft_text: str
@@ -1812,8 +1810,6 @@ async def save_response_pattern(req: SavePatternRequest):
     try:
         await pb_client.pb_post("/api/collections/response_patterns/records", {
             "account":       req.account_id,
-            "from_email":    req.from_email,
-            "email_id":      req.email_id,
             "element_text":  req.element_text,
             "action":        req.action,
             "draft_text":    req.draft_text,

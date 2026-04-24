@@ -347,8 +347,6 @@ def _response_patterns_schema(accounts_id: str) -> dict:
         "fields": [
             _field("account", "relation", required=True,
                    collectionId=accounts_id, maxSelect=1, cascadeDelete=True),
-            _field("from_email", "text"),
-            _field("email_id", "text"),
             _field("element_text", "text", max=MAX_UNLIMITED),
             _field("action", "text"),
             _field("draft_text", "text", max=MAX_UNLIMITED),
