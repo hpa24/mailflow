@@ -1747,9 +1747,13 @@ async function openKiAnalyzeSidebar(emailId, fromEmail) {
       ).join('');
       const mahnHtml = u.mahnstatus && u.mahnstatus !== '0'
         ? `<span class="xano-mahnstatus">Mahnstufe ${escHtml(u.mahnstatus)}</span>` : '';
+      const lastLoginStr = u.lastlogin
+        ? new Date(u.lastlogin).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : 'nie';
       xanoHtml = `<div class="xano-card">
         <div class="xano-row"><span class="xano-lbl">FM-ID</span><span>${escHtml(u.fm_id || '–')}</span></div>
         ${u.rollen?.length ? `<div class="xano-row"><span class="xano-lbl">Rollen</span><span class="xano-roles">${rollenHtml}</span></div>` : ''}
+        <div class="xano-row"><span class="xano-lbl">Login</span><span>${escHtml(lastLoginStr)}</span></div>
         ${mahnHtml ? `<div class="xano-row">${mahnHtml}</div>` : ''}
       </div>`;
     } else if (typeof ud === 'string') {
