@@ -113,5 +113,8 @@ window.api = {
     refine(text, instruction) {
       return apiJson('/ai/refine', 'POST', { text, instruction });
     },
+    analyze(emailId) {
+      return apiJson('/ai/analyze', 'POST', { email_id: emailId });
+    },
   },
 };

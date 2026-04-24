@@ -111,6 +111,7 @@
             <button class="action-btn danger primary" id="btn-delete">Löschen</button>
             <button class="action-btn danger" id="btn-spam">Spam</button>
             <button id="btn-ki-suggest" class="action-btn primary" style="display:none">KI-Antwort erstellen</button>
+            <button id="btn-ki-analyze" class="action-btn" style="display:none">KI-Analyse</button>
             <button id="btn-zoom" class="action-btn" title="Inhalt vergrößern/verkleinern">100%</button>
           </div>
 
@@ -130,7 +131,16 @@
 
         </div>
 
-        <!-- Compose-Ansicht (inline) -->
+          <!-- KI-Analyse-Sidebar -->
+        <div id="ki-analyze-sidebar">
+          <div id="ki-analyze-header">
+            <span id="ki-analyze-title">KI-Analyse</span>
+            <button id="ki-analyze-close">✕</button>
+          </div>
+          <div id="ki-analyze-body"></div>
+        </div>
+
+      <!-- Compose-Ansicht (inline) -->
         <div id="compose-mode" style="display:none">
 
           <div id="compose-actions-bar">
@@ -250,8 +260,8 @@
     </div>
   </div>
 
-  <script src="js/api.js?v=20260421-2"></script>
-  <script src="js/inbox.js?v=20260421-2"></script>
+  <script src="js/api.js?v=20260424-1"></script>
+  <script src="js/inbox.js?v=20260424-1"></script>
 </body>
 </html>
 

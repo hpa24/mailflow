@@ -327,7 +327,9 @@ function toggleKiMode() {
   if (!state.kiModeActive) {
     // KI-Elemente ausblenden wenn Modus verlassen wird
     document.getElementById('btn-ki-suggest').style.display = 'none';
+    document.getElementById('btn-ki-analyze').style.display = 'none';
     document.getElementById('detail-ki-bar').style.display = 'none';
+    closeKiAnalyzeSidebar();
     if (state.kiCategoryFilter) {
       state.kiCategoryFilter = '';
       document.querySelectorAll('.ki-filter-btn').forEach(b =>
@@ -1345,6 +1347,15 @@ async function openEmail(email, itemEl) {
   const kiSuggestBtn = document.getElementById('btn-ki-suggest');
   kiSuggestBtn.style.display = (state.kiModeActive && !isDraft) ? '' : 'none';
   kiSuggestBtn.onclick = null;
+
+  // KI-Analyse-Button: nur anzeigen wenn KI-Modus aktiv und kein Draft
+  const kiAnalyzeBtn = document.getElementById('btn-ki-analyze');
+  kiAnalyzeBtn.style.display = (state.kiModeActive && !isDraft) ? '' : 'none';
+  kiAnalyzeBtn.onclick = () => openKiAnalyzeSidebar(email.id);
+
+  // Sidebar schließen wenn neue E-Mail geöffnet wird
+  closeKiAnalyzeSidebar();
+
   // Handler wird erst nach Full-Email-Load gesetzt (braucht quote-Text aus full)
 
   try {
@@ -1703,6 +1714,36 @@ function formatDate(iso) {
     return time;
   }
   return weekday + ' ' + d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' + time;
+}
+
+function closeKiAnalyzeSidebar() {
+  document.getElementById('ki-analyze-sidebar').classList.remove('open');
+}
+
+async function openKiAnalyzeSidebar(emailId) {
+  const sidebar = document.getElementById('ki-analyze-sidebar');
+  const body = document.getElementById('ki-analyze-body');
+  sidebar.classList.add('open');
+  body.innerHTML = '<div class="loading">KI analysiert…</div>';
+  try {
+    const result = await api.ai.analyze(emailId);
+    const items = result.items || [];
+    if (!items.length) {
+      body.innerHTML = '<div class="ki-analyze-empty">Keine Elemente erkannt.</div>';
+      return;
+    }
+    body.innerHTML = items.map((item, i) =>
+      `<div class="ki-analyze-item" data-index="${i}">
+        <div class="ki-analyze-element">${escHtml(item.element)}</div>
+        <div class="ki-analyze-action">${escHtml(item.action)}</div>
+      </div>`
+    ).join('');
+    body.querySelectorAll('.ki-analyze-item').forEach(el => {
+      el.addEventListener('click', () => el.classList.toggle('selected'));
+    });
+  } catch (e) {
+    body.innerHTML = `<div class="ki-analyze-error">Fehler: ${escHtml(e.message)}</div>`;
+  }
 }
 
 function escHtml(str) {
@@ -2182,6 +2223,8 @@ document.getElementById('detail-ki-bar').addEventListener('click', async (e) => 
   }
 });
 // ─────────────────────────────────────────────────────────────
+
+document.getElementById('ki-analyze-close').addEventListener('click', closeKiAnalyzeSidebar);
 
 // Kontext-Menü
 const ctxMenu = document.getElementById('ctx-menu');
