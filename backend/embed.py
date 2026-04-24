@@ -28,6 +28,11 @@ def _get_client() -> AsyncOpenAI:
     return _client
 
 
+def _is_sent_folder(folder: str) -> bool:
+    f = (folder or "").lower()
+    return any(kw in f for kw in ("sent", "gesendet", "gesendete"))
+
+
 def split_reply_from_quote(body: str) -> tuple[str, str]:
     """Trennt Stefans Antworttext vom zitierten Original.
     Gibt (reply, quoted) zurück."""
@@ -40,20 +45,26 @@ def split_reply_from_quote(body: str) -> tuple[str, str]:
 
 
 def build_thread_embed_text(emails: list[dict]) -> str:
-    """Erstellt den Embedding-Text für einen ganzen Thread.
+    """Erstellt den Embedding-Text für einen Thread.
 
-    Format: Betreff oben, dann chronologisch jede Nachricht als [from] + eigenem Text.
-    Jede Nachricht wird auf max. 600 Zeichen begrenzt; Gesamtbudget 4000 Zeichen.
+    Embeddet nur die eingehenden Nachrichten (nicht Stefans gesendete Antworten),
+    damit die Suche mit neuen eingehenden Mails semantisch passt.
+    Fallback auf alle Nachrichten wenn der Thread nur gesendete enthält
+    (z.B. Stefan hat eine Konversation initiiert).
     """
     if not emails:
         return ""
 
     sorted_emails = sorted(emails, key=lambda e: e.get("date_sent") or "")
     subject = sorted_emails[0].get("subject") or ""
+
+    incoming = [e for e in sorted_emails if not _is_sent_folder(e.get("folder", ""))]
+    source = incoming if incoming else sorted_emails  # Fallback: alle
+
     parts = [subject]
     budget = 4000 - len(subject)
 
-    for email in sorted_emails:
+    for email in source:
         if budget < 80:
             break
         from_email = email.get("from_email") or ""
