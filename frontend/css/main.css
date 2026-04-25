@@ -1172,10 +1172,10 @@ min-height: 700px;
 /* Zahnrad-Icon neben Account-Name in Sidebar */
 .account-label {
 font-size: 22px;
-    color: #fff;
+    color: #000;
     height: 48px;
   position: relative;
-background: var(--bg8);
+background: #ffffdf;
 margin-bottom:5px;
 }
 .account-settings-btn {
