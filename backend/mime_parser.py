@@ -1,9 +1,21 @@
 import email as _email_stdlib
 import logging
+from email.header import decode_header, make_header
 
 import mailparser
 
 logger = logging.getLogger(__name__)
+
+
+def _decode_mime_filename(name: str | None) -> str | None:
+    """Dekodiert RFC-2047-Encoded-Words in Dateinamen (z.B. =?utf-8?B?...?=).
+    Pythons stdlib get_filename() im compat32-Policy liefert sie unverändert."""
+    if not name:
+        return name
+    try:
+        return str(make_header(decode_header(name)))
+    except Exception:
+        return name
 
 
 def _decode_part(part) -> str:
@@ -124,7 +136,7 @@ def extract_attachment_meta(raw_bytes: bytes) -> list[dict]:
         if part.get_content_maintype() == "multipart":
             continue
         cd = (part.get_content_disposition() or "").lower()
-        filename = part.get_filename()
+        filename = _decode_mime_filename(part.get_filename())
         if cd == "attachment" or filename:
             mime_type = part.get_content_type() or "application/octet-stream"
             payload = part.get_payload(decode=True)
@@ -151,7 +163,7 @@ def get_attachment_payload(raw_bytes: bytes, part_index: int) -> tuple[bytes, st
         if part.get_content_maintype() == "multipart":
             continue
         cd = (part.get_content_disposition() or "").lower()
-        filename = part.get_filename()
+        filename = _decode_mime_filename(part.get_filename())
         if cd == "attachment" or filename:
             if index == part_index:
                 payload = part.get_payload(decode=True) or b""
