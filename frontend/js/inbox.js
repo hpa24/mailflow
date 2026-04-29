@@ -1981,6 +1981,37 @@ function setupComposeToolbar() {
       body.focus();
     });
   }
+
+  // Emoji-Buttons: fügen das Emoji als großes <span> am Cursor ein
+  document.querySelectorAll('#tb-emoji-group .tb-emoji').forEach(btn => {
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
+    btn.addEventListener('click', () => {
+      const body = document.getElementById('ci-body');
+      const span = document.createElement('span');
+      span.style.fontSize = '48px';
+      span.style.lineHeight = '1';
+      span.textContent = btn.dataset.emoji;
+
+      const sel = window.getSelection();
+      const range = (sel && sel.rangeCount > 0 && body.contains(sel.anchorNode))
+        ? sel.getRangeAt(0)
+        : null;
+
+      if (range) {
+        range.deleteContents();
+        range.insertNode(span);
+      } else {
+        body.appendChild(span);
+      }
+      // Cursor hinter den Span setzen, damit nachfolgender Text wieder normal groß ist
+      const after = document.createRange();
+      after.setStartAfter(span);
+      after.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(after);
+      body.focus();
+    });
+  });
 }
 // ─────────────────────────────────────────────────────────────
 
