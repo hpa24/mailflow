@@ -313,6 +313,59 @@ function _escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// URLs in Textknoten zu klickbaren <a>-Tags machen. Bestehende <a> bleiben unangetastet.
+function _linkifyHtml(html) {
+  if (!html) return html;
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      let p = node.parentNode;
+      while (p && p !== tpl.content) {
+        const name = p.nodeName;
+        if (name === 'A' || name === 'SCRIPT' || name === 'STYLE') return NodeFilter.FILTER_REJECT;
+        p = p.parentNode;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  const URL_RE = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/g;
+  const targets = [];
+  let n;
+  while ((n = walker.nextNode())) {
+    if (n.nodeValue && URL_RE.test(n.nodeValue)) targets.push(n);
+    URL_RE.lastIndex = 0;
+  }
+  for (const textNode of targets) {
+    const text = textNode.nodeValue;
+    const frag = document.createDocumentFragment();
+    let lastIdx = 0;
+    URL_RE.lastIndex = 0;
+    let m;
+    while ((m = URL_RE.exec(text))) {
+      let url = m[0];
+      const trail = url.match(/[.,;:!?)\]}>]+$/);
+      if (trail) url = url.slice(0, -trail[0].length);
+      if (m.index > lastIdx) {
+        frag.appendChild(document.createTextNode(text.slice(lastIdx, m.index)));
+      }
+      const a = document.createElement('a');
+      a.href = url.startsWith('www.') ? 'https://' + url : url;
+      a.textContent = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      frag.appendChild(a);
+      lastIdx = m.index + url.length;
+      URL_RE.lastIndex = lastIdx;
+    }
+    if (lastIdx < text.length) {
+      frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+    }
+    textNode.parentNode.replaceChild(frag, textNode);
+  }
+  return tpl.innerHTML;
+}
+
 // ── KI-Modus ────────────────────────────────────────────────
 
 function toggleKiMode() {
@@ -2172,7 +2225,7 @@ document.getElementById('btn-send-inline').addEventListener('click', async () =>
   const subject    = document.getElementById('ci-subject').value.trim();
   const ciBodyEl   = document.getElementById('ci-body');
   const body       = (ciBodyEl.innerText || '').trim();
-  const body_html  = ciBodyEl.innerHTML || '';
+  const body_html  = _linkifyHtml(ciBodyEl.innerHTML || '');
   const _qEl       = document.getElementById('ci-quote');
   const quote      = _qEl.textContent;
   const quote_html = _qEl.dataset.quoteHtml || '';
