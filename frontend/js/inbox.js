@@ -1912,6 +1912,75 @@ function setupComposeToolbar() {
       btn.classList.add('tbfs-active');
     });
   });
+
+  // Link-Button: Selektion in <a> wickeln, ohne Selektion: <a>URL</a> an Cursor
+  const linkBtn = document.getElementById('tb-link');
+  if (linkBtn) {
+    let _savedRange = null;
+    linkBtn.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const sel = window.getSelection();
+      _savedRange = (sel && sel.rangeCount > 0) ? sel.getRangeAt(0).cloneRange() : null;
+    });
+    linkBtn.addEventListener('click', () => {
+      const body = document.getElementById('ci-body');
+      const raw = prompt('Link-URL eingeben:', 'https://');
+      if (!raw) { body.focus(); return; }
+      const trimmed = raw.trim();
+      const finalUrl = (/^(https?:\/\/|mailto:|tel:)/i.test(trimmed))
+        ? trimmed
+        : 'https://' + trimmed;
+
+      body.focus();
+      const sel = window.getSelection();
+      if (_savedRange) {
+        sel.removeAllRanges();
+        sel.addRange(_savedRange);
+      }
+      const range = (sel && sel.rangeCount > 0) ? sel.getRangeAt(0) : null;
+
+      const a = document.createElement('a');
+      a.href = finalUrl;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+
+      if (range && !range.collapsed && body.contains(range.commonAncestorContainer)) {
+        a.appendChild(range.extractContents());
+        range.insertNode(a);
+      } else {
+        a.textContent = finalUrl;
+        if (range && body.contains(range.commonAncestorContainer)) {
+          range.insertNode(a);
+        } else {
+          body.appendChild(a);
+        }
+      }
+      // Cursor hinter den Link setzen
+      const after = document.createRange();
+      after.setStartAfter(a);
+      after.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(after);
+      _savedRange = null;
+    });
+  }
+
+  // Sans-Serif-Button: alle font-family-Styles und <font face>-Reste im Body entfernen
+  const sansBtn = document.getElementById('tb-sansserif');
+  if (sansBtn) {
+    sansBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    sansBtn.addEventListener('click', () => {
+      const body = document.getElementById('ci-body');
+      body.querySelectorAll('[style*="font-family" i], [style*="font:" i]').forEach(el => {
+        el.style.fontFamily = '';
+        if (!el.getAttribute('style')) el.removeAttribute('style');
+      });
+      body.querySelectorAll('font[face]').forEach(el => {
+        el.removeAttribute('face');
+      });
+      body.focus();
+    });
+  }
 }
 // ─────────────────────────────────────────────────────────────
 
