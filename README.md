@@ -2,13 +2,17 @@
 
 E-Mail-Client auf Basis von FastAPI + PocketBase + Vanilla JS, deployed via Coolify.
 
-**Dokumentation:** `~/Syncthing/Claude/Wissens-Dateien/HPA24/20_Apps/mailflow/`
+**Dokumentation:** `~/Syncthing/Claude/Wissens-Dateien/20_Apps/mailflow/`
 
 | Datei | Inhalt |
 |---|---|
 | `README.md` | Architektur, Collections, Suche, Performance, Fallstricke, offene Punkte |
 | `briefing.md` | Ursprüngliches Briefing, vollständiges PocketBase-Schema |
 | `MAILFLOW-KIINTEGRATION-PLAN.md` (im Repo) | KI-Triage, Antwortvorschlag, Xano-Plan |
+
+## Sicherheit
+
+Auth-Pattern, PocketBase-Rules und n8n-Tokens folgen dem zentralen Modell in `~/Syncthing/Claude/Wissens-Dateien/20_Apps/_shared/sicherheit.md`.
 
 ## Refactoring 2026-04-21
 
