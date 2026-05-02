@@ -44,3 +44,5 @@ backfill_reply_to.py
 reset_emails.py
 test_imap.py
 add_thread_id.py
+CLAUDE.md
+AGENTS.md
