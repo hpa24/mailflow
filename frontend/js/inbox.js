@@ -161,6 +161,7 @@ let state = {
 };
 
 async function init() {
+  if (!await auth.authRefresh()) return;
   await Promise.all([loadAccounts(), loadSmtpServers(), loadCategories()]);
   await loadEmails(true);
   setupInfiniteScroll();

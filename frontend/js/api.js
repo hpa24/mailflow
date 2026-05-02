@@ -11,6 +11,10 @@ async function _loadApiKey() {
     const res = await fetch(`${API}/config.js`, {
       headers: { 'Authorization': `Bearer ${pbToken}` },
     });
+    if (res.status === 401 || res.status === 403) {
+      auth.logout();
+      return;
+    }
     if (res.ok) {
       const text = await res.text();
       const m = text.match(/MAILFLOW_API_KEY='([^']*)'/);
@@ -30,6 +34,10 @@ async function apiFetch(path, options = {}) {
     options.headers = { 'X-API-Key': API_KEY, ...(options.headers || {}) };
   }
   const res = await fetch(API + path, options);
+  if (res.status === 401 || res.status === 403) {
+    auth.logout();
+    throw new Error('Nicht autorisiert');
+  }
   if (!res.ok) {
     let detail = `${res.status}`;
     try { const j = await res.json(); detail = j.detail || detail; } catch (_) {}

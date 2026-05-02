@@ -33,6 +33,33 @@ function logout() {
   window.location.href = '/login.html';
 }
 
+async function authRefresh() {
+  const a = getAuth();
+  if (!a || !a.token) {
+    logout();
+    return false;
+  }
+  try {
+    const resp = await fetch(
+      `${PB_URL}/api/collections/users/auth-refresh`,
+      { method: 'POST', headers: { 'Authorization': a.token } }
+    );
+    if (resp.status === 401 || resp.status === 403) {
+      logout();
+      return false;
+    }
+    if (resp.ok) {
+      const data = await resp.json();
+      setAuth(data.token, data.record);
+    }
+    // sonstige Fehler (Netz, 5xx) → nicht ausloggen
+    return true;
+  } catch {
+    // Netzwerkfehler — nicht ausloggen
+    return true;
+  }
+}
+
 async function login(email, password) {
   const resp = await fetch(
     `${PB_URL}/api/collections/users/auth-with-password`,
@@ -51,4 +78,4 @@ async function login(email, password) {
   return data;
 }
 
-window.auth = { requireAuth, logout, login, isLoggedIn, getAuth };
+window.auth = { requireAuth, logout, login, isLoggedIn, getAuth, authRefresh };
