@@ -2,7 +2,7 @@
 
 E-Mail-Client auf Basis von FastAPI + PocketBase + Vanilla JS, deployed via Coolify.
 
-**Dokumentation:** `/Users/hpa24ms1/Syncthing/Claude/Wissens-Dateien/HPA24/20_Apps/mailflow/`
+**Dokumentation:** `~/Syncthing/Claude/Wissens-Dateien/HPA24/20_Apps/mailflow/`
 
 | Datei | Inhalt |
 |---|---|
