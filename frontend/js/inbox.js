@@ -2210,6 +2210,11 @@ async function openCompose({ to = '', subject = '', body = null, quote = '', quo
     const sel = window.getSelection();
     if (sel) { sel.removeAllRanges(); sel.addRange(range); }
   } catch (_) {}
+  // Bei neuer E-Mail (kein Empfänger gesetzt): Fokus ins To-Feld.
+  // Bei Antwort/Draft mit Empfänger: Fokus bleibt im Body.
+  if (!to) {
+    document.getElementById('ci-to-input').focus();
+  }
   // Nach dem Rendern an den Anfang scrollen (requestAnimationFrame überschreibt Browser-Autoscroll)
   requestAnimationFrame(() => {
     document.getElementById('compose-mode').scrollTop = 0;
@@ -2229,6 +2234,19 @@ async function openCompose({ to = '', subject = '', body = null, quote = '', quo
   subjectEl.removeEventListener('keydown', subjectEl._tabHandler);
   subjectEl._tabHandler = subjectTabHandler;
   subjectEl.addEventListener('keydown', subjectTabHandler);
+
+  // Tab im To-Feld → CC überspringen, direkt ins Body-Feld.
+  // Läuft NACH dem Address-Field-Handler (Autocomplete/Chip-Logik bleibt erhalten).
+  const toInputEl = document.getElementById('ci-to-input');
+  const toTabHandler = (e) => {
+    if (e.key === 'Tab' && !e.shiftKey) {
+      e.preventDefault();
+      document.getElementById('ci-body').focus();
+    }
+  };
+  toInputEl.removeEventListener('keydown', toInputEl._tabHandler);
+  toInputEl._tabHandler = toTabHandler;
+  toInputEl.addEventListener('keydown', toTabHandler);
 
   // Auto-Save beim Tippen (alte Listener zuerst entfernen, damit keine Duplikate entstehen)
   ['ci-to-input', 'ci-cc-input', 'ci-subject'].forEach(id => {
