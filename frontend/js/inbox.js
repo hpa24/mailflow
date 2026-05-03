@@ -2235,13 +2235,14 @@ async function openCompose({ to = '', subject = '', body = null, quote = '', quo
   subjectEl._tabHandler = subjectTabHandler;
   subjectEl.addEventListener('keydown', subjectTabHandler);
 
-  // Tab im To-Feld → CC überspringen, direkt ins Body-Feld.
+  // Tab im To-Feld → CC überspringen, direkt ins Betreff-Feld.
+  // (Tab im Betreff springt dann weiter ins Body-Feld.)
   // Läuft NACH dem Address-Field-Handler (Autocomplete/Chip-Logik bleibt erhalten).
   const toInputEl = document.getElementById('ci-to-input');
   const toTabHandler = (e) => {
     if (e.key === 'Tab' && !e.shiftKey) {
       e.preventDefault();
-      document.getElementById('ci-body').focus();
+      document.getElementById('ci-subject').focus();
     }
   };
   toInputEl.removeEventListener('keydown', toInputEl._tabHandler);
