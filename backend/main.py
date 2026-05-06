@@ -369,15 +369,40 @@ async def search_emails(q: str, account: str | None = None,
     elif is_read == "false":
         filters.append("is_read=false")
 
+    fields = ("id,account,folder,message_id,thread_id,from_email,from_name,"
+              "reply_to,to_emails,subject,snippet,date_sent,is_read,is_flagged,"
+              "is_answered,ai_category,has_attachments,imap_uid")
+
     data = await pb_client.pb_get("/api/collections/emails/records", params={
         "filter": " && ".join(filters),
         "perPage": 100,
         "sort": "-date_sent",
-        "fields": ("id,account,folder,message_id,thread_id,from_email,from_name,"
-                   "reply_to,to_emails,subject,snippet,date_sent,is_read,is_flagged,"
-                   "is_answered,ai_category,has_attachments,imap_uid"),
+        "fields": fields,
     })
     items = data.get("items", [])
+
+    # Zusätzlich: im Sent-Ordner auch nach Empfänger (to_emails) suchen,
+    # damit "an wen habe ich geschrieben?" funktioniert.
+    sent_filters = [f'folder="Sent"', f'to_emails ~ "{safe}"']
+    if account:
+        sent_filters.append(f'account="{account}"')
+    if is_read == "true":
+        sent_filters.append("is_read=true")
+    elif is_read == "false":
+        sent_filters.append("is_read=false")
+    sent_data = await pb_client.pb_get("/api/collections/emails/records", params={
+        "filter": " && ".join(sent_filters),
+        "perPage": 100,
+        "sort": "-date_sent",
+        "fields": fields,
+    })
+    seen_ids = {e["id"] for e in items}
+    for e in sent_data.get("items", []):
+        if e["id"] not in seen_ids:
+            items.append(e)
+            seen_ids.add(e["id"])
+    items.sort(key=lambda e: e.get("date_sent") or "", reverse=True)
+
     for e in items:
         e["display_thread_id"] = e.get("thread_id") or e.get("message_id") or e["id"]
     return {"items": items, "totalItems": len(items)}
