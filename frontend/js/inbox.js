@@ -1118,7 +1118,11 @@ function buildEmailItem(email) {
   const date = email.date_sent ? formatDate(email.date_sent) : '';
   const replyIcon = isReply ? '<span class="reply-icon">↳</span>' : '';
   const indent = isReply ? 'padding-left: 10px;' : '';
-  const displayFrom = email.reply_to || email.from_name || email.from_email || '–';
+  const displayFrom = isFlatFolder()
+    ? ((email.to_emails && email.to_emails.length)
+        ? email.to_emails.join(', ')
+        : '–')
+    : (email.reply_to || email.from_name || email.from_email || '–');
   const folderBadge = state.searchQuery
     ? `<span class="folder-badge">${escHtml(email.folder || '')}</span>` : '';
 
