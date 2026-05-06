@@ -462,9 +462,11 @@ async function silentRefresh() {
     if (state.activeAccount) params.account = state.activeAccount;
     if (state.activeFolder)  params.folder  = state.activeFolder;
 
-    const fetchFn = state.groupMode === 'sender'
-      ? api.getEmailsBySender.bind(api)
-      : api.getThreadedEmails.bind(api);
+    const fetchFn = isFlatFolder()
+      ? fetchFlatEmails
+      : (state.groupMode === 'sender'
+          ? api.getEmailsBySender.bind(api)
+          : api.getThreadedEmails.bind(api));
 
     const data = await fetchFn(params);
     const fresh = data.items || [];
@@ -862,9 +864,11 @@ async function loadEmails(reset = false) {
       _addEmailBatch(data.items || [], reset);
       updateListHeader();
     } else {
-      const fetchFn = state.groupMode === 'sender'
-        ? api.getEmailsBySender.bind(api)
-        : api.getThreadedEmails.bind(api);
+      const fetchFn = isFlatFolder()
+        ? fetchFlatEmails
+        : (state.groupMode === 'sender'
+            ? api.getEmailsBySender.bind(api)
+            : api.getThreadedEmails.bind(api));
 
       // Stage 1: erste 50 sofort anzeigen
       const quick = await fetchFn({ ...baseParams, page: 1, limit: FIRST_PAGE_SIZE });
@@ -1694,9 +1698,11 @@ function updateFooter() {
 function updateListHeader() {
   const account = state.accounts.find(a => a.id === state.activeAccount);
   const name = account ? (account.name || account.from_email) : '';
-  const folder = state.activeFolder === 'INBOX' ? 'Posteingang' : state.activeFolder;
+  const folder = FOLDER_DISPLAY_NAMES[state.activeFolder] || state.activeFolder;
   document.getElementById('list-header-title').textContent =
     name ? `${folder} — ${name}` : folder;
+  const viewToggle = document.querySelector('.view-toggle');
+  if (viewToggle) viewToggle.style.display = isFlatFolder() ? 'none' : '';
 }
 
 function formatDate(iso) {
@@ -1885,8 +1891,27 @@ function escHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+function isFlatFolder() {
+  // Im Gesendet-Ordner nutzlos zu nach Konversation/Absender zu gruppieren
+  // (Absender ist immer Stefan). Daher flache, chronologische Liste.
+  return state.activeFolder === 'Sent';
+}
+
 function getThreadId(email) {
+  if (isFlatFolder()) return email.id;
   return email.display_thread_id || email.thread_id || email.message_id || email.id;
+}
+
+async function fetchFlatEmails(params) {
+  const data = await api.getEmails(params);
+  const total = data.totalItems || 0;
+  const perPage = data.perPage || params.limit || 50;
+  const page = data.page || params.page || 1;
+  return {
+    items: data.items || [],
+    totalItems: total,
+    hasMore: page * perPage < total,
+  };
 }
 
 // ── Compose-Toolbar ──────────────────────────────────────────
