@@ -1116,7 +1116,9 @@ function buildEmailItem(email) {
   item.dataset.thread = tid;
 
   const date = email.date_sent ? formatDate(email.date_sent) : '';
-  const replyIcon = isReply ? '<span class="reply-icon">↳</span>' : '';
+  const replyIcon = isReply
+    ? '<span class="reply-icon">↳</span>'
+    : (showRecipient ? '<span class="reply-icon sent-icon">→</span>' : '');
   const indent = isReply ? 'padding-left: 10px;' : '';
   // Im Sent-Ordner (auch in Suchergebnissen) Empfänger statt Absender zeigen.
   const showRecipient = isFlatFolder() || email.folder === 'Sent';
