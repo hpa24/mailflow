@@ -1139,6 +1139,7 @@ function buildEmailItem(email) {
     ? `<div class="spam-suggestion-bar">
          <span class="ssb-text">⚠ Möglicher Spam${email.spam_score ? ` (Score ${Number(email.spam_score).toFixed(2)})` : ''}</span>
          <button class="ssb-btn ssb-confirm" title="Ja, ist Spam — in Spam-Ordner verschieben">Spam</button>
+         <button class="ssb-btn ssb-confirm-block" title="Spam und Absender blockieren">+ Absender blocken</button>
          <button class="ssb-btn ssb-dismiss" title="Doch kein Spam — Markierung entfernen">Behalten</button>
        </div>`
     : '';
@@ -1174,6 +1175,13 @@ function buildEmailItem(email) {
     ssbConfirm.addEventListener('click', e => {
       e.stopPropagation();
       spamEmail(email, item);
+    });
+  }
+  const ssbConfirmBlock = item.querySelector('.ssb-confirm-block');
+  if (ssbConfirmBlock) {
+    ssbConfirmBlock.addEventListener('click', e => {
+      e.stopPropagation();
+      spamEmail(email, item, { blockSender: true });
     });
   }
   const ssbDismiss = item.querySelector('.ssb-dismiss');

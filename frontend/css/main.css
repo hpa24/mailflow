@@ -376,6 +376,7 @@ align-items:center;
   margin-bottom: 4px;
   font-size: 12px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   border-radius: 2px;
@@ -393,11 +394,13 @@ align-items:center;
   font-size: 11px;
   line-height: 1.4;
 }
-.spam-suggestion-bar .ssb-confirm {
+.spam-suggestion-bar .ssb-confirm,
+.spam-suggestion-bar .ssb-confirm-block {
   background: #d4534a;
   color: #fff;
 }
-.spam-suggestion-bar .ssb-confirm:hover { background: #b8453d; }
+.spam-suggestion-bar .ssb-confirm:hover,
+.spam-suggestion-bar .ssb-confirm-block:hover { background: #b8453d; }
 .spam-suggestion-bar .ssb-dismiss {
   background: rgba(0,0,0,0.08);
   color: #333;
