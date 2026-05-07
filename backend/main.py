@@ -373,7 +373,8 @@ async def search_emails(q: str, account: str | None = None,
 
     fields = ("id,account,folder,message_id,thread_id,from_email,from_name,"
               "reply_to,to_emails,subject,snippet,date_sent,is_read,is_flagged,"
-              "is_answered,ai_category,has_attachments,imap_uid")
+              "is_answered,ai_category,has_attachments,imap_uid,"
+              "spam_suggested,spam_score,spam_rule_match")
 
     data = await pb_client.pb_get("/api/collections/emails/records", params={
         "filter": " && ".join(filters),
@@ -507,7 +508,8 @@ async def get_emails_threaded(account: str | None = None, folder: str | None = N
 
     fields = ("id,account,folder,message_id,thread_id,in_reply_to,from_email,"
               "from_name,reply_to,to_emails,subject,snippet,date_sent,is_read,is_flagged,"
-              "is_answered,ai_category,has_attachments,imap_uid")
+              "is_answered,ai_category,has_attachments,imap_uid,"
+              "spam_suggested,spam_score,spam_rule_match")
 
     params = {
         "perPage": limit,
@@ -592,7 +594,8 @@ async def get_emails_by_sender(account: str | None = None, folder: str | None = 
 
     fields = ("id,account,folder,message_id,thread_id,in_reply_to,from_email,"
               "from_name,reply_to,to_emails,subject,snippet,date_sent,is_read,is_flagged,"
-              "is_answered,ai_category,has_attachments,imap_uid")
+              "is_answered,ai_category,has_attachments,imap_uid,"
+              "spam_suggested,spam_score,spam_rule_match")
 
     params = {
         "perPage": limit,
