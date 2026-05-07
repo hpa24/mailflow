@@ -1315,6 +1315,8 @@ def _imap_search_by_msgid(srv, folder: str, message_id: str) -> int | None:
 
 
 def _imap_move_to_spam_sync(acc: dict, imap_uid: int, folder: str, message_id: str) -> tuple[str, int | None]:
+    """Verschiebt im IMAP nach Junk/Spam-Folder; gibt immer den normierten UI-Namen 'Spam' zurück
+    (analog zum Mapping in imap_sync._IMAP_FLAG_TO_STANDARD)."""
     from imapclient import IMAPClient
     with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
         srv.login(acc["imap_user"], acc["imap_pass"])
@@ -1329,8 +1331,8 @@ def _imap_move_to_spam_sync(acc: dict, imap_uid: int, folder: str, message_id: s
                 srv.set_flags([imap_uid], [b"\\Deleted"])
                 srv.expunge()
             new_uid = _imap_search_by_msgid(srv, spam, message_id)
-            return spam or "Spam", new_uid
-        return spam or "Spam", None
+            return "Spam", new_uid
+        return "Spam", None
 
 
 async def _imap_move_to_spam(email: dict) -> tuple[str, int | None]:
