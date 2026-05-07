@@ -18,7 +18,9 @@ from embed import EMBED_DIMS, build_thread_embed_text, embed_batch, embed_text, 
 logger = logging.getLogger(__name__)
 
 COLLECTION = "mailflow_emails"
+SPAM_COLLECTION = "mailflow_spam_samples"
 _NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+_SPAM_NS = uuid.UUID("9d4f2c1e-7a3b-4e89-b612-5c8d0f9e1a73")
 
 _client: AsyncQdrantClient | None = None
 
@@ -35,6 +37,18 @@ def _get_client() -> AsyncQdrantClient:
 
 def _point_id(thread_id: str) -> str:
     return str(uuid.uuid5(_NS, thread_id))
+
+
+def _spam_point_id(email_id: str) -> str:
+    return str(uuid.uuid5(_SPAM_NS, email_id))
+
+
+def build_spam_embed_text(email: dict) -> str:
+    subject = (email.get("subject") or "").strip()
+    body = (email.get("body_plain") or "").strip()
+    reply, _ = split_reply_from_quote(body)
+    text = (reply if reply else body)[:3500]
+    return f"{subject}\n\n{text}".strip()
 
 
 def _is_sent(folder: str) -> bool:
@@ -152,6 +166,71 @@ async def search_similar(text: str, limit: int = 5, only_with_reply: bool = True
         query=vector,
         query_filter=query_filter,
         limit=limit,
+        with_payload=True,
+    )
+    return [{"score": r.score, **r.payload} for r in response.points]
+
+
+async def ensure_spam_collection() -> None:
+    if not settings.QDRANT_URL:
+        return
+    client = _get_client()
+    existing = await client.get_collections()
+    if SPAM_COLLECTION not in {c.name for c in existing.collections}:
+        await client.create_collection(
+            collection_name=SPAM_COLLECTION,
+            vectors_config=VectorParams(size=EMBED_DIMS, distance=Distance.COSINE),
+        )
+        logger.info("Qdrant: collection '%s' created", SPAM_COLLECTION)
+
+
+async def upsert_spam_sample(email: dict) -> None:
+    """Embeddet eine als Spam markierte Mail und speichert sie als Trainingsbeispiel."""
+    if not settings.QDRANT_URL:
+        return
+    email_id = email.get("id")
+    if not email_id:
+        return
+    text = build_spam_embed_text(email)
+    if not text:
+        return
+    vector = await embed_text(text)
+    payload = {
+        "email_id": email_id,
+        "account_id": email.get("account") or "",
+        "from_email": email.get("from_email") or "",
+        "subject": email.get("subject") or "",
+        "marked_at_ts": int(datetime.utcnow().timestamp()),
+    }
+    await _get_client().upsert(
+        collection_name=SPAM_COLLECTION,
+        points=[PointStruct(id=_spam_point_id(email_id), vector=vector, payload=payload)],
+    )
+
+
+async def delete_spam_sample(email_id: str) -> None:
+    if not settings.QDRANT_URL or not email_id:
+        return
+    await _get_client().delete(
+        collection_name=SPAM_COLLECTION,
+        points_selector=[_spam_point_id(email_id)],
+    )
+
+
+async def search_similar_spam(email: dict, limit: int = 3, score_threshold: float | None = None) -> list[dict]:
+    """Sucht ähnliche Spam-Samples zu einer eingehenden Mail.
+    Gibt Liste von Payloads mit Score zurück, sortiert absteigend."""
+    if not settings.QDRANT_URL:
+        return []
+    text = build_spam_embed_text(email)
+    if not text:
+        return []
+    vector = await embed_text(text)
+    response = await _get_client().query_points(
+        collection_name=SPAM_COLLECTION,
+        query=vector,
+        limit=limit,
+        score_threshold=score_threshold,
         with_payload=True,
     )
     return [{"score": r.score, **r.payload} for r in response.points]

@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     QDRANT_URL: str = ""
     QDRANT_API_KEY: str = ""
+    SPAM_SIMILARITY_THRESHOLD: float = 0.82
+    SPAM_AUTO_CLASSIFY: bool = False
     # Wenn gesetzt, müssen alle API-Anfragen diesen Key mitsenden.
     # Leer lassen für lokale Entwicklung ohne Auth.
     API_KEY: str = ""

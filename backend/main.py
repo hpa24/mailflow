@@ -23,6 +23,7 @@ from idle_manager import idle_manager, get_sse_queues
 from imap_sync import sync_all_accounts, get_sync_status, upsert_contact
 from imap_utils import find_imap_folder
 from models import HealthResponse, SyncStatusResponse
+import spam_filter
 from scheduler import start_scheduler, stop_scheduler
 from smtp_sender import send_email as smtp_send_email
 
@@ -104,6 +105,7 @@ async def lifespan(app: FastAPI):
         try:
             from vector_store import ensure_collection
             await ensure_collection()
+            await spam_filter.ensure_spam_collection()
         except Exception as _e:
             logger.warning("Qdrant nicht erreichbar beim Start — Vector Store deaktiviert: %s", _e)
 
@@ -1201,8 +1203,8 @@ async def mark_read(email_id: str, is_read: bool = True):
 
 
 @app.post("/emails/{email_id}/spam")
-async def move_to_spam(email_id: str):
-    """Verschiebt E-Mail in den Spam-Ordner (IMAP + PocketBase)."""
+async def move_to_spam(email_id: str, block_sender: bool = False, block_domain: bool = False):
+    """Verschiebt E-Mail in den Spam-Ordner (IMAP + PocketBase) und lernt das Sample."""
     email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
     source_folder = email.get("folder", "INBOX")
     new_folder, new_uid = "Spam", None
@@ -1210,7 +1212,7 @@ async def move_to_spam(email_id: str):
         new_folder, new_uid = await _imap_move_to_spam(email)
     except Exception as e:
         logger.warning(f"IMAP spam move failed for {email_id}: {e}")
-    patch = {"folder": new_folder or "Spam"}
+    patch = {"folder": new_folder or "Spam", "spam_suggested": False}
     if new_uid:
         patch["imap_uid"] = new_uid
     try:
@@ -1221,7 +1223,81 @@ async def move_to_spam(email_id: str):
         await _update_folder_unread_count(email["account"], source_folder)
     except Exception as e:
         logger.warning(f"folder unread_count update failed after spam move {email_id}: {e}")
-    return {"moved_to": new_folder}
+
+    await spam_filter.add_spam_sample({**email, "id": email_id})
+    blocked = None
+    if block_sender or block_domain:
+        rule = await spam_filter.add_blocklist_entry(
+            email.get("account") or "",
+            email.get("from_email") or "",
+            block_domain=block_domain,
+        )
+        if rule:
+            blocked = {"rule_id": rule.get("id"), "match_type": rule.get("match_type"), "pattern": rule.get("pattern")}
+
+    return {"moved_to": new_folder, "blocked": blocked}
+
+
+@app.post("/emails/{email_id}/unspam")
+async def unspam_email(email_id: str):
+    """Holt eine Mail aus dem Spam-Ordner zurück nach INBOX und entfernt das Spam-Sample."""
+    email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
+    source_folder = email.get("folder", "Spam")
+    new_uid = None
+    try:
+        new_uid = await _imap_move(email, "INBOX")
+    except Exception as e:
+        logger.warning(f"IMAP unspam move failed for {email_id}: {e}")
+    patch = {"folder": "INBOX", "spam_suggested": False, "spam_score": None, "spam_rule_match": ""}
+    if new_uid:
+        patch["imap_uid"] = new_uid
+    try:
+        await pb_client.pb_patch(f"/api/collections/emails/records/{email_id}", patch)
+    except Exception as e:
+        logger.warning(f"unspam: pb_patch fehlgeschlagen: {e}")
+    try:
+        await _update_folder_unread_count(email["account"], source_folder)
+        await _update_folder_unread_count(email["account"], "INBOX")
+    except Exception as e:
+        logger.warning(f"folder unread_count update failed after unspam {email_id}: {e}")
+    await spam_filter.remove_spam_sample(email_id)
+    return {"moved_to": "INBOX"}
+
+
+@app.post("/emails/{email_id}/spam-suggestion/confirm")
+async def confirm_spam_suggestion(email_id: str):
+    """Bestätigt einen Spam-Vorschlag aus dem Vorschlag-Badge."""
+    return await move_to_spam(email_id, block_sender=False, block_domain=False)
+
+
+@app.post("/emails/{email_id}/spam-suggestion/dismiss")
+async def dismiss_spam_suggestion(email_id: str):
+    """Verwirft den Spam-Vorschlag — Mail bleibt in INBOX."""
+    try:
+        await pb_client.pb_patch(
+            f"/api/collections/emails/records/{email_id}",
+            {"spam_suggested": False, "spam_score": None, "spam_rule_match": ""},
+        )
+    except Exception as e:
+        logger.warning(f"dismiss_spam_suggestion failed for {email_id}: {e}")
+    return {"dismissed": True}
+
+
+@app.get("/spam-rules")
+async def list_spam_rules(account: str | None = None):
+    """Listet alle Spam-Regeln, optional nach Account gefiltert."""
+    params: dict = {"perPage": 500, "sort": "-last_hit,-created"}
+    if account:
+        params["filter"] = f'account="{account}"'
+    result = await pb_client.pb_get("/api/collections/spam_rules/records", params=params)
+    return {"items": result.get("items", []), "totalItems": result.get("totalItems", 0)}
+
+
+@app.delete("/spam-rules/{rule_id}")
+async def delete_spam_rule(rule_id: str):
+    """Löscht eine Spam-Regel (Absender wieder erlaubt)."""
+    await pb_client.pb_delete(f"/api/collections/spam_rules/records/{rule_id}")
+    return {"deleted": rule_id}
 
 
 def _imap_search_by_msgid(srv, folder: str, message_id: str) -> int | None:

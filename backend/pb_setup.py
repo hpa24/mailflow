@@ -42,6 +42,9 @@ async def setup_pocketbase_schema(token: str) -> None:
         # 8. response_patterns (depends on accounts)
         await _ensure_collection(client, headers, existing, _response_patterns_schema(accounts_id))
 
+        # 9. spam_rules (depends on accounts)
+        await _ensure_collection(client, headers, existing, _spam_rules_schema(accounts_id))
+
         # Migrations: add fields to existing collections if missing
         if "accounts" in existing:
             await _add_missing_fields(client, headers, "accounts", existing["accounts"], [
@@ -75,6 +78,12 @@ async def setup_pocketbase_schema(token: str) -> None:
                     "values": ["focus", "quick-reply", "office", "info-trash"],
                     "maxSelect": 1,
                 },
+            ])
+        if "emails" in existing:
+            await _add_missing_fields(client, headers, "emails", existing["emails"], [
+                _field("spam_score", "number"),
+                _field("spam_suggested", "bool"),
+                _field("spam_rule_match", "text"),
             ])
         if "contacts" in existing:
             await _add_missing_fields(client, headers, "contacts", existing["contacts"], [
@@ -331,6 +340,30 @@ def _triage_rules_schema(accounts_id: str) -> dict:
                    collectionId=accounts_id, maxSelect=1, cascadeDelete=True),
             _field("category_slug", "text", required=True),
             _field("rule_text", "text", max=MAX_UNLIMITED),
+        ],
+    }
+
+
+def _spam_rules_schema(accounts_id: str) -> dict:
+    return {
+        "name": "spam_rules",
+        "type": "base",
+        "listRule": None,
+        "viewRule": None,
+        "createRule": None,
+        "updateRule": None,
+        "deleteRule": None,
+        "indexes": [
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_spam_rules_account_pattern ON spam_rules (account, match_type, pattern)",
+        ],
+        "fields": [
+            _field("account", "relation", required=True,
+                   collectionId=accounts_id, maxSelect=1, cascadeDelete=True),
+            _field("match_type", "select", required=True,
+                   values=["email", "domain"], maxSelect=1),
+            _field("pattern", "text", required=True),
+            _field("hits", "number"),
+            _field("last_hit", "date"),
         ],
     }
 

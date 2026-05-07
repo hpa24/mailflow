@@ -275,10 +275,50 @@ async def _fetch_and_save(server: IMAPClient, account_id: str,
                 except Exception as att_exc:
                     logger.warning(f"Anhang-Metadaten für UID {uid} nicht gespeichert: {att_exc}")
 
+        # Spam-Auto-Klassifikation (best-effort, hinter Feature-Flag)
+        if settings.SPAM_AUTO_CLASSIFY and record.get("folder") == "INBOX":
+            try:
+                await _spam_classify_new_email({**record, "id": email_id})
+            except Exception as cls_exc:
+                logger.warning(f"spam classify failed for {email_id}: {cls_exc}")
+
     except pb_client.DuplicateRecordError:
         pass  # E-Mail bereits vorhanden — ignorieren
     except Exception as e:
         raise
+
+
+async def _spam_classify_new_email(email: dict) -> None:
+    """Klassifiziert eine eben eingefügte INBOX-Mail.
+    Bei action=move: IMAP-Move + PB-Patch. Bei action=suggest: nur PB-Patch."""
+    from spam_filter import classify_incoming
+    cls = await classify_incoming(email)
+    action = cls.get("action")
+    email_id = email["id"]
+
+    if action == "move":
+        from main import _imap_move_to_spam  # late import: bricht Zirkular-Abhängigkeit
+        patch = {"folder": "Spam", "spam_rule_match": cls.get("rule_match", "")}
+        try:
+            new_folder, new_uid = await _imap_move_to_spam(email)
+            patch["folder"] = new_folder or "Spam"
+            if new_uid:
+                patch["imap_uid"] = new_uid
+        except Exception as ex:
+            logger.warning(f"spam auto-move IMAP failed for {email_id}: {ex}")
+        await pb_client.pb_patch(f"/api/collections/emails/records/{email_id}", patch)
+        logger.info(f"spam auto-moved {email_id} ({cls.get('rule_match')})")
+
+    elif action == "suggest":
+        await pb_client.pb_patch(
+            f"/api/collections/emails/records/{email_id}",
+            {
+                "spam_suggested": True,
+                "spam_score": cls.get("score"),
+                "spam_rule_match": cls.get("rule_match", ""),
+            },
+        )
+        logger.info(f"spam suggested for {email_id} (score {cls.get('score'):.3f})")
 
 
 async def _count_unread(account_id: str, folder_name: str) -> int:
