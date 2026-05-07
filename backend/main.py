@@ -21,7 +21,7 @@ from config import settings
 from fts import fts_setup, fts_search, fts_rebuild, fts_delete
 from idle_manager import idle_manager, get_sse_queues
 from imap_sync import sync_all_accounts, get_sync_status, upsert_contact
-from imap_utils import find_imap_folder
+from imap_utils import find_imap_folder, resolve_imap_path
 from models import HealthResponse, SyncStatusResponse
 import spam_filter
 from scheduler import start_scheduler, stop_scheduler
@@ -1320,9 +1320,10 @@ def _imap_move_to_spam_sync(acc: dict, imap_uid: int, folder: str, message_id: s
     from imapclient import IMAPClient
     with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
         srv.login(acc["imap_user"], acc["imap_pass"])
-        srv.select_folder(folder)
+        real_source = resolve_imap_path(srv, folder)
+        srv.select_folder(real_source)
         spam = find_imap_folder(srv, [b"\\Junk", b"\\Spam"], ["Spam", "Junk", "Junk E-Mail", "INBOX.Spam", "INBOX.Junk"])
-        if spam and spam.lower() != folder.lower():
+        if spam and spam.lower() != real_source.lower():
             caps = srv.capabilities()
             if b"MOVE" in caps:
                 srv.move([imap_uid], spam)
@@ -1397,15 +1398,17 @@ def _imap_move_sync(acc: dict, imap_uid: int, source_folder: str, target_folder:
     from imapclient import IMAPClient
     with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
         srv.login(acc["imap_user"], acc["imap_pass"])
-        srv.select_folder(source_folder)
+        real_source = resolve_imap_path(srv, source_folder)
+        real_target = resolve_imap_path(srv, target_folder)
+        srv.select_folder(real_source)
         caps = srv.capabilities()
         if b"MOVE" in caps:
-            srv.move([imap_uid], target_folder)
+            srv.move([imap_uid], real_target)
         else:
-            srv.copy([imap_uid], target_folder)
+            srv.copy([imap_uid], real_target)
             srv.set_flags([imap_uid], [b"\\Deleted"])
             srv.expunge()
-        return _imap_search_by_msgid(srv, target_folder, message_id)
+        return _imap_search_by_msgid(srv, real_target, message_id)
 
 
 async def _imap_move(email: dict, target_folder: str) -> int | None:
@@ -1460,11 +1463,12 @@ def _imap_trash_sync(acc: dict, imap_uid: int, folder: str, message_id: str) -> 
     from imapclient import IMAPClient
     with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
         srv.login(acc["imap_user"], acc["imap_pass"])
-        srv.select_folder(folder)
+        real_source = resolve_imap_path(srv, folder)
+        srv.select_folder(real_source)
         caps = srv.capabilities()
         if b"MOVE" in caps:
             trash = find_imap_folder(srv, [b"\\Trash", b"\\Deleted"], ["Trash", "Deleted", "Deleted Items", "Papierkorb", "INBOX.Trash"])
-            if trash and trash.lower() != folder.lower():
+            if trash and trash.lower() != real_source.lower():
                 srv.move([imap_uid], trash)
                 new_uid = _imap_search_by_msgid(srv, trash, message_id)
                 if new_uid:
@@ -1948,7 +1952,7 @@ def _imap_set_read_sync(acc: dict, imap_uid: int, folder: str, is_read: bool) ->
     from imapclient import IMAPClient
     with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
         srv.login(acc["imap_user"], acc["imap_pass"])
-        srv.select_folder(folder)
+        srv.select_folder(resolve_imap_path(srv, folder))
         if is_read:
             srv.set_flags([imap_uid], [b"\\Seen"])
         else:
