@@ -413,17 +413,16 @@ align-items:center;
 .email-quick-actions {
   flex: 0 0 0px;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 22px 22px;
+  grid-template-rows: 22px 22px;
   gap: 1px;
   justify-content: center;
-  align-items: center;
+  align-content: center;
   transition: flex-basis 0.15s;
 }
-.email-item:hover .email-quick-actions { flex: 0 0 36px; }
+.email-item:hover .email-quick-actions { flex: 0 0 50px; }
 .email-qa-btn {
-  width: 22px;
-  height: 22px;
   border: none;
   border-radius: 4px;
   font-size: 14px;
@@ -434,10 +433,16 @@ align-items:center;
   justify-content: center;
   color: #fff;
   line-height: 1;
-  flex-shrink: 0;
+  padding: 0;
 }
-.email-qa-btn.qa-delete { background: var(--danger); }
-.email-qa-btn.qa-spam   { background: #ff9500; }
+.email-qa-btn.qa-delete {
+  background: var(--danger);
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  font-size: 18px;
+}
+.email-qa-btn.qa-spam-vec   { background: #ff9500; grid-column: 2; grid-row: 1; }
+.email-qa-btn.qa-spam-block { background: #d2691e; grid-column: 2; grid-row: 2; }
 .email-qa-btn:hover { opacity: 0.8; }
 .email-item.unread .email-from { font-weight: 700; color: var(--unread); }
 .email-item.unread .email-subject { font-weight: 600; color: var(--text); }

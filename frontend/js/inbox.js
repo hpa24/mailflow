@@ -1159,7 +1159,8 @@ function buildEmailItem(email) {
     </div>
     <div class="email-quick-actions">
       <button class="email-qa-btn qa-delete" title="Löschen">×</button>
-      <button class="email-qa-btn qa-spam" title="Spam">!</button>
+      <button class="email-qa-btn qa-spam-vec" title="Spam – nur Vektor-Ähnlichkeit lernen">V</button>
+      <button class="email-qa-btn qa-spam-block" title="Spam – Vektor lernen + Absender blocken">B</button>
     </div>
   `;
 
@@ -1167,9 +1168,13 @@ function buildEmailItem(email) {
     e.stopPropagation();
     deleteEmail(email, item);
   });
-  item.querySelector('.qa-spam').addEventListener('click', e => {
+  item.querySelector('.qa-spam-vec').addEventListener('click', e => {
     e.stopPropagation();
     spamEmail(email, item);
+  });
+  item.querySelector('.qa-spam-block').addEventListener('click', e => {
+    e.stopPropagation();
+    spamEmail(email, item, { blockSender: true });
   });
 
   const ssbConfirm = item.querySelector('.ssb-confirm');
