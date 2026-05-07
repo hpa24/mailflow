@@ -1358,20 +1358,27 @@ async def _imap_move_to_spam(email: dict) -> tuple[str, int | None]:
 
 @app.post("/emails/{email_id}/move")
 async def move_email(email_id: str, data: dict):
-    """Verschiebt E-Mail in einen anderen Ordner (IMAP + PocketBase)."""
+    """Verschiebt E-Mail in einen anderen Ordner (IMAP + PocketBase).
+    Beim Verlassen des Spam-Ordners werden Qdrant-Sample und spam_*-Felder mit aufgeräumt."""
     target_folder = (data.get("target_folder") or "").strip()
     if not target_folder:
         raise HTTPException(status_code=400, detail="target_folder fehlt")
 
     email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
+    source_folder = email.get("folder", "INBOX")
+    leaving_spam = source_folder == "Spam" and target_folder != "Spam"
+
     try:
         new_uid = await _imap_move(email, target_folder)
     except Exception as e:
         logger.warning(f"IMAP move failed for {email_id}: {e}")
         raise HTTPException(status_code=502, detail=f"IMAP-Fehler: {e}")
 
-    source_folder = email.get("folder", "INBOX")
     patch = {"folder": target_folder, "is_read": True}
+    if leaving_spam:
+        patch["spam_suggested"] = False
+        patch["spam_score"] = None
+        patch["spam_rule_match"] = ""
     if new_uid:
         patch["imap_uid"] = new_uid
         logger.info("move_email: %s → '%s', neue imap_uid=%s", email_id, target_folder, new_uid)
@@ -1394,6 +1401,8 @@ async def move_email(email_id: str, data: dict):
         )
     except Exception as e:
         logger.warning("move_email: folder unread_count update fehlgeschlagen: %s", e)
+    if leaving_spam:
+        await spam_filter.remove_spam_sample(email_id)
     return {"moved_to": target_folder, "marked_read": True}
 
 
