@@ -83,7 +83,20 @@ window.api = {
 
   moveEmail(id, targetFolder) { return apiJson(`/emails/${id}/move`, 'POST', { target_folder: targetFolder }); },
   deleteEmail(id)   { return apiFetch(`/emails/${id}`, { method: 'DELETE' }); },
-  spamEmail(id)     { return apiFetch(`/emails/${id}/spam`, { method: 'POST' }); },
+  spamEmail(id, opts = {}) {
+    const params = [];
+    if (opts.blockSender) params.push('block_sender=true');
+    if (opts.blockDomain) params.push('block_domain=true');
+    const qs = params.length ? `?${params.join('&')}` : '';
+    return apiFetch(`/emails/${id}/spam${qs}`, { method: 'POST' });
+  },
+  unspamEmail(id)             { return apiFetch(`/emails/${id}/unspam`, { method: 'POST' }); },
+  spamSuggestionConfirm(id)   { return apiFetch(`/emails/${id}/spam-suggestion/confirm`, { method: 'POST' }); },
+  spamSuggestionDismiss(id)   { return apiFetch(`/emails/${id}/spam-suggestion/dismiss`, { method: 'POST' }); },
+  spamRulesList(account = null) {
+    return account ? apiGet('/spam-rules', { account }) : apiFetch('/spam-rules');
+  },
+  spamRulesDelete(ruleId)     { return apiFetch(`/spam-rules/${ruleId}`, { method: 'DELETE' }); },
   syncRun()         { return apiFetch('/sync/run', { method: 'POST' }); },
   syncDraft(id)     { return apiFetch(`/emails/draft/${id}/sync`, { method: 'POST' }); },
   markRead(id)        { return apiFetch(`/emails/${id}/read?is_read=true`, { method: 'PATCH' }); },

@@ -368,6 +368,45 @@ align-items:center;
   grid-template-columns: 1fr auto;
   gap: 0px 8px;
 }
+.spam-suggestion-bar {
+  grid-column: 1 / -1;
+  background: #fff8dc;
+  border-left: 3px solid #d4a017;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 2px;
+}
+.spam-suggestion-bar .ssb-text {
+  flex: 1;
+  color: #5a4500;
+  font-weight: 500;
+}
+.spam-suggestion-bar .ssb-btn {
+  border: none;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.spam-suggestion-bar .ssb-confirm {
+  background: #d4534a;
+  color: #fff;
+}
+.spam-suggestion-bar .ssb-confirm:hover { background: #b8453d; }
+.spam-suggestion-bar .ssb-dismiss {
+  background: rgba(0,0,0,0.08);
+  color: #333;
+}
+.spam-suggestion-bar .ssb-dismiss:hover { background: rgba(0,0,0,0.16); }
+.email-item.active .spam-suggestion-bar {
+  background: #fff8dc;
+  color: #5a4500;
+}
 .email-quick-actions {
   flex: 0 0 0px;
   overflow: hidden;

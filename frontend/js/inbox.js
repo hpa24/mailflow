@@ -1135,12 +1135,21 @@ function buildEmailItem(email) {
     ? `<span class="ai-category-badge ${escHtml(email.ai_category)}">${escHtml(catLabel)}</span>`
     : '';
 
+  const spamBar = email.spam_suggested
+    ? `<div class="spam-suggestion-bar">
+         <span class="ssb-text">⚠ Möglicher Spam${email.spam_score ? ` (Score ${Number(email.spam_score).toFixed(2)})` : ''}</span>
+         <button class="ssb-btn ssb-confirm" title="Ja, ist Spam — in Spam-Ordner verschieben">Spam</button>
+         <button class="ssb-btn ssb-dismiss" title="Doch kein Spam — Markierung entfernen">Behalten</button>
+       </div>`
+    : '';
+
   item.innerHTML = `
     <div class="email-flags">
       <span class="flag-answered${email.is_answered ? ' active' : ''}" title="Beantwortet">↩</span>
       <button class="flag-read-toggle${email.is_read ? '' : ' unread'}" title="${email.is_read ? 'Als ungelesen markieren' : 'Als gelesen markieren'}">●</button>
     </div>
     <div class="email-content">
+      ${spamBar}
       <span class="email-from" style="${indent}">${replyIcon}${escHtml(displayFrom)}</span>
       <span class="email-date">${date}</span>
       <span class="email-subject" style="${indent}"><span class="email-subject-text">${escHtml(email.subject || '(kein Betreff)')}</span>${folderBadge}${aiBadge}</span>
@@ -1159,6 +1168,26 @@ function buildEmailItem(email) {
     e.stopPropagation();
     spamEmail(email, item);
   });
+
+  const ssbConfirm = item.querySelector('.ssb-confirm');
+  if (ssbConfirm) {
+    ssbConfirm.addEventListener('click', e => {
+      e.stopPropagation();
+      spamEmail(email, item);
+    });
+  }
+  const ssbDismiss = item.querySelector('.ssb-dismiss');
+  if (ssbDismiss) {
+    ssbDismiss.addEventListener('click', e => {
+      e.stopPropagation();
+      email.spam_suggested = false;
+      email.spam_score = null;
+      const bar = item.querySelector('.spam-suggestion-bar');
+      if (bar) bar.remove();
+      api.spamSuggestionDismiss(email.id).catch(_ => {});
+      _saveToCache();
+    });
+  }
   item.querySelector('.flag-read-toggle').addEventListener('click', async e => {
     e.stopPropagation();
     const nowRead = !email.is_read;
@@ -1409,6 +1438,7 @@ async function openEmail(email, itemEl) {
   document.getElementById('btn-forward').style.display     = isDraft ? 'none' : '';
   document.getElementById('btn-toggle-read').style.display = isDraft ? 'none' : '';
   document.getElementById('btn-spam').style.display        = isDraft ? 'none' : '';
+  document.getElementById('btn-spam-block').style.display  = isDraft ? 'none' : '';
 
   // KI-Suggest-Button: nur anzeigen wenn KI-Modus aktiv und kein Draft
   const kiSuggestBtn = document.getElementById('btn-ki-suggest');
@@ -1575,13 +1605,14 @@ async function openEmail(email, itemEl) {
 
     // Löschen-Button (immer sichtbar)
     document.getElementById('btn-delete').onclick = () => deleteEmail(email, itemEl);
-    document.getElementById('btn-spam').onclick   = () => spamEmail(email, itemEl);
+    document.getElementById('btn-spam').onclick       = () => spamEmail(email, itemEl);
+    document.getElementById('btn-spam-block').onclick = () => spamEmail(email, itemEl, { blockSender: true });
   } catch (e) {
     body.textContent = 'Fehler beim Laden.';
   }
 }
 
-function spamEmail(email, itemEl) {
+function spamEmail(email, itemEl, opts = {}) {
   const next = itemEl.nextElementSibling || itemEl.previousElementSibling;
   const wasUnread = !email.is_read;
 
@@ -1599,7 +1630,7 @@ function spamEmail(email, itemEl) {
 
   // API im Hintergrund — kein await
   _saveToCache();
-  api.spamEmail(email.id).catch(e => {
+  api.spamEmail(email.id, opts).catch(e => {
     state.emails = [email, ...state.emails];
     renderEmails(true);
     if (wasUnread) _adjustFolderCount(email.account, email.folder, +1);
