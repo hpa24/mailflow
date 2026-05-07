@@ -416,12 +416,12 @@ align-items:center;
   display: grid;
   grid-template-columns: 22px 22px;
   grid-template-rows: 22px 22px;
-  gap: 1px;
+  gap: 3px;
   justify-content: center;
   align-content: center;
   transition: flex-basis 0.15s;
 }
-.email-item:hover .email-quick-actions { flex: 0 0 50px; }
+.email-item:hover .email-quick-actions { flex: 0 0 55px; }
 .email-qa-btn {
   border: none;
   border-radius: 4px;
