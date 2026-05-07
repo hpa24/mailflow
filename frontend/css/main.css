@@ -1106,7 +1106,8 @@ min-height: 700px;
 }
 
 /* Account-Einstellungen Modal */
-#account-modal-overlay {
+#account-modal-overlay,
+#spam-rules-modal-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.4);
@@ -1115,7 +1116,8 @@ min-height: 700px;
   align-items: center;
   justify-content: center;
 }
-#account-modal {
+#account-modal,
+#spam-rules-modal {
   background: var(--bg2);
   border-radius: 12px;
   box-shadow: 0 8px 40px rgba(0,0,0,0.25);
@@ -1125,18 +1127,25 @@ min-height: 700px;
   flex-direction: column;
   overflow: hidden;
 }
-#account-modal-header {
+#spam-rules-modal {
+  width: 560px;
+  max-height: 80vh;
+}
+#account-modal-header,
+#spam-rules-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
 }
-#account-modal-title {
+#account-modal-title,
+#spam-rules-modal-title {
   font-size: 17px;
   font-weight: 600;
 }
-#account-modal-close {
+#account-modal-close,
+#spam-rules-modal-close {
   background: none;
   border: none;
   font-size: 18px;
@@ -1145,9 +1154,111 @@ min-height: 700px;
   padding: 2px 6px;
   border-radius: 4px;
 }
-#account-modal-close:hover { background: var(--bg3); }
+#account-modal-close:hover,
+#spam-rules-modal-close:hover { background: var(--bg3); }
 #account-modal-body {
   padding: 8px 0;
+}
+#spam-rules-modal-body {
+  padding: 12px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+#spam-rules-search-wrap {
+  margin-bottom: 12px;
+}
+#spam-rules-search {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  background: var(--bg);
+  color: var(--text);
+  box-sizing: border-box;
+}
+#spam-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.spam-rules-loading,
+.spam-rules-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text2);
+  font-size: 13px;
+}
+.spam-rule-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 13px;
+}
+.spam-rule-row:hover { background: var(--bg3); }
+.spam-rule-pattern {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+  color: var(--text);
+}
+.spam-rule-type {
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--bg3);
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.spam-rule-meta {
+  font-size: 11px;
+  color: var(--text2);
+  white-space: nowrap;
+}
+.spam-rule-delete {
+  background: rgba(212, 83, 74, 0.12);
+  color: #b8453d;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.spam-rule-delete:hover { background: rgba(212, 83, 74, 0.24); }
+#spam-rules-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+#spam-rules-modal-status {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text2);
+}
+.badge-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #d4534a;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  min-width: 14px;
+  text-align: center;
 }
 .modal-field-row {
   display: flex;
