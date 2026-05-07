@@ -1289,7 +1289,7 @@ async def dismiss_spam_suggestion(email_id: str):
 @app.get("/spam-rules")
 async def list_spam_rules(account: str | None = None):
     """Listet alle Spam-Regeln, optional nach Account gefiltert."""
-    params: dict = {"perPage": 500, "sort": "-last_hit,-created"}
+    params: dict = {"perPage": 500, "sort": "-created"}
     if account:
         params["filter"] = f'account="{account}"'
     result = await pb_client.pb_get("/api/collections/spam_rules/records", params=params)

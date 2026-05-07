@@ -3031,7 +3031,11 @@ async function openSpamRulesModal() {
   listEl.innerHTML = '<div class="spam-rules-loading">Lade…</div>';
   try {
     const data = await api.spamRulesList();
-    _spamRulesCache = data.items || [];
+    _spamRulesCache = (data.items || []).sort((a, b) => {
+      const ka = a.last_hit || a.created || '';
+      const kb = b.last_hit || b.created || '';
+      return kb.localeCompare(ka);
+    });
     renderSpamRules(_spamRulesCache, '');
   } catch (e) {
     listEl.innerHTML = `<div class="spam-rules-empty">Fehler: ${escHtml(e.message)}</div>`;
