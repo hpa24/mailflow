@@ -283,6 +283,42 @@ Neue Settings-Sektion „Spam-Regeln":
 
 ---
 
+## Beobachtungspunkte nach Aktivierung von SPAM_AUTO_CLASSIFY
+
+**Notiert 2026-05-07.** Sobald das Feature-Flag scharf ist, beobachten:
+
+### False-Positive-Häufung
+
+Wenn legitime Mails wiederholt in der gelben Vorschlag-Bar auftauchen oder per Blocklist sofort verschoben werden, müssen wir die **Quelle des Treffers** identifizieren und entfernen können.
+
+Zwei mögliche Ursachen:
+
+1. **Falsch gelerntes Spam-Sample** — irgendeine frühere als Spam markierte Mail hat semantisch zu viel mit den legitimen Mails gemeinsam (z. B. fälschlicherweise eine Newsletter-Variante als Spam markiert, die der gewünschten Newsletter-Form sehr ähnelt).
+2. **Zu weit gefasste Blocklist-Regel** — z. B. eine Domain-Regel, die sowohl Spam-Versender als auch legitime Absender abdeckt.
+
+### Diagnose-Workflow (manuell, bis UI in Phase 2/3)
+
+**Bei Vektor-Treffer (gelbe Bar):**
+- In PocketBase die Mail öffnen → Feld `spam_rule_match` enthält den Hash/Score und die `email_id` des auslösenden Samples (Format: `vector:0.873:abc123def456`).
+- Im Qdrant (`mailflow_spam_samples`-Collection) nach diesem `email_id` im Payload suchen → Sample identifizieren und löschen.
+- Alternativ: `spam_filter.search_similar_spam(verdächtige_mail)` per Python-Konsole im Container aufrufen → Top-Treffer ist das Problem-Sample.
+
+**Bei Blocklist-Treffer (Auto-Move):**
+- `spam_rule_match` enthält `email:absender@x.de` oder `domain:x.de`.
+- In PocketBase `spam_rules`-Collection den Eintrag finden und löschen.
+- Mail per Drag aus Spam zurück in INBOX (nicht via Unspam, weil wir Sample-Cleanup separat brauchen).
+
+### Konsequenz für Phase 2/3
+
+Wenn diese Diagnose **mehr als ein paar Mal pro Woche** nötig wird, lohnt sich:
+
+- **UI-Erweiterung in Phase 2:** Spam-Regeln-Verwaltung soll auch Spam-Samples anzeigen (Subject + Date + Score gegen jüngste Treffer) und ein Lösch-Button pro Sample.
+- **„Anti-Spam"-Lernsignal beim „Behalten":** Aktuell wird der „Behalten"-Klick nur als Dismiss behandelt. Erweiterung: zusätzliche Qdrant-Collection `mailflow_ham_samples` als Negativ-Signal — wenn neue Mail Vektor-Treffer hat, prüfe vorher ob sie nicht Ham-Sample näher steht. Verhindert wiederkehrende False-Positives ohne manuellen Eingriff.
+
+Bei moderater Häufung (1-2 Fehler pro Woche) reicht der manuelle Workflow erstmal.
+
+---
+
 ## Phase 2 — Spam-Regeln-Verwaltung in der Hauptleiste
 
 **Notiert 2026-05-07.** Ersetzt Punkt 7 der ursprünglichen Reihenfolge (Settings-Sektion) — Stefan möchte die Verwaltung direkt erreichbar in der Top-Toolbar, nicht in einem Settings-Untermenü.
