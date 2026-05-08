@@ -1432,12 +1432,17 @@ async function openEmail(email, itemEl) {
   }
 
   document.getElementById('detail-subject').textContent = email.subject || '(kein Betreff)';
-  document.getElementById('detail-meta').innerHTML = `
-    <span style="width:60px;display:inline-block;">Von:</span> ${escHtml(email.from_name ? `${email.from_name} <${email.from_email}>` : email.from_email)}<br>
-    <span style="width:60px;display:inline-block;">An:</span> ${escHtml((email.to_emails || []).join(', '))}<br>
-    <span style="width:60px;display:inline-block;">Datum:</span> ${email.date_sent ? new Date(email.date_sent).toLocaleString('de-DE') : '–'}
-    ${email.is_answered ? '<br><span style="color:var(--accent);font-size:12px">↩ Beantwortet</span>' : ''}
-  `;
+  const _renderDetailMeta = (e) => {
+    const ccList = (e.cc_emails || []).filter(Boolean);
+    document.getElementById('detail-meta').innerHTML = `
+      <span style="width:60px;display:inline-block;">Von:</span> ${escHtml(e.from_name ? `${e.from_name} <${e.from_email}>` : e.from_email)}<br>
+      <span style="width:60px;display:inline-block;">An:</span> ${escHtml((e.to_emails || []).join(', '))}<br>
+      ${ccList.length ? `<span style="width:60px;display:inline-block;">Cc:</span> ${escHtml(ccList.join(', '))}<br>` : ''}
+      <span style="width:60px;display:inline-block;">Datum:</span> ${e.date_sent ? new Date(e.date_sent).toLocaleString('de-DE') : '–'}
+      ${e.is_answered ? '<br><span style="color:var(--accent);font-size:12px">↩ Beantwortet</span>' : ''}
+    `;
+  };
+  _renderDetailMeta(email);
   body.textContent = 'Lade…';
   document.getElementById('btn-reply').onclick = null;
   document.getElementById('btn-forward').onclick = null;
@@ -1472,6 +1477,7 @@ async function openEmail(email, itemEl) {
 
   try {
     const full = await api.getEmail(email.id);
+    _renderDetailMeta(full);
     // body_plain bevorzugen; Fallback: plain text aus body_html extrahieren (HTML-only-E-Mails)
     let text = full.body_plain || '';
     if (!text && full.body_html) {

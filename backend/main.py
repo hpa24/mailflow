@@ -372,7 +372,7 @@ async def search_emails(q: str, account: str | None = None,
         filters.append("is_read=false")
 
     fields = ("id,account,folder,message_id,thread_id,from_email,from_name,"
-              "reply_to,to_emails,subject,snippet,date_sent,is_read,is_flagged,"
+              "reply_to,to_emails,cc_emails,subject,snippet,date_sent,is_read,is_flagged,"
               "is_answered,ai_category,has_attachments,imap_uid,"
               "spam_suggested,spam_score,spam_rule_match")
 
