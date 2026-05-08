@@ -1215,7 +1215,7 @@ async def move_to_spam(email_id: str, block_sender: bool = False, block_domain: 
         new_folder, new_uid = await _imap_move_to_spam(email)
     except Exception as e:
         logger.warning(f"IMAP spam move failed for {email_id}: {e}")
-    patch = {"folder": new_folder or "Spam", "spam_suggested": False}
+    patch = {"folder": new_folder or "Spam", "spam_suggested": False, "is_read": True}
     if new_uid:
         patch["imap_uid"] = new_uid
     try:
