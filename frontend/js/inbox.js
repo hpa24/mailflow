@@ -1146,6 +1146,10 @@ function buildEmailItem(email) {
        </div>`
     : '';
 
+  const attachmentDot = email.has_attachments
+    ? '<span class="attachment-dot" title="Anhang"></span>'
+    : '';
+
   item.innerHTML = `
     <div class="email-flags">
       <span class="flag-answered${email.is_answered ? ' active' : ''}" title="Beantwortet">↩</span>
@@ -1155,7 +1159,7 @@ function buildEmailItem(email) {
       ${spamBar}
       <span class="email-from" style="${indent}">${replyIcon}${escHtml(displayFrom)}</span>
       <span class="email-date">${date}</span>
-      <span class="email-subject" style="${indent}"><span class="email-subject-text">${escHtml(email.subject || '(kein Betreff)')}</span>${folderBadge}${aiBadge}</span>
+      <span class="email-subject" style="${indent}">${attachmentDot}<span class="email-subject-text">${escHtml(email.subject || '(kein Betreff)')}</span>${folderBadge}${aiBadge}</span>
     </div>
     <div class="email-quick-actions">
       <button class="email-qa-btn qa-delete" title="Löschen">×</button>
