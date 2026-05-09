@@ -1146,8 +1146,8 @@ function buildEmailItem(email) {
        </div>`
     : '';
 
-  const attachmentDot = email.has_attachments
-    ? '<span class="attachment-dot" title="Anhang"></span>'
+  const attachmentClip = email.has_attachments
+    ? '<span class="attachment-clip" title="Anhang"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.99 8.83l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>'
     : '';
 
   item.innerHTML = `
@@ -1159,7 +1159,7 @@ function buildEmailItem(email) {
       ${spamBar}
       <span class="email-from" style="${indent}">${replyIcon}${escHtml(displayFrom)}</span>
       <span class="email-date">${date}</span>
-      <span class="email-subject" style="${indent}">${attachmentDot}<span class="email-subject-text">${escHtml(email.subject || '(kein Betreff)')}</span>${folderBadge}${aiBadge}</span>
+      <span class="email-subject" style="${indent}">${attachmentClip}<span class="email-subject-text">${escHtml(email.subject || '(kein Betreff)')}</span>${folderBadge}${aiBadge}</span>
     </div>
     <div class="email-quick-actions">
       <button class="email-qa-btn qa-delete" title="Löschen">×</button>
