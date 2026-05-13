@@ -1780,3 +1780,188 @@ justify-content: center;
 #detail-panel { position: relative; }
 
 /* ─────────────────────────────────────────────────────────── */
+
+/* ─── Massenversand ───────────────────────────────────────── */
+
+/* Banner, der das "An"-Feld ersetzt, wenn Bulk-Modus aktiv ist */
+#ci-bulk-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: rgba(255, 196, 0, 0.10);
+  border: 1px solid rgba(255, 196, 0, 0.45);
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--text);
+}
+.ci-bulk-banner-icon { font-size: 16px; }
+.ci-bulk-banner-text { flex: 1; }
+.ci-bulk-banner-text strong { font-weight: 600; }
+.ci-bulk-banner-edit,
+.ci-bulk-banner-clear {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text2);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ci-bulk-banner-edit:hover,
+.ci-bulk-banner-clear:hover { background: var(--bg3); color: var(--text); }
+.ci-bulk-banner-clear { padding: 3px 6px; }
+
+/* Eingabe-Modal */
+#bulk-modal-overlay,
+#bulk-status-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#bulk-modal,
+#bulk-status-modal {
+  background: var(--bg2);
+  border-radius: 12px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.25);
+  width: 520px;
+  max-width: 95vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#bulk-modal-header,
+#bulk-status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+#bulk-modal-title,
+#bulk-status-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+#bulk-modal-close,
+#bulk-status-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--text2);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+#bulk-modal-close:hover,
+#bulk-status-close:hover { background: var(--bg3); }
+#bulk-modal-body {
+  padding: 14px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+.bulk-modal-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.5;
+}
+#bulk-modal-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 200px;
+}
+#bulk-modal-errors {
+  padding: 8px 10px;
+  background: rgba(212, 83, 74, 0.12);
+  border: 1px solid rgba(212, 83, 74, 0.35);
+  color: #b8453d;
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+#bulk-modal-footer,
+#bulk-status-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+#bulk-modal-status {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text2);
+}
+
+/* Status-Modal */
+#bulk-status-summary {
+  padding: 10px 20px;
+  font-size: 13px;
+  color: var(--text2);
+  border-bottom: 1px solid var(--border);
+}
+#bulk-status-summary strong { color: var(--text); }
+#bulk-status-body {
+  padding: 8px 12px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 120px;
+}
+#bulk-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bulk-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 13px;
+}
+.bulk-status-row:hover { background: var(--bg3); }
+.bulk-status-icon {
+  flex: 0 0 auto;
+  width: 18px;
+  text-align: center;
+  font-size: 14px;
+}
+.bulk-status-addr {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.bulk-status-msg {
+  font-size: 12px;
+  color: var(--text2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+.bulk-status-row.success .bulk-status-icon { color: var(--success); }
+.bulk-status-row.error   .bulk-status-icon { color: var(--danger);  }
+.bulk-status-row.error   .bulk-status-addr { color: #b8453d; }
+.bulk-status-row.queued  { opacity: 0.55; }
+.bulk-status-row.sending .bulk-status-icon { color: var(--text2); }

@@ -759,6 +759,131 @@ async def send_email_endpoint(data: dict):
     return {"job_id": job_id, "status": "sending"}
 
 
+_EMAIL_RE = re.compile(r"^[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}$")
+
+
+async def _do_bulk_send(bulk_id: str, jobs: list[dict], base_data: dict,
+                       attachments: list, delay_seconds: float) -> None:
+    """Startet die Einzel-Sendejobs sequentiell mit ``delay_seconds`` Abstand.
+
+    Jeder Sub-Job nutzt ``_do_send_job`` wie ein normaler Versand — d.h. die
+    bestehenden SSE-Events (``send-result``) feuern pro Empfänger.
+    """
+    logger.info("Bulk-Send %s gestartet: %d Empfänger, Abstand %.1fs",
+                bulk_id, len(jobs), delay_seconds)
+    for idx, job in enumerate(jobs):
+        if idx > 0:
+            await asyncio.sleep(delay_seconds)
+        job_id = job["job_id"]
+        recipient = job["to"]
+
+        # Pro-Empfänger-Kopie: nur der erste Sub-Job darf Draft löschen und
+        # das Original als beantwortet markieren. Attachments-IDs werden in
+        # allen Sub-Jobs entfernt, damit der erste nicht die Datei-Refs
+        # für die nachfolgenden killt — Bulk-Cleanup übernehmen wir am Ende.
+        sub_data = dict(base_data)
+        sub_data["to"] = recipient
+        sub_data["attachment_ids"] = []
+        if idx > 0:
+            sub_data.pop("draft_id", None)
+            sub_data.pop("in_reply_to_email_id", None)
+
+        _send_jobs[job_id]["status"] = "sending"
+        # bewusst nicht awaiten: nächste Mail soll nach delay_seconds starten,
+        # unabhängig davon ob der vorherige Sub-Job schon fertig ist.
+        asyncio.create_task(_do_send_job(job_id, sub_data, attachments))
+
+    # Attachments einmalig am Ende aus den Temp-Uploads entfernen
+    for aid in base_data.get("_bulk_attachment_ids") or []:
+        _temp_uploads.pop(aid, None)
+
+
+@app.post("/emails/bulk-send")
+async def bulk_send_endpoint(data: dict):
+    """Versendet dieselbe E-Mail einzeln an viele Empfänger mit Zeitversatz.
+
+    Body wie ``/emails/send``, zusätzlich:
+      - ``recipients``: list[str] — eine E-Mail-Adresse pro Eintrag
+      - ``delay_seconds``: float (default 5.0) — Abstand zwischen den Mails
+    """
+    recipients_raw = data.get("recipients") or []
+    if not isinstance(recipients_raw, list) or not recipients_raw:
+        raise HTTPException(status_code=400, detail="recipients fehlt oder leer")
+
+    # Adressen normalisieren, validieren, deduplizieren (Reihenfolge erhalten)
+    seen: set[str] = set()
+    recipients: list[str] = []
+    invalid: list[str] = []
+    for raw in recipients_raw:
+        addr = (raw or "").strip()
+        if not addr:
+            continue
+        # Erlaubt "Name <addr>" oder reines "addr" — wir prüfen nur die addr
+        m = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", addr)
+        if not m or not _EMAIL_RE.match(m.group(0)):
+            invalid.append(addr)
+            continue
+        key = m.group(0).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        recipients.append(addr)
+
+    if invalid:
+        raise HTTPException(status_code=400,
+                            detail=f"Ungültige Adressen: {', '.join(invalid[:5])}")
+    if not recipients:
+        raise HTTPException(status_code=400, detail="Keine gültigen Empfänger")
+
+    from_account = (data.get("from_account") or "").strip()
+    smtp_server  = (data.get("smtp_server") or "").strip()
+    subject      = (data.get("subject") or "").strip()
+    if not from_account:
+        raise HTTPException(status_code=400, detail="Absender-Account fehlt")
+    if not smtp_server:
+        raise HTTPException(status_code=400, detail="SMTP-Server fehlt")
+
+    try:
+        delay_seconds = float(data.get("delay_seconds", 5.0))
+    except (TypeError, ValueError):
+        delay_seconds = 5.0
+    delay_seconds = max(0.0, min(delay_seconds, 300.0))
+
+    attachment_ids = data.get("attachment_ids") or []
+    attachments = [_temp_uploads[aid] for aid in attachment_ids if aid in _temp_uploads]
+
+    bulk_id = str(_uuid_mod.uuid4())
+    jobs: list[dict] = []
+    for recipient in recipients:
+        job_id = str(_uuid_mod.uuid4())
+        _send_jobs[job_id] = {
+            "status": "queued",
+            "to": recipient,
+            "subject": subject,
+            "bulk_id": bulk_id,
+        }
+        jobs.append({"job_id": job_id, "to": recipient})
+
+    base_data = dict(data)
+    base_data["from_account"] = from_account
+    base_data["smtp_server"]  = smtp_server
+    base_data["subject"]      = subject
+    base_data["cc"]           = ""  # CC ergibt bei N Einzel-Mails keinen Sinn
+    base_data.pop("to", None)
+    base_data["_bulk_attachment_ids"] = list(attachment_ids)
+
+    logger.info("Bulk-Send angelegt: bulk=%s, n=%d, delay=%.1fs, subject=%s",
+                bulk_id, len(jobs), delay_seconds, subject)
+
+    asyncio.create_task(_do_bulk_send(bulk_id, jobs, base_data,
+                                      attachments, delay_seconds))
+
+    return {
+        "bulk_id": bulk_id,
+        "jobs": jobs,
+        "delay_seconds": delay_seconds,
+    }
+
 
 @app.post("/emails/draft")
 async def create_draft(data: dict):

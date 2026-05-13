@@ -283,6 +283,12 @@ function _addSendNotif(jobId, to, subject) {
 }
 
 function _handleSendResult(data) {
+  // Bulk-Hook: wenn die job_id zu einem laufenden Massenversand gehört,
+  // übernimmt das Status-Modal die Anzeige — keine normale Notif.
+  if (_bulkTracking && _bulkTracking.byJobId.has(data.job_id)) {
+    _bulkApplyResult(data);
+    return;
+  }
   const el = _sendNotifContainer.querySelector(`[data-job-id="${data.job_id}"]`);
   if (!el) return;
 
@@ -2388,6 +2394,8 @@ async function closeCompose() {
   document.getElementById('btn-compose-cancel').textContent = 'Abbrechen';
   document.getElementById('detail-tabs').style.display = 'none';
   showTab('email');
+  // Massenversand-Modus zurücksetzen
+  _clearBulkMode();
 }
 
 function scheduleDraftSave() {
@@ -2430,6 +2438,12 @@ document.getElementById('btn-compose-cancel').addEventListener('click', closeCom
 document.getElementById('btn-send-inline').addEventListener('click', async () => {
   // Draft-Timer sofort stoppen — verhindert dass ein ausstehender Save nach dem Senden feuert
   clearTimeout(_draftTimer);
+
+  // Bulk-Modus zweigt früh ab — verwendet eigene Validierung und Status-UI.
+  if (_bulkRecipients.length > 0) {
+    await _sendBulk();
+    return;
+  }
 
   const to         = _toField.getAddresses().join(', ');
   const cc         = _ccField.getAddresses().join(', ');
@@ -2486,6 +2500,273 @@ document.getElementById('btn-send-inline').addEventListener('click', async () =>
   }
 });
 // ────────────────────────────────────────────────────────────
+
+// ── Massenversand ───────────────────────────────────────────
+//
+// Im Compose-Modus öffnet der Button "Massenversand" ein Modal mit einer
+// Textarea für E-Mail-Adressen (eine pro Zeile). Bei Übernahme ersetzt ein
+// Banner das normale "An"-Feld. Beim Senden ruft das Frontend
+// `/emails/bulk-send` auf; das Backend versendet je Empfänger eine eigene
+// Mail mit 5 s Abstand. SSE-Events `send-result` aktualisieren live ein
+// Status-Modal mit ✓/✗ pro Adresse — inklusive Retry- und Copy-Funktion.
+
+let _bulkRecipients = [];
+let _bulkTracking = null;  // { byJobId: Map<jobId,addr>, byAddr: Map<addr,row>, compose: {...} }
+const _EMAIL_RE = /^[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}$/;
+
+function _parseBulkInput(text) {
+  const valid = [], invalid = [], seen = new Set();
+  (text || '').split(/[\n,;]+/).forEach(line => {
+    const addr = line.trim();
+    if (!addr) return;
+    const m = addr.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/);
+    if (!m || !_EMAIL_RE.test(m[0])) { invalid.push(addr); return; }
+    const key = m[0].toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    valid.push(addr);
+  });
+  return { valid, invalid };
+}
+
+function _renderBulkBanner() {
+  const banner = document.getElementById('ci-bulk-banner');
+  const toField = document.getElementById('ci-to-field');
+  if (_bulkRecipients.length === 0) {
+    banner.style.display = 'none';
+    toField.style.display = '';
+    return;
+  }
+  banner.querySelector('.ci-bulk-banner-text').innerHTML =
+    `Massenversand aktiv: <strong>${_bulkRecipients.length}</strong> Empfänger`;
+  banner.style.display = 'flex';
+  toField.style.display = 'none';
+}
+
+function _clearBulkMode() {
+  _bulkRecipients = [];
+  _renderBulkBanner();
+}
+
+function _openBulkModal() {
+  const overlay  = document.getElementById('bulk-modal-overlay');
+  const textarea = document.getElementById('bulk-modal-textarea');
+  const errors   = document.getElementById('bulk-modal-errors');
+  textarea.value = _bulkRecipients.join('\n');
+  errors.style.display = 'none';
+  errors.textContent = '';
+  overlay.style.display = 'flex';
+  setTimeout(() => textarea.focus(), 0);
+}
+
+function _closeBulkModal() {
+  document.getElementById('bulk-modal-overlay').style.display = 'none';
+}
+
+document.getElementById('btn-bulk').addEventListener('click', _openBulkModal);
+document.getElementById('ci-bulk-edit').addEventListener('click', _openBulkModal);
+document.getElementById('ci-bulk-clear').addEventListener('click', _clearBulkMode);
+document.getElementById('bulk-modal-close').addEventListener('click', _closeBulkModal);
+document.getElementById('bulk-modal-cancel').addEventListener('click', _closeBulkModal);
+document.getElementById('bulk-modal-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'bulk-modal-overlay') _closeBulkModal();
+});
+
+document.getElementById('bulk-modal-apply').addEventListener('click', () => {
+  const textarea = document.getElementById('bulk-modal-textarea');
+  const errors   = document.getElementById('bulk-modal-errors');
+  const { valid, invalid } = _parseBulkInput(textarea.value);
+  if (invalid.length > 0) {
+    errors.style.display = 'block';
+    errors.textContent = 'Ungültige Adressen:\n' + invalid.join('\n');
+    return;
+  }
+  if (valid.length === 0) {
+    errors.style.display = 'block';
+    errors.textContent = 'Bitte mindestens eine gültige Adresse eingeben.';
+    return;
+  }
+  _bulkRecipients = valid;
+  _renderBulkBanner();
+  _closeBulkModal();
+});
+
+async function _sendBulk() {
+  const subject    = document.getElementById('ci-subject').value.trim();
+  const ciBodyEl   = document.getElementById('ci-body');
+  const body       = (ciBodyEl.innerText || '').trim();
+  const body_html  = _linkifyHtml(ciBodyEl.innerHTML || '');
+  const _qEl       = document.getElementById('ci-quote');
+  const quote      = _qEl.textContent;
+  const quote_html = _qEl.dataset.quoteHtml || '';
+  const fromAccId  = document.getElementById('ci-from-account').value;
+  const smtpId     = document.getElementById('ci-smtp-server').value;
+  const statusEl   = document.getElementById('draft-status');
+
+  if (!subject) {
+    statusEl.textContent = 'Bitte Betreff ausfüllen.';
+    statusEl.style.color = 'var(--danger)';
+    return;
+  }
+  if (_bulkRecipients.length === 0) {
+    statusEl.textContent = 'Massenversand-Liste ist leer.';
+    statusEl.style.color = 'var(--danger)';
+    return;
+  }
+
+  const composeSnapshot = {
+    subject, body, body_html, quote, quote_html,
+    from_account: fromAccId, smtp_server: smtpId,
+    attachment_ids: _composeAttachments.map(a => a.id),
+    draft_id: _draftId,
+  };
+  const recipients = _bulkRecipients.slice();
+
+  _composeAttachments = [];
+  _editingDraftItemEl = null;
+  closeCompose();
+
+  _bulkTracking = { byJobId: new Map(), byAddr: new Map(), compose: composeSnapshot };
+  _openBulkStatusModal();
+  await _bulkStart(recipients, composeSnapshot);
+}
+
+async function _bulkStart(recipients, snapshot) {
+  recipients.forEach(addr => _bulkUpsertRow(addr, { status: 'queued', error: null, jobId: null }));
+  _bulkUpdateSummary();
+
+  let resp;
+  try {
+    resp = await api.bulkSendEmail({ ...snapshot, recipients, delay_seconds: 5 });
+  } catch (e) {
+    recipients.forEach(addr => _bulkUpsertRow(addr, { status: 'error', error: e.message, jobId: null }));
+    _bulkFinalize();
+    return;
+  }
+  (resp.jobs || []).forEach(j => {
+    _bulkTracking.byJobId.set(j.job_id, j.to);
+    _bulkUpsertRow(j.to, { status: 'sending', error: null, jobId: j.job_id });
+  });
+  _bulkUpdateSummary();
+}
+
+function _bulkApplyResult(data) {
+  const addr = _bulkTracking.byJobId.get(data.job_id);
+  if (!addr) return;
+  _bulkUpsertRow(addr, {
+    status: data.success ? 'success' : 'error',
+    error: data.success ? null : (data.error || 'Unbekannter Fehler'),
+    jobId: data.job_id,
+  });
+  _bulkUpdateSummary();
+  const allDone = Array.from(_bulkTracking.byAddr.values())
+    .every(r => r.status === 'success' || r.status === 'error');
+  if (allDone) _bulkFinalize();
+}
+
+function _bulkUpsertRow(addr, patch) {
+  const prev = _bulkTracking.byAddr.get(addr) || {};
+  _bulkTracking.byAddr.set(addr, { ...prev, ...patch, addr });
+  _bulkRenderList();
+}
+
+function _bulkRenderList() {
+  const listEl = document.getElementById('bulk-status-list');
+  // Sortierung: Erfolge oben, dann sending/queued, Fehler ganz unten (zum Rauskopieren).
+  const order = { success: 0, sending: 1, queued: 2, error: 3 };
+  const rows = Array.from(_bulkTracking.byAddr.values())
+    .sort((a, b) => (order[a.status] - order[b.status]) || a.addr.localeCompare(b.addr));
+  listEl.innerHTML = rows.map(r => {
+    let icon, cls;
+    if (r.status === 'success')      { icon = '✓'; cls = 'success'; }
+    else if (r.status === 'error')   { icon = '✗'; cls = 'error';   }
+    else if (r.status === 'sending') { icon = '⏳'; cls = 'sending'; }
+    else                              { icon = '·'; cls = 'queued';  }
+    const msg = r.status === 'error' && r.error
+      ? `<span class="bulk-status-msg" title="${_escHtml(r.error)}">${_escHtml(r.error)}</span>`
+      : '';
+    return `<div class="bulk-status-row ${cls}"><span class="bulk-status-icon">${icon}</span><span class="bulk-status-addr">${_escHtml(r.addr)}</span>${msg}</div>`;
+  }).join('');
+}
+
+function _bulkUpdateSummary() {
+  const rows = Array.from(_bulkTracking.byAddr.values());
+  const total = rows.length;
+  const ok    = rows.filter(r => r.status === 'success').length;
+  const err   = rows.filter(r => r.status === 'error').length;
+  const pending = total - ok - err;
+  const titleEl = document.getElementById('bulk-status-title');
+  const sumEl   = document.getElementById('bulk-status-summary');
+  if (pending > 0) {
+    titleEl.textContent = 'Massenversand läuft…';
+    sumEl.innerHTML = `<strong>${ok}</strong> gesendet · <strong>${err}</strong> Fehler · <strong>${pending}</strong> ausstehend (insgesamt ${total})`;
+  } else {
+    titleEl.textContent = err === 0
+      ? 'Massenversand abgeschlossen'
+      : `Massenversand mit ${err} Fehler${err === 1 ? '' : 'n'} beendet`;
+    sumEl.innerHTML = `<strong>${ok}</strong> gesendet · <strong>${err}</strong> Fehler (insgesamt ${total})`;
+  }
+}
+
+function _openBulkStatusModal() {
+  document.getElementById('bulk-status-overlay').style.display = 'flex';
+  document.getElementById('bulk-status-close').style.display = 'none';
+  document.getElementById('bulk-status-done').style.display = 'none';
+  document.getElementById('bulk-status-retry').style.display = 'none';
+  document.getElementById('bulk-status-copy-failed').style.display = 'none';
+}
+
+function _bulkFinalize() {
+  const hasErrors = Array.from(_bulkTracking.byAddr.values()).some(r => r.status === 'error');
+  document.getElementById('bulk-status-close').style.display = '';
+  document.getElementById('bulk-status-done').style.display = '';
+  document.getElementById('bulk-status-retry').style.display = hasErrors ? '' : 'none';
+  document.getElementById('bulk-status-copy-failed').style.display = hasErrors ? '' : 'none';
+}
+
+function _closeBulkStatus() {
+  document.getElementById('bulk-status-overlay').style.display = 'none';
+  _bulkTracking = null;
+}
+
+document.getElementById('bulk-status-close').addEventListener('click', _closeBulkStatus);
+document.getElementById('bulk-status-done').addEventListener('click', _closeBulkStatus);
+
+document.getElementById('bulk-status-copy-failed').addEventListener('click', async () => {
+  if (!_bulkTracking) return;
+  const failed = Array.from(_bulkTracking.byAddr.values())
+    .filter(r => r.status === 'error').map(r => r.addr);
+  if (failed.length === 0) return;
+  try {
+    await navigator.clipboard.writeText(failed.join('\n'));
+    const btn = document.getElementById('bulk-status-copy-failed');
+    const orig = btn.textContent;
+    btn.textContent = 'Kopiert ✓';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  } catch (_) { /* Clipboard blockiert — still */ }
+});
+
+document.getElementById('bulk-status-retry').addEventListener('click', async () => {
+  if (!_bulkTracking) return;
+  const failed = Array.from(_bulkTracking.byAddr.values())
+    .filter(r => r.status === 'error').map(r => r.addr);
+  if (failed.length === 0) return;
+
+  // Alte job_ids der fehlgeschlagenen aus Tracking entfernen (sonst kollidieren
+  // ggf. verspätete SSE-Events des ersten Laufs mit dem Retry).
+  for (const [jobId, addr] of Array.from(_bulkTracking.byJobId.entries())) {
+    if (failed.includes(addr)) _bulkTracking.byJobId.delete(jobId);
+  }
+
+  document.getElementById('bulk-status-close').style.display = 'none';
+  document.getElementById('bulk-status-done').style.display = 'none';
+  document.getElementById('bulk-status-retry').style.display = 'none';
+  document.getElementById('bulk-status-copy-failed').style.display = 'none';
+
+  // Retry verwendet KEINE alten draft_id/attachment_ids — die wurden beim ersten Lauf konsumiert.
+  const snapshot = { ..._bulkTracking.compose, draft_id: null, attachment_ids: [] };
+  await _bulkStart(failed, snapshot);
+});
 
 document.getElementById('btn-new-email').addEventListener('click', () => {
   openCompose({});

@@ -7,7 +7,7 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0a84ff">
-  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/main.css?v=20260513-bulk">
   <script src="js/auth.js"></script>
   <script>auth.requireAuth();</script>
 </head>
@@ -153,6 +153,7 @@
             <button class="action-btn primary" id="btn-send-inline">Senden</button>
             <button class="action-btn" id="btn-compose-cancel">Abbrechen</button>
             <button class="action-btn" id="btn-attach" title="Datei anhängen">Anhang</button>
+            <button class="action-btn" id="btn-bulk" title="Massenversand: dieselbe Mail einzeln an viele Empfänger">Massenversand</button>
             <input type="file" id="ci-file-input" multiple style="display:none">
             <span id="draft-status"></span>
           </div>
@@ -173,6 +174,12 @@
                   <input type="text" class="address-chips-input" id="ci-to-input" placeholder="empfaenger@beispiel.de" autocomplete="off">
                 </div>
                 <div class="address-suggestions" id="ci-to-suggestions"></div>
+                <div id="ci-bulk-banner" style="display:none">
+                  <span class="ci-bulk-banner-icon">📋</span>
+                  <span class="ci-bulk-banner-text"></span>
+                  <button type="button" class="ci-bulk-banner-edit" id="ci-bulk-edit">Bearbeiten</button>
+                  <button type="button" class="ci-bulk-banner-clear" id="ci-bulk-clear" title="Massenversand verwerfen">✕</button>
+                </div>
               </div>
               <span class="compose-lbl-mid">CC</span>
               <div class="ci-addr-wrap">
@@ -295,8 +302,47 @@
     </div>
   </div>
 
-  <script src="js/api.js?v=20260424-5"></script>
-  <script src="js/inbox.js?v=20260424-5"></script>
+  <!-- Massenversand: Eingabe-Modal -->
+  <div id="bulk-modal-overlay" style="display:none">
+    <div id="bulk-modal">
+      <div id="bulk-modal-header">
+        <span id="bulk-modal-title">Massenversand</span>
+        <button id="bulk-modal-close">✕</button>
+      </div>
+      <div id="bulk-modal-body">
+        <p class="bulk-modal-hint">Eine E-Mail-Adresse pro Zeile. Dieselbe Mail wird im Abstand von 5 Sekunden einzeln versendet — jeder Empfänger sieht nur sich selbst im „An“-Feld.</p>
+        <textarea id="bulk-modal-textarea" rows="12" placeholder="anna@example.de&#10;bernd@example.com&#10;…" autocomplete="off" spellcheck="false"></textarea>
+        <div id="bulk-modal-errors" style="display:none"></div>
+      </div>
+      <div id="bulk-modal-footer">
+        <span id="bulk-modal-status"></span>
+        <button class="action-btn" id="bulk-modal-cancel">Abbrechen</button>
+        <button class="action-btn primary" id="bulk-modal-apply">Übernehmen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Massenversand: Status-Modal -->
+  <div id="bulk-status-overlay" style="display:none">
+    <div id="bulk-status-modal">
+      <div id="bulk-status-header">
+        <span id="bulk-status-title">Massenversand läuft…</span>
+        <button id="bulk-status-close" style="display:none">✕</button>
+      </div>
+      <div id="bulk-status-summary"></div>
+      <div id="bulk-status-body">
+        <div id="bulk-status-list"></div>
+      </div>
+      <div id="bulk-status-footer">
+        <button class="action-btn" id="bulk-status-copy-failed" style="display:none">Fehlgeschlagene kopieren</button>
+        <button class="action-btn" id="bulk-status-retry" style="display:none">Fehlgeschlagene erneut versuchen</button>
+        <button class="action-btn primary" id="bulk-status-done" style="display:none">Schließen</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js?v=20260513-bulk"></script>
+  <script src="js/inbox.js?v=20260513-bulk"></script>
 </body>
 </html>
 
