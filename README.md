@@ -2,7 +2,7 @@
 
 E-Mail-Client auf Basis von FastAPI + PocketBase + Vanilla JS, deployed via Coolify.
 
-**Dokumentation:** `~/Syncthing/Claude/Wissens-Dateien/20_Apps/mailflow/`
+**Dokumentation:** `~/Syncthing/Claude/Wissen/20_Apps/mailflow/`
 
 | Datei | Inhalt |
 |---|---|
@@ -12,7 +12,7 @@ E-Mail-Client auf Basis von FastAPI + PocketBase + Vanilla JS, deployed via Cool
 
 ## Sicherheit
 
-Auth-Pattern, PocketBase-Rules und n8n-Tokens folgen dem zentralen Modell in `~/Syncthing/Claude/Wissens-Dateien/20_Apps/_shared/sicherheit.md`.
+Auth-Pattern, PocketBase-Rules und n8n-Tokens folgen dem zentralen Modell in `~/Syncthing/Claude/Wissen/20_Apps/_shared/sicherheit.md`.
 
 ## Refactoring 2026-04-21
 
