@@ -767,7 +767,7 @@ flex: 0 0 175px;
 flex: 0 0 130px;}
 
 #detail-body {
-max-width:100px;
+max-width:1000px;
   flex: 1;
   padding: 20px;
   display: flex;
