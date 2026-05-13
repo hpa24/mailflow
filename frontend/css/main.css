@@ -1813,8 +1813,7 @@ justify-content: center;
 .ci-bulk-banner-clear { padding: 3px 6px; }
 
 /* Eingabe-Modal */
-#bulk-modal-overlay,
-#bulk-status-overlay {
+#bulk-modal-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.4);
@@ -1823,8 +1822,7 @@ justify-content: center;
   align-items: center;
   justify-content: center;
 }
-#bulk-modal,
-#bulk-status-modal {
+#bulk-modal {
   background: var(--bg2);
   border-radius: 12px;
   box-shadow: 0 8px 40px rgba(0,0,0,0.25);
@@ -1835,31 +1833,72 @@ justify-content: center;
   flex-direction: column;
   overflow: hidden;
 }
-#bulk-modal-header,
-#bulk-status-header {
+/* Floating Status-Panel (nicht blockierend) */
+#bulk-status-panel {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 420px;
+  max-width: calc(100vw - 40px);
+  max-height: 60vh;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.22);
+  z-index: 1500;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#bulk-status-panel.minimized { max-height: none; }
+#bulk-status-panel.minimized #bulk-status-body,
+#bulk-status-panel.minimized #bulk-status-footer { display: none; }
+#bulk-status-panel.minimized #bulk-status-summary { border-bottom: none; }
+#bulk-status-panel.minimized #bulk-status-minimize { transform: rotate(180deg); }
+#bulk-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
 }
+#bulk-status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+#bulk-status-header:hover { background: var(--bg3); }
 #bulk-modal-title,
 #bulk-status-title {
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+#bulk-modal-title { font-size: 17px; }
 #bulk-modal-close,
-#bulk-status-close {
+#bulk-status-close,
+#bulk-status-minimize {
   background: none;
   border: none;
-  font-size: 18px;
+  font-size: 16px;
   cursor: pointer;
   color: var(--text2);
   padding: 2px 6px;
   border-radius: 4px;
+  transition: transform 0.15s ease;
 }
 #bulk-modal-close:hover,
-#bulk-status-close:hover { background: var(--bg3); }
+#bulk-status-close:hover,
+#bulk-status-minimize:hover { background: var(--bg3); color: var(--text); }
 #bulk-modal-body {
   padding: 14px 20px;
   display: flex;
@@ -1900,19 +1939,21 @@ justify-content: center;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  padding: 12px 20px;
+  gap: 8px;
+  padding: 10px 16px;
   border-top: 1px solid var(--border);
+  flex-wrap: wrap;
 }
+#bulk-modal-footer { padding: 12px 20px; gap: 10px; }
 #bulk-modal-status {
   flex: 1;
   font-size: 12px;
   color: var(--text2);
 }
 
-/* Status-Modal */
+/* Status-Panel innen */
 #bulk-status-summary {
-  padding: 10px 20px;
+  padding: 10px 16px;
   font-size: 13px;
   color: var(--text2);
   border-bottom: 1px solid var(--border);

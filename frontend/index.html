@@ -7,7 +7,7 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0a84ff">
-  <link rel="stylesheet" href="css/main.css?v=20260513-bulk">
+  <link rel="stylesheet" href="css/main.css?v=20260513-bulk2">
   <script src="js/auth.js"></script>
   <script>auth.requireAuth();</script>
 </head>
@@ -322,27 +322,26 @@
     </div>
   </div>
 
-  <!-- Massenversand: Status-Modal -->
-  <div id="bulk-status-overlay" style="display:none">
-    <div id="bulk-status-modal">
-      <div id="bulk-status-header">
-        <span id="bulk-status-title">Massenversand läuft…</span>
-        <button id="bulk-status-close" style="display:none">✕</button>
-      </div>
-      <div id="bulk-status-summary"></div>
-      <div id="bulk-status-body">
-        <div id="bulk-status-list"></div>
-      </div>
-      <div id="bulk-status-footer">
-        <button class="action-btn" id="bulk-status-copy-failed" style="display:none">Fehlgeschlagene kopieren</button>
-        <button class="action-btn" id="bulk-status-retry" style="display:none">Fehlgeschlagene erneut versuchen</button>
-        <button class="action-btn primary" id="bulk-status-done" style="display:none">Schließen</button>
-      </div>
+  <!-- Massenversand: Status-Panel (floating, nicht blockierend) -->
+  <div id="bulk-status-panel" style="display:none">
+    <div id="bulk-status-header" title="Klicken zum Ein-/Ausklappen">
+      <span id="bulk-status-title">Massenversand läuft…</span>
+      <button id="bulk-status-minimize" title="Ein-/Ausklappen">▾</button>
+      <button id="bulk-status-close" style="display:none" title="Schließen">✕</button>
+    </div>
+    <div id="bulk-status-summary"></div>
+    <div id="bulk-status-body">
+      <div id="bulk-status-list"></div>
+    </div>
+    <div id="bulk-status-footer">
+      <button class="action-btn" id="bulk-status-copy-failed" style="display:none">Fehlgeschlagene kopieren</button>
+      <button class="action-btn" id="bulk-status-retry" style="display:none">Fehlgeschlagene erneut versuchen</button>
+      <button class="action-btn primary" id="bulk-status-done" style="display:none">Schließen</button>
     </div>
   </div>
 
-  <script src="js/api.js?v=20260513-bulk"></script>
-  <script src="js/inbox.js?v=20260513-bulk"></script>
+  <script src="js/api.js?v=20260513-bulk2"></script>
+  <script src="js/inbox.js?v=20260513-bulk2"></script>
 </body>
 </html>
 

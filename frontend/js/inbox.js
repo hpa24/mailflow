@@ -2709,7 +2709,9 @@ function _bulkUpdateSummary() {
 }
 
 function _openBulkStatusModal() {
-  document.getElementById('bulk-status-overlay').style.display = 'flex';
+  const panel = document.getElementById('bulk-status-panel');
+  panel.style.display = 'flex';
+  panel.classList.remove('minimized');
   document.getElementById('bulk-status-close').style.display = 'none';
   document.getElementById('bulk-status-done').style.display = 'none';
   document.getElementById('bulk-status-retry').style.display = 'none';
@@ -2725,11 +2727,25 @@ function _bulkFinalize() {
 }
 
 function _closeBulkStatus() {
-  document.getElementById('bulk-status-overlay').style.display = 'none';
+  const panel = document.getElementById('bulk-status-panel');
+  panel.style.display = 'none';
+  panel.classList.remove('minimized');
   _bulkTracking = null;
 }
 
-document.getElementById('bulk-status-close').addEventListener('click', _closeBulkStatus);
+function _toggleBulkStatusMinimized() {
+  document.getElementById('bulk-status-panel').classList.toggle('minimized');
+}
+
+// Header-Klick und Minimize-Button klappen ein/aus; Schließen-/Aktion-Buttons stoppen Bubble.
+document.getElementById('bulk-status-header').addEventListener('click', (e) => {
+  if (e.target.closest('#bulk-status-close')) return;
+  _toggleBulkStatusMinimized();
+});
+document.getElementById('bulk-status-close').addEventListener('click', (e) => {
+  e.stopPropagation();
+  _closeBulkStatus();
+});
 document.getElementById('bulk-status-done').addEventListener('click', _closeBulkStatus);
 
 document.getElementById('bulk-status-copy-failed').addEventListener('click', async () => {

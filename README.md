@@ -64,12 +64,12 @@ Details der Sub-Job-Erzeugung: nur der **erste** Sub-Job behält `draft_id` und 
 ### Frontend
 
 - **`api.js`:** `bulkSendEmail(data)` → `/emails/bulk-send`.
-- **`index.html`:** Action-Bar-Button `#btn-bulk`, Banner `#ci-bulk-banner` im An-Zeilen-Container (ersetzt `#ci-to-field` per `display:none`), zwei Modals `#bulk-modal-overlay` (Eingabe) und `#bulk-status-overlay` (Live-Status).
-- **`inbox.js`:** State `_bulkRecipients` (aktive Liste) und `_bulkTracking = { byJobId, byAddr, compose }` (laufender Versand). `_parseBulkInput` splittet nach `\n`/`,`/`;`, validiert mit `_EMAIL_RE`, dedupliziert. Der bestehende `btn-send-inline`-Handler zweigt früh in `_sendBulk()` ab, wenn `_bulkRecipients.length > 0`. **SSE-Hook in `_handleSendResult`:** ist die `job_id` in `_bulkTracking.byJobId`, übernimmt das Status-Modal die Anzeige und die normale Send-Notif wird unterdrückt. `closeCompose()` ruft `_clearBulkMode()`, sodass Bulk-State nicht zwischen Compose-Sitzungen leakt.
+- **`index.html`:** Action-Bar-Button `#btn-bulk`, Banner `#ci-bulk-banner` im An-Zeilen-Container (ersetzt `#ci-to-field` per `display:none`), Eingabe-Modal `#bulk-modal-overlay` und nicht-blockierendes Floating-Panel `#bulk-status-panel` (unten rechts, durch Header-Klick einklappbar — `.minimized` blendet Body+Footer aus). Während der Bulk läuft, bleibt die übrige UI bedienbar.
+- **`inbox.js`:** State `_bulkRecipients` (aktive Liste) und `_bulkTracking = { byJobId, byAddr, compose }` (laufender Versand). `_parseBulkInput` splittet nach `\n`/`,`/`;`, validiert mit `_EMAIL_RE`, dedupliziert. Der bestehende `btn-send-inline`-Handler zweigt früh in `_sendBulk()` ab, wenn `_bulkRecipients.length > 0`. **SSE-Hook in `_handleSendResult`:** ist die `job_id` in `_bulkTracking.byJobId`, übernimmt das Status-Panel die Anzeige und die normale Send-Notif wird unterdrückt. `closeCompose()` ruft `_clearBulkMode()`, sodass Bulk-State nicht zwischen Compose-Sitzungen leakt.
 - **Retry:** beim Klick auf „Fehlgeschlagene erneut versuchen“ werden die alten `job_id`s der fehlgeschlagenen Adressen aus `byJobId` entfernt (vermeidet Race mit verspäteten SSE-Events) und `_bulkStart(failed, snapshot)` neu aufgerufen — mit `draft_id: null` und `attachment_ids: []`, da beides beim ersten Lauf konsumiert wurde.
 
 ### Bewusst nicht gebaut
 
 - **Platzhalter** (`{{name}}` etc.) — braucht zweispaltige Eingabe (Adresse + Daten), kommt später.
 - **Backend-Persistenz** der Bulk-Jobs — `_send_jobs` ist in-memory. Bei Backend-Restart mitten im Bulk gehen offene Sub-Jobs verloren. Bei 5 s × N ist das Fenster klein; bei Bedarf später in PocketBase verlagern.
-- **Progress-Bar** im Status-Modal — die Summary-Zeile reicht.
+- **Progress-Bar** im Status-Panel — die Summary-Zeile reicht.
