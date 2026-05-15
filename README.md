@@ -73,3 +73,46 @@ Details der Sub-Job-Erzeugung: nur der **erste** Sub-Job behält `draft_id` und 
 - **Platzhalter** (`{{name}}` etc.) — braucht zweispaltige Eingabe (Adresse + Daten), kommt später.
 - **Backend-Persistenz** der Bulk-Jobs — `_send_jobs` ist in-memory. Bei Backend-Restart mitten im Bulk gehen offene Sub-Jobs verloren. Bei 5 s × N ist das Fenster klein; bei Bedarf später in PocketBase verlagern.
 - **Progress-Bar** im Status-Panel — die Summary-Zeile reicht.
+
+## Webhooks (externer Mail-Versand) 2026-05-15
+
+Externe Workflows (Xano, Webseiten-Kontaktformulare, Buchungssysteme) lösen den Versand über einen eigenen, pro Use-Case konfigurierten Endpoint aus — als Ablösung von Make. Eine Webhook-Konfig bündelt SMTP-Server, Absender-Account, optionale Default-Empfänger, Override-Berechtigungen und einen eigenen `api_key`. Versand läuft durch dieselbe `smtp_sender.send_email`-Pipeline wie die UI, daher landet jede Mail wie gewohnt im Sent-Ordner per IMAP APPEND.
+
+### Endpoint
+
+**`POST /webhooks/{slug}/send`** — von der globalen Frontend-API-Key-Middleware ausgenommen, validiert eigenen Key per `X-Webhook-Key`-Header (`secrets.compare_digest`). Payload-Felder: `to`, `subject`, `body` und/oder `body_html`, optional `reply_to`, `cc`. Override-Felder werden nur akzeptiert wenn der entsprechende Toggle im Webhook aktiv ist (`allow_to_override`, `allow_reply_to`, `allow_cc`) — sonst kommt der Wert aus der Webhook-Konfig (`default_to`) oder bleibt leer. `to` darf payload-seitig nur überschrieben werden wenn das Feld nicht leer ist, sonst greift `default_to`.
+
+Bei `is_active=false` oder unbekanntem Slug wird bewusst `401 Unauthorized` zurückgegeben (kein 404), damit Slug-Existenz nicht durch Fehlercodes leakt.
+
+### Collections
+
+- **`webhooks`** (`pbc_3653375940`) — `name`, `slug` (unique, `^[a-z0-9-]+$`), `smtp_server` (rel), `from_account` (rel), `default_to`, `from_name_override`, `allow_to_override`/`allow_reply_to`/`allow_cc` (bool), `api_key` (unique, generiert als `whk_` + `secrets.token_urlsafe(32)`), `is_active`. Indexe: unique auf `slug` und `api_key`.
+- **`webhook_logs`** (`pbc_305862465`) — `webhook` (rel, cascadeDelete), `ip`, `status` (`success`/`error`), `to`, `subject`, `error`, `message_id`, `email` (rel zur `emails`-Collection, optional). Jeder externer Aufruf — auch Validierungsfehler ohne Versand — wird hier protokolliert.
+
+### Reply-To-Header
+
+`smtp_sender.send_email` hat neuen Parameter `reply_to: str = ""`; wenn gesetzt wird `msg["Reply-To"]` gefügt. Use Case Kontaktformular: Absender = `zentrale@hpa24.de` (vom Mailflow-Account), Reply-To = User-Adresse — Klick auf „Antworten" landet direkt beim User.
+
+### Absender-Anzeigename-Override
+
+Pro Webhook optionales Feld `from_name_override`: überschreibt für diesen Webhook den `from_name` aus dem Account. So sieht der Empfänger im Postfach klar getrennt z.B. „Verwaltung, HPA24" statt dem persönlichen Namen aus dem Account. Implementierung: `send_email` bekommt Parameter `from_name_override`, beim Aufbau des `From`-Headers gilt `from_name = from_name_override or acc.get("from_name", "")`.
+
+### Verwaltungs-UI
+
+Topbar-Button **„Webhooks"** öffnet ein Modal mit drei Views (List / Edit / Logs). Anlegen: alle Felder im Modal, `api_key` wird beim Speichern serverseitig erzeugt und nach Anlage als read-only mit Copy-Button + Rotate-Button (`PATCH` mit `rotate_api_key: true`) angezeigt. Webhook-URL ebenfalls read-only kopierbar. Eingebaute Hilfe-Sektion (`<details>`) zeigt das erwartete JSON-Schema für Xano-Setup.
+
+Logs-View pro Webhook: letzte 100 Einträge mit Status-Icon, Timestamp, IP, Empfänger, Betreff, Fehler und Message-ID — grüner Balken bei Success, roter bei Error.
+
+### Drei Ebenen Mail-Historie
+
+Bei Kunden-Reklamationen („Mail nicht angekommen") drei voneinander unabhängige Anhaltspunkte:
+
+1. **Webhook-Trigger erfolgt?** → `webhook_logs` (deckt auch Aufrufe ab, die vor dem SMTP-Versand aus Validierungsgründen abbrechen)
+2. **SMTP-Versand erfolgreich?** → Message-ID im Log-Eintrag
+3. **Im Sent-Folder?** → IMAP APPEND wie bisher, nach nächstem Sync auch in der `emails`-Collection sichtbar
+
+### Bewusst nicht gebaut
+
+- **Templates / Platzhalter** im Webhook-Body — Xano liefert fertige Texte. Wenn später nötig, würde das in `webhooks` als `subject_template` / `body_html_template` mit Jinja-ähnlichem Rendering ergänzt.
+- **From-Address-Override per Payload** — der Absender ist bewusst pro Webhook in der Config festgenagelt (Anti-Spoofing). Wenn ein Workflow mehrere Absender braucht: pro Absender ein eigener Webhook.
+- **Rate-Limiting** im Endpoint — bisher kein Bedarf, der eigene API-Key pro Webhook + die externe Netcup-Firewall reichen. Würde sich bei Missbrauch trivial via fastapi-limiter ergänzen lassen.
