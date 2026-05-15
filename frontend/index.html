@@ -7,7 +7,7 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0a84ff">
-  <link rel="stylesheet" href="css/main.css?v=20260513-bulk2">
+  <link rel="stylesheet" href="css/main.css?v=20260515-webhooks">
   <script src="js/auth.js"></script>
   <script>auth.requireAuth();</script>
 </head>
@@ -26,6 +26,7 @@
 <button class="action-btn primary" id="btn-new-email">Neue E-Mail</button>
         <button class="action-btn" id="btn-ki-mode">KI-Modus</button>
         <button class="action-btn" id="btn-spam-rules" title="Geblockte Absender verwalten">Blocklist<span id="spam-rules-count" class="badge-count" style="display:none">0</span></button>
+        <button class="action-btn" id="btn-webhooks" title="Externe Webhooks für Mail-Versand">Webhooks</button>
         <div id="search-wrap">
           <input type="text" id="search-input" placeholder="Suchen…" autocomplete="off">
           <button id="search-clear" title="Suche beenden">✕</button>
@@ -340,8 +341,113 @@
     </div>
   </div>
 
-  <script src="js/api.js?v=20260513-bulk2"></script>
-  <script src="js/inbox.js?v=20260513-bulk2"></script>
+  <!-- Webhooks-Verwaltung -->
+  <div id="webhooks-modal-overlay" style="display:none">
+    <div id="webhooks-modal">
+      <div id="webhooks-modal-header">
+        <span id="webhooks-modal-title">Webhooks</span>
+        <button id="webhooks-modal-close">✕</button>
+      </div>
+      <div id="webhooks-modal-body">
+        <!-- List view -->
+        <div id="webhooks-list-view">
+          <div class="webhooks-toolbar">
+            <button class="action-btn primary" id="btn-webhook-new">+ Neuer Webhook</button>
+          </div>
+          <div id="webhooks-list">
+            <div class="webhooks-loading">Lade…</div>
+          </div>
+        </div>
+
+        <!-- Edit view -->
+        <div id="webhook-edit-view" style="display:none">
+          <div class="modal-field-row">
+            <label class="modal-lbl">Name</label>
+            <input type="text" id="wh-name" placeholder="z.B. Kontaktformular barres.de">
+          </div>
+          <div class="modal-field-row">
+            <label class="modal-lbl">Slug (URL-Pfad)</label>
+            <input type="text" id="wh-slug" placeholder="kontaktformular-barres" autocomplete="off">
+            <small class="wh-hint">nur a-z, 0-9, Bindestrich</small>
+          </div>
+          <div class="modal-field-row">
+            <label class="modal-lbl">SMTP-Server</label>
+            <select id="wh-smtp-server"></select>
+          </div>
+          <div class="modal-field-row">
+            <label class="modal-lbl">Absender-Account</label>
+            <select id="wh-from-account"></select>
+          </div>
+          <div class="modal-field-row">
+            <label class="modal-lbl">Default-Empfänger</label>
+            <input type="text" id="wh-default-to" placeholder="leer = Xano muss 'to' liefern">
+            <small class="wh-hint">Bei Buchungen: feste Adresse eintragen, &laquo;An mich&raquo; ohne Override</small>
+          </div>
+          <div class="modal-field-row">
+            <label class="modal-lbl">Optionen</label>
+            <div class="wh-toggles">
+              <label class="wh-toggle"><input type="checkbox" id="wh-allow-to-override"> Xano darf <code>to</code> überschreiben</label>
+              <label class="wh-toggle"><input type="checkbox" id="wh-allow-reply-to"> Xano darf <code>reply_to</code> setzen</label>
+              <label class="wh-toggle"><input type="checkbox" id="wh-allow-cc"> Xano darf <code>cc</code> setzen</label>
+              <label class="wh-toggle"><input type="checkbox" id="wh-is-active"> aktiv</label>
+            </div>
+          </div>
+          <div class="modal-field-row" id="wh-credentials-row" style="display:none">
+            <label class="modal-lbl">Webhook-URL</label>
+            <div class="wh-copy-row">
+              <input type="text" id="wh-url" readonly>
+              <button class="action-btn" id="wh-url-copy" type="button">Kopieren</button>
+            </div>
+          </div>
+          <div class="modal-field-row" id="wh-apikey-row" style="display:none">
+            <label class="modal-lbl">API-Key</label>
+            <div class="wh-copy-row">
+              <input type="text" id="wh-apikey" readonly>
+              <button class="action-btn" id="wh-apikey-copy" type="button">Kopieren</button>
+              <button class="action-btn" id="wh-apikey-rotate" type="button" title="Neuen Key erzeugen">↻</button>
+            </div>
+            <small class="wh-hint">Header für Xano: <code>X-Webhook-Key</code></small>
+          </div>
+          <details id="wh-payload-help" class="wh-payload-help">
+            <summary>Erwartete Felder von Xano</summary>
+            <pre>POST &lt;webhook-url&gt;
+Header: X-Webhook-Key: &lt;api-key&gt;
+Body (JSON):
+{
+  "to":         "user@example.com",   // optional, nur wenn allow_to_override
+  "subject":    "Betreff",            // erforderlich
+  "body":       "Plaintext",          // body und/oder body_html erforderlich
+  "body_html":  "&lt;p&gt;HTML&lt;/p&gt;",        // optional
+  "reply_to":   "user@example.com",   // optional, nur wenn allow_reply_to
+  "cc":         "kopie@example.com"   // optional, nur wenn allow_cc
+}</pre>
+          </details>
+        </div>
+
+        <!-- Logs view -->
+        <div id="webhook-logs-view" style="display:none">
+          <div class="webhooks-toolbar">
+            <button class="action-btn" id="btn-webhook-logs-back">← Zurück</button>
+            <span id="webhook-logs-title"></span>
+            <button class="action-btn" id="btn-webhook-logs-refresh">Aktualisieren</button>
+          </div>
+          <div id="webhook-logs-list">
+            <div class="webhooks-loading">Lade…</div>
+          </div>
+        </div>
+      </div>
+      <div id="webhooks-modal-footer">
+        <span id="webhooks-modal-status"></span>
+        <button class="action-btn" id="webhooks-modal-cancel" style="display:none">Abbrechen</button>
+        <button class="action-btn" id="webhooks-modal-delete" style="display:none">Löschen</button>
+        <button class="action-btn primary" id="webhooks-modal-save" style="display:none">Speichern</button>
+        <button class="action-btn" id="webhooks-modal-done">Fertig</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js?v=20260515-webhooks"></script>
+  <script src="js/inbox.js?v=20260515-webhooks"></script>
 </body>
 </html>
 

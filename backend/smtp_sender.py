@@ -34,6 +34,7 @@ async def send_email(
     quote_html: str = "",
     cc: str = "",
     attachments: list[dict] | None = None,
+    reply_to: str = "",
 ) -> str:
     """
     Sendet eine E-Mail via SMTP und hängt sie per IMAP APPEND in den Sent-Ordner.
@@ -102,6 +103,8 @@ async def send_email(
     msg["To"] = to
     if cc:
         msg["Cc"] = cc
+    if reply_to:
+        msg["Reply-To"] = reply_to
     msg["Subject"] = subject
     msg["Date"] = email.utils.formatdate(localtime=True)
     msg["Message-ID"] = email.utils.make_msgid()

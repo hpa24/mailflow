@@ -130,6 +130,15 @@ window.api = {
     save(data) { return apiJson('/response-patterns', 'POST', data); },
   },
 
+  webhooks: {
+    list()                  { return apiFetch('/webhooks'); },
+    create(data)            { return apiJson('/webhooks', 'POST', data); },
+    update(id, data)        { return apiJson(`/webhooks/${id}`, 'PATCH', data); },
+    delete(id)              { return apiFetch(`/webhooks/${id}`, { method: 'DELETE' }); },
+    logs(id, limit = 100)   { return apiGet(`/webhooks/${id}/logs`, { limit }); },
+    sendUrl(slug)           { return `${API}/webhooks/${encodeURIComponent(slug)}/send`; },
+  },
+
   ai: {
     triage(accountId, folder) {
       const body = {};
