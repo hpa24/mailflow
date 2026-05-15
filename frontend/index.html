@@ -7,7 +7,7 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0a84ff">
-  <link rel="stylesheet" href="css/main.css?v=20260515-webhooks">
+  <link rel="stylesheet" href="css/main.css?v=20260515-fromname">
   <script src="js/auth.js"></script>
   <script>auth.requireAuth();</script>
 </head>
@@ -379,6 +379,11 @@
             <select id="wh-from-account"></select>
           </div>
           <div class="modal-field-row">
+            <label class="modal-lbl">Absender-Anzeigename (Override)</label>
+            <input type="text" id="wh-from-name-override" placeholder="z.B. Verwaltung, HPA24 — leer = Name aus Account">
+            <small class="wh-hint">Wird im Postfach des Empfängers angezeigt. Leer lassen für Account-Standard.</small>
+          </div>
+          <div class="modal-field-row">
             <label class="modal-lbl">Default-Empfänger</label>
             <input type="text" id="wh-default-to" placeholder="leer = Xano muss 'to' liefern">
             <small class="wh-hint">Bei Buchungen: feste Adresse eintragen, &laquo;An mich&raquo; ohne Override</small>
@@ -446,8 +451,8 @@ Body (JSON):
     </div>
   </div>
 
-  <script src="js/api.js?v=20260515-webhooks"></script>
-  <script src="js/inbox.js?v=20260515-webhooks"></script>
+  <script src="js/api.js?v=20260515-fromname"></script>
+  <script src="js/inbox.js?v=20260515-fromname"></script>
 </body>
 </html>
 

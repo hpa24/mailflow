@@ -35,6 +35,7 @@ async def send_email(
     cc: str = "",
     attachments: list[dict] | None = None,
     reply_to: str = "",
+    from_name_override: str = "",
 ) -> str:
     """
     Sendet eine E-Mail via SMTP und hängt sie per IMAP APPEND in den Sent-Ordner.
@@ -48,7 +49,7 @@ async def send_email(
     )
 
     from_email = acc.get("from_email", "")
-    from_name = acc.get("from_name", "")
+    from_name = from_name_override or acc.get("from_name", "")
 
     # E-Mail aufbauen
     msg = MIMEMultipart("mixed")

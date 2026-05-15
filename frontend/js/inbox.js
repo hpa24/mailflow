@@ -3551,6 +3551,7 @@ function _openWebhookNew() {
   _webhooks.currentId = null;
   _whEl('wh-name').value = '';
   _whEl('wh-slug').value = '';
+  _whEl('wh-from-name-override').value = '';
   _whEl('wh-default-to').value = '';
   _whEl('wh-allow-to-override').checked = true;
   _whEl('wh-allow-reply-to').checked = true;
@@ -3565,6 +3566,7 @@ function _openWebhookEdit(wh) {
   _webhooks.currentId = wh.id;
   _whEl('wh-name').value = wh.name || '';
   _whEl('wh-slug').value = wh.slug || '';
+  _whEl('wh-from-name-override').value = wh.from_name_override || '';
   _whEl('wh-default-to').value = wh.default_to || '';
   _whEl('wh-allow-to-override').checked = !!wh.allow_to_override;
   _whEl('wh-allow-reply-to').checked = !!wh.allow_reply_to;
@@ -3583,6 +3585,7 @@ async function _saveWebhook() {
     slug: _whEl('wh-slug').value.trim().toLowerCase(),
     smtp_server: _whEl('wh-smtp-server').value,
     from_account: _whEl('wh-from-account').value,
+    from_name_override: _whEl('wh-from-name-override').value.trim(),
     default_to: _whEl('wh-default-to').value.trim(),
     allow_to_override: _whEl('wh-allow-to-override').checked,
     allow_reply_to: _whEl('wh-allow-reply-to').checked,

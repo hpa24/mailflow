@@ -2232,6 +2232,7 @@ async def webhook_send(slug: str, request: Request, data: dict):
             body=body,
             body_html=body_html,
             reply_to=reply_to,
+            from_name_override=(wh.get("from_name_override") or "").strip(),
         )
     except Exception as exc:
         logger.error("Webhook-Versand fehlgeschlagen (slug=%s): %s", slug, exc)
@@ -2273,6 +2274,7 @@ async def webhooks_create(data: dict):
         "smtp_server": smtp_server,
         "from_account": from_account,
         "default_to": (data.get("default_to") or "").strip(),
+        "from_name_override": (data.get("from_name_override") or "").strip(),
         "allow_to_override": bool(data.get("allow_to_override", True)),
         "allow_reply_to": bool(data.get("allow_reply_to", True)),
         "allow_cc": bool(data.get("allow_cc", False)),
@@ -2300,6 +2302,7 @@ async def webhooks_logs(webhook_id: str, limit: int = 100):
 async def webhooks_update(webhook_id: str, data: dict):
     allowed = {
         "name", "slug", "smtp_server", "from_account", "default_to",
+        "from_name_override",
         "allow_to_override", "allow_reply_to", "allow_cc", "is_active",
     }
     patch = {k: v for k, v in data.items() if k in allowed}
