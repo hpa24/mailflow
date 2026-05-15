@@ -3484,8 +3484,8 @@ async function _loadWebhooks() {
       api.getAccounts(),
     ]);
     _webhooks.list = whs || [];
-    _webhooks.smtpServers = smtp || [];
-    _webhooks.accounts = accs || [];
+    _webhooks.smtpServers = smtp?.items || (Array.isArray(smtp) ? smtp : []);
+    _webhooks.accounts = accs?.items || (Array.isArray(accs) ? accs : []);
     _renderWebhooksList();
   } catch (e) {
     listEl.innerHTML = `<div class="webhooks-error">Fehler: ${e.message}</div>`;
