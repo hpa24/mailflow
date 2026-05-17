@@ -2266,6 +2266,9 @@ justify-content: center;
   overflow: hidden;
   background: var(--bg2);
 }
+/* Alle Top-Level-Container in den 1fr-Row vom #layout-Grid zwingen,
+   sonst rutschen sichtbare Tab-Panes in den auto-Row und kollabieren. */
+#app, #compose-mode, #tab-templates, #tab-contacts { grid-row: 3; }
 body[data-active-tab="templates"] #tab-templates { display: grid; grid-template-columns: 220px 1fr; }
 body[data-active-tab="contacts"]  #tab-contacts  { display: flex; align-items: center; justify-content: center; }
 
