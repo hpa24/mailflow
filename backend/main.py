@@ -2572,6 +2572,71 @@ async def templates_delete(template_id: str):
     return {"status": "deleted"}
 
 
+_GROUP_NAME_RE = re.compile(r"^[a-z0-9_\-]{1,60}$")
+
+
+@app.get("/contact-groups")
+async def contact_groups_list():
+    data = await pb_client.pb_get(
+        "/api/collections/contact_groups/records",
+        params={"perPage": 500, "sort": "name"},
+    )
+    return data.get("items", [])
+
+
+@app.post("/contact-groups")
+async def contact_groups_create(data: dict):
+    name = (data.get("name") or "").strip().lower()
+    if not _GROUP_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="name ungültig (1–60 Zeichen, nur a-z, 0-9, _, -)")
+    record = {
+        "name": name,
+        "description": (data.get("description") or "").strip(),
+    }
+    try:
+        return await pb_client.pb_post("/api/collections/contact_groups/records", record)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 400 and "name" in exc.response.text:
+            raise HTTPException(status_code=409, detail=f"Gruppe '{name}' existiert bereits")
+        raise
+
+
+@app.patch("/contact-groups/{group_id}")
+async def contact_groups_update(group_id: str, data: dict):
+    patch: dict = {}
+    if "name" in data:
+        n = (data["name"] or "").strip().lower()
+        if not _GROUP_NAME_RE.match(n):
+            raise HTTPException(status_code=400, detail="name ungültig")
+        patch["name"] = n
+    if "description" in data:
+        patch["description"] = (data["description"] or "").strip()
+    if not patch:
+        raise HTTPException(status_code=400, detail="nichts zu ändern")
+    try:
+        return await pb_client.pb_patch(f"/api/collections/contact_groups/records/{group_id}", patch)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 400 and "name" in exc.response.text:
+            raise HTTPException(status_code=409, detail="Gruppe mit diesem Namen existiert bereits")
+        raise
+
+
+@app.delete("/contact-groups/{group_id}")
+async def contact_groups_delete(group_id: str):
+    # PocketBase: cascadeDelete=False auf contacts.groups → Kontakte bleiben, Relation wird gelöscht
+    await pb_client.pb_delete(f"/api/collections/contact_groups/records/{group_id}")
+    return {"status": "deleted"}
+
+
+@app.get("/contact-groups/{group_id}/members")
+async def contact_groups_members(group_id: str):
+    data = await pb_client.pb_get(
+        "/api/collections/contacts/records",
+        params={"filter": f'groups~"{group_id}"', "perPage": 1000, "sort": "name"},
+    )
+    return data.get("items", [])
+
+
 @app.post("/templates/render")
 async def templates_render(data: dict):
     """Rendert html + subject mit Snippets, globalen Variablen und optional

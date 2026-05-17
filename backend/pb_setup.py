@@ -54,6 +54,9 @@ async def setup_pocketbase_schema(token: str) -> None:
         # 12. email_templates (no dependencies) — Vorlagen für Versand
         await _ensure_collection(client, headers, existing, _email_templates_schema())
 
+        # 13. contact_groups (no dependencies) — Sets von Kontakten für Gruppen-Versand
+        contact_groups_id = await _ensure_collection(client, headers, existing, _contact_groups_schema())
+
         # Migrations: add fields to existing collections if missing
         if "accounts" in existing:
             await _add_missing_fields(client, headers, "accounts", existing["accounts"], [
@@ -98,6 +101,11 @@ async def setup_pocketbase_schema(token: str) -> None:
             await _add_missing_fields(client, headers, "contacts", existing["contacts"], [
                 _field("xano_context", "text", max=MAX_UNLIMITED),
                 _field("xano_synced_at", "date"),
+            ])
+            await _add_missing_fields(client, headers, "contacts", existing["contacts"], [
+                _field("groups", "relation",
+                       collectionId=contact_groups_id, maxSelect=999, cascadeDelete=False),
+                _field("unsubscribed", "bool"),
             ])
         if "emails" in existing:
             await _ensure_indexes(client, headers, "emails", existing["emails"], [
@@ -476,5 +484,24 @@ def _email_templates_schema() -> dict:
             _field("subject", "text"),
             _field("html_body", "text", max=MAX_UNLIMITED),
             _field("text_body", "text", max=MAX_UNLIMITED),
+        ],
+    }
+
+
+def _contact_groups_schema() -> dict:
+    return {
+        "name": "contact_groups",
+        "type": "base",
+        "listRule": None,
+        "viewRule": None,
+        "createRule": None,
+        "updateRule": None,
+        "deleteRule": None,
+        "indexes": [
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_groups_name ON contact_groups (name)",
+        ],
+        "fields": [
+            _field("name", "text", required=True),
+            _field("description", "text"),
         ],
     }
