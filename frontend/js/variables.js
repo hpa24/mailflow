@@ -4,6 +4,42 @@
 (function () {
   let _variables = [];
   let _loaded = false;
+  let _activePrefix = 'all';
+
+  function prefixOf(name) {
+    const i = (name || '').indexOf('_');
+    return i > 0 ? name.slice(0, i) : null;
+  }
+
+  function renderPrefixFilter() {
+    const bar = document.getElementById('variables-prefix-filter');
+    if (!bar) return;
+    const prefixes = Array.from(new Set(
+      _variables.map(v => prefixOf(v.name)).filter(Boolean)
+    )).sort();
+    if (prefixes.length === 0) {
+      bar.style.display = 'none';
+      bar.innerHTML = '';
+      _activePrefix = 'all';
+      return;
+    }
+    bar.style.display = 'flex';
+    bar.innerHTML = '';
+    const mkBtn = (label, prefix) => {
+      const btn = document.createElement('button');
+      btn.className = 'var-prefix-btn';
+      btn.classList.toggle('active', _activePrefix === prefix);
+      btn.textContent = label;
+      btn.addEventListener('click', () => {
+        _activePrefix = prefix;
+        renderPrefixFilter();
+        render();
+      });
+      return btn;
+    };
+    bar.appendChild(mkBtn('Alle', 'all'));
+    prefixes.forEach(p => bar.appendChild(mkBtn(p, p)));
+  }
 
   function escapeHtml(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g,
@@ -23,12 +59,18 @@
       _variables = await api.variables.list();
       _variables.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       _loaded = true;
+      renderPrefixFilter();
       render();
     } catch (err) {
       console.error('variables load failed:', err);
       const tbody = document.getElementById('variables-tbody');
-      if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="var-error">Laden fehlgeschlagen: ${escapeHtml(err.message || String(err))}</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="4" class="var-error">Laden fehlgeschlagen: ${escapeHtml(err.message || String(err))}</td></tr>`;
     }
+  }
+
+  function visible() {
+    if (_activePrefix === 'all') return _variables;
+    return _variables.filter(v => prefixOf(v.name) === _activePrefix);
   }
 
   function render() {
@@ -36,12 +78,18 @@
     const empty = document.getElementById('variables-empty');
     if (!tbody) return;
     tbody.innerHTML = '';
-    if (_variables.length === 0) {
-      if (empty) empty.style.display = 'block';
+    const list = visible();
+    if (list.length === 0) {
+      if (empty) {
+        empty.style.display = 'block';
+        empty.textContent = _variables.length === 0
+          ? 'Noch keine Variablen angelegt. Mit „+ Neue Variable" anfangen.'
+          : `Keine Variablen mit Präfix „${_activePrefix}".`;
+      }
       return;
     }
     if (empty) empty.style.display = 'none';
-    _variables.forEach(v => tbody.appendChild(renderRow(v)));
+    list.forEach(v => tbody.appendChild(renderRow(v)));
   }
 
   function renderRow(v) {
@@ -115,6 +163,11 @@
     try {
       await api.variables.delete(v.id);
       _variables = _variables.filter(x => x.id !== v.id);
+      // Falls aktives Präfix nicht mehr vorhanden, zurück auf 'all'
+      if (_activePrefix !== 'all' && !_variables.some(x => prefixOf(x.name) === _activePrefix)) {
+        _activePrefix = 'all';
+      }
+      renderPrefixFilter();
       render();
     } catch (err) {
       alert('Löschen fehlgeschlagen: ' + (err.message || err));
@@ -151,6 +204,7 @@
         const created = await api.variables.create({ name, value });
         _variables.push(created);
         _variables.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        renderPrefixFilter();
         render();
       } catch (err) {
         alert('Anlegen fehlgeschlagen: ' + (err.message || err));

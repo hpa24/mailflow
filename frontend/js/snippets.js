@@ -9,6 +9,16 @@
   let _loaded = false;
   let _previewTimer = null;
 
+  // E-Mail-sicheres Tabellen-Skelett als Startpunkt fuer neue Snippets.
+  // Outlook-kompatibel: explizite Attribute statt CSS, Inline-Styles statt <style>.
+  const DEFAULT_SNIPPET_HTML = `<table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse;">
+  <tr>
+    <td style="padding:16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:16px; line-height:1.5; color:#1c1c1e;">
+
+    </td>
+  </tr>
+</table>`;
+
   function escapeHtml(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g,
       c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -17,7 +27,8 @@
   function isDirty() {
     if (!_draft) return false;
     if (_selectedId === null) {
-      return (_draft.name && _draft.name.length) || (_draft.html && _draft.html.length);
+      // Neues Snippet: dirty wenn Name gesetzt oder HTML vom Default abweicht
+      return (_draft.name && _draft.name.length > 0) || (_draft.html !== DEFAULT_SNIPPET_HTML);
     }
     const orig = _snippets.find(s => s.id === _selectedId);
     if (!orig) return true;
@@ -116,10 +127,10 @@
   function onNew() {
     if (!maybeConfirmDiscard()) return;
     _selectedId = null;
-    _draft = { name: '', html: '' };
+    _draft = { name: '', html: DEFAULT_SNIPPET_HTML };
     showEditor();
     document.getElementById('snippet-name-input').value = '';
-    document.getElementById('snippet-html-textarea').value = '';
+    document.getElementById('snippet-html-textarea').value = DEFAULT_SNIPPET_HTML;
     document.getElementById('snippet-ref').textContent = '{{> name_kommt_beim_speichern}}';
     document.getElementById('snippet-delete-btn').disabled = true;
     updatePreview();

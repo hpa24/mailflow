@@ -2452,6 +2452,32 @@ body[data-active-tab="contacts"]  #tab-contacts  { display: flex; align-items: c
 }
 #btn-snippet-new {
   align-self: flex-start;
+  flex: 0 0 auto;
+  padding: 7px 18px;
+}
+
+/* Variablen: Praefix-Filter */
+.var-prefix-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.var-prefix-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 5px 12px;
+  font-size: 13px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  cursor: pointer;
+}
+.var-prefix-btn:hover { background: var(--bg); }
+.var-prefix-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
 }
 .snippets-list-items {
   overflow-y: auto;
