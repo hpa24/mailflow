@@ -45,6 +45,9 @@ async def setup_pocketbase_schema(token: str) -> None:
         # 9. spam_rules (depends on accounts)
         await _ensure_collection(client, headers, existing, _spam_rules_schema(accounts_id))
 
+        # 10. email_variables (no dependencies) — globale Variablen für Vorlagen-Rendering
+        await _ensure_collection(client, headers, existing, _email_variables_schema())
+
         # Migrations: add fields to existing collections if missing
         if "accounts" in existing:
             await _add_missing_fields(client, headers, "accounts", existing["accounts"], [
@@ -406,5 +409,25 @@ def _contacts_schema() -> dict:
             _field("email_count", "number"),
             _field("last_contact", "date"),
             _field("notes", "text"),
+        ],
+    }
+
+
+def _email_variables_schema() -> dict:
+    return {
+        "name": "email_variables",
+        "type": "base",
+        "listRule": None,
+        "viewRule": None,
+        "createRule": None,
+        "updateRule": None,
+        "deleteRule": None,
+        "indexes": [
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_email_variables_name ON email_variables (name)",
+        ],
+        "fields": [
+            _field("name", "text", required=True),
+            _field("value", "text", max=MAX_UNLIMITED),
+            _field("description", "text"),
         ],
     }

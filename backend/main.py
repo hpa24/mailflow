@@ -2320,3 +2320,70 @@ async def webhooks_update(webhook_id: str, data: dict):
 async def webhooks_delete(webhook_id: str):
     await pb_client.pb_delete(f"/api/collections/webhooks/records/{webhook_id}")
     return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# E-Mail-Vorlagen, Snippets, Variablen
+# ---------------------------------------------------------------------------
+
+_VAR_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+_VAR_RESERVED_NAMES = {"name", "email"}
+
+
+@app.get("/variables")
+async def variables_list():
+    data = await pb_client.pb_get(
+        "/api/collections/email_variables/records",
+        params={"perPage": 500, "sort": "name"},
+    )
+    return data.get("items", [])
+
+
+@app.post("/variables")
+async def variables_create(data: dict):
+    name = (data.get("name") or "").strip().lower()
+    if not _VAR_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="name ungültig (nur a-z, 0-9, _; Start mit Buchstabe oder _)")
+    if name in _VAR_RESERVED_NAMES:
+        raise HTTPException(status_code=400, detail=f"name '{name}' ist reserviert für Kontakt-Felder")
+    record = {
+        "name": name,
+        "value": data.get("value") or "",
+        "description": (data.get("description") or "").strip(),
+    }
+    try:
+        return await pb_client.pb_post("/api/collections/email_variables/records", record)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 400 and "name" in exc.response.text:
+            raise HTTPException(status_code=409, detail=f"Variable '{name}' existiert bereits")
+        raise
+
+
+@app.patch("/variables/{var_id}")
+async def variables_update(var_id: str, data: dict):
+    patch: dict = {}
+    if "value" in data:
+        patch["value"] = data["value"] or ""
+    if "description" in data:
+        patch["description"] = (data["description"] or "").strip()
+    if "name" in data:
+        new_name = (data["name"] or "").strip().lower()
+        if not _VAR_NAME_RE.match(new_name):
+            raise HTTPException(status_code=400, detail="name ungültig")
+        if new_name in _VAR_RESERVED_NAMES:
+            raise HTTPException(status_code=400, detail=f"name '{new_name}' ist reserviert")
+        patch["name"] = new_name
+    if not patch:
+        raise HTTPException(status_code=400, detail="nichts zu ändern")
+    try:
+        return await pb_client.pb_patch(f"/api/collections/email_variables/records/{var_id}", patch)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 400 and "name" in exc.response.text:
+            raise HTTPException(status_code=409, detail="Variable mit diesem Namen existiert bereits")
+        raise
+
+
+@app.delete("/variables/{var_id}")
+async def variables_delete(var_id: str):
+    await pb_client.pb_delete(f"/api/collections/email_variables/records/{var_id}")
+    return {"status": "deleted"}
