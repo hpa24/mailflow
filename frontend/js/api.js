@@ -139,6 +139,13 @@ window.api = {
     sendUrl(slug)           { return `${API}/webhooks/${encodeURIComponent(slug)}/send`; },
   },
 
+  variables: {
+    list()                  { return apiFetch('/variables'); },
+    create(data)            { return apiJson('/variables', 'POST', data); },
+    update(id, data)        { return apiJson(`/variables/${id}`, 'PATCH', data); },
+    delete(id)              { return apiFetch(`/variables/${id}`, { method: 'DELETE' }); },
+  },
+
   ai: {
     triage(accountId, folder) {
       const body = {};

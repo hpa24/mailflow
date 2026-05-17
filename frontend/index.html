@@ -22,6 +22,11 @@
 </div>
 
 <div id="topbar-actions">
+        <nav id="topbar-tabs">
+          <button class="tab-btn" data-tab="inbox">Inbox</button>
+          <button class="tab-btn" data-tab="templates">Vorlagen</button>
+          <button class="tab-btn" data-tab="contacts">Kontakte</button>
+        </nav>
         <button class="action-btn primary" id="btn-sync">E-Mails abrufen</button>
 <button class="action-btn primary" id="btn-new-email">Neue E-Mail</button>
         <button class="action-btn" id="btn-ki-mode">KI-Modus</button>
@@ -230,6 +235,45 @@
       </section>
 
     </div>
+
+    <!-- Tab: Vorlagen -->
+    <div id="tab-templates" class="tab-pane">
+      <aside id="templates-submenu">
+        <button class="submenu-btn active" data-section="variables">Variablen</button>
+        <button class="submenu-btn" data-section="templates" disabled>Vorlagen <small>(folgt)</small></button>
+        <button class="submenu-btn" data-section="snippets" disabled>Snippets <small>(folgt)</small></button>
+        <button class="submenu-btn" data-section="groups" disabled>Gruppen <small>(folgt)</small></button>
+        <button class="submenu-btn" data-section="contacts" disabled>Kontakte <small>(folgt)</small></button>
+      </aside>
+      <main id="templates-main">
+        <section id="section-variables" class="templates-section">
+          <div class="section-header">
+            <h2>Globale Variablen</h2>
+            <button class="action-btn primary" id="btn-var-new">+ Neue Variable</button>
+            <p class="section-hint">Werte werden beim Versand in Vorlagen ersetzt. Die Namen <code>name</code> und <code>email</code> sind reserviert (kommen später aus Kontaktdaten). Doppelklick auf Wert oder Beschreibung zum Editieren.</p>
+          </div>
+          <table id="variables-table">
+            <thead>
+              <tr>
+                <th style="width: 22%">Variable</th>
+                <th style="width: 28%">Wert</th>
+                <th>Beschreibung</th>
+                <th style="width: 110px">Geändert</th>
+                <th style="width: 50px"></th>
+              </tr>
+            </thead>
+            <tbody id="variables-tbody"></tbody>
+          </table>
+          <div id="variables-empty" style="display:none">Noch keine Variablen angelegt. Mit „+ Neue Variable" anfangen.</div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Tab: Kontakte -->
+    <div id="tab-contacts" class="tab-pane">
+      <p>Kontakte-Tab — kommt in Phase 2.</p>
+    </div>
+
   </div>
 
   <!-- Kontext-Menü -->
@@ -451,8 +495,10 @@ Body (JSON):
     </div>
   </div>
 
-  <script src="js/api.js?v=20260515-fix1"></script>
-  <script src="js/inbox.js?v=20260515-fix1"></script>
+  <script src="js/api.js?v=20260517-tpl1"></script>
+  <script src="js/tabs.js?v=20260517-tpl1"></script>
+  <script src="js/variables.js?v=20260517-tpl1"></script>
+  <script src="js/inbox.js?v=20260517-tpl1"></script>
 </body>
 </html>
 
