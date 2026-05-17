@@ -2576,7 +2576,7 @@ body[data-active-tab="contacts"]  #tab-contacts  { display: flex; align-items: c
   border-radius: 6px;
   padding: 12px;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 13px;
+  font-size: 17px;
   line-height: 1.5;
   resize: none;
   outline: none;
