@@ -2516,6 +2516,23 @@ body[data-active-tab="contacts"]  #tab-contacts  { display: flex; align-items: c
 }
 #snippet-delete-btn { margin-left: auto; }
 
+.copy-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  padding: 5px 9px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.copy-btn:hover { background: var(--bg); }
+.copy-btn.copied {
+  background: var(--success);
+  color: white;
+  border-color: var(--success);
+}
+
 .snippets-editor-body {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -218,10 +218,41 @@
     });
   }
 
+  async function copyToClipboard(text, btn) {
+    try {
+      await navigator.clipboard.writeText(text);
+      if (btn) {
+        const oldLabel = btn.textContent;
+        btn.textContent = '✓ Kopiert';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = oldLabel;
+          btn.classList.remove('copied');
+        }, 1200);
+      }
+    } catch (err) {
+      alert('Kopieren fehlgeschlagen: ' + (err.message || err));
+    }
+  }
+
+  function onCopyRef(e) {
+    if (!_draft) return;
+    const name = (_draft.name || '').trim().toLowerCase();
+    if (!name) { alert('Snippet muss erst gespeichert sein.'); return; }
+    copyToClipboard(`{{> ${name}}}`, e.currentTarget);
+  }
+
+  function onCopyHtml(e) {
+    if (!_draft) return;
+    copyToClipboard(_draft.html || '', e.currentTarget);
+  }
+
   function bindGlobal() {
     document.getElementById('btn-snippet-new')?.addEventListener('click', onNew);
     document.getElementById('snippet-save-btn')?.addEventListener('click', onSave);
     document.getElementById('snippet-delete-btn')?.addEventListener('click', onDelete);
+    document.getElementById('snippet-copy-ref')?.addEventListener('click', onCopyRef);
+    document.getElementById('snippet-copy-html')?.addEventListener('click', onCopyHtml);
     document.getElementById('snippets-search')?.addEventListener('input', renderList);
 
     window.addEventListener('mf:tab-changed', (e) => {

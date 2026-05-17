@@ -61,22 +61,41 @@
 
 ---
 
-## Rendering-Pipeline
+## Rendering-Pipeline — zwei Phasen
 
-Strikte Reihenfolge im Backend (`backend/templates.py::render`):
+Rendering läuft in **zwei klar getrennten Phasen**, gesteuert durch einen `phase`-Parameter:
 
-1. **HTML laden** aus Template
-2. **Sections strippen** — alle `<!-- @section ID -->...<!-- @end -->`, deren ID nicht in der aktiven Liste steht, entfernen (Regex, non-greedy)
-3. **Snippets auflösen** — `{{> snippet_name}}` → `email_snippets.html`. Einmaliger Pass, kein Re-Resolve (Snippets enthalten selbst keine `{{> …}}`)
-4. **Variablen ersetzen** — `{{key}}` aufgelöst in dieser Reihenfolge:
-   - `name` → Kontakt-Name (Fallback: leerer String, weil Anrede „Hallo " erträglich)
-   - `email` → Kontakt-E-Mail
-   - sonst → Lookup in `email_variables` per Name
-5. **Subject** durchläuft Schritte 4 (keine Sections/Snippets im Subject)
+### Phase 1 — Pre-Compose / Pre-Send-Vorbereitung („Aus Vorlage")
 
-**Strict mode** für unbekannte Variablen: Sub-Job wird mit `status: "failed"`, Reason „Variable `{{xyz}}` nicht definiert" markiert. Keine kaputten Mails raus.
+Wird ausgeführt wenn der User „Aus Vorlage" wählt → Subject+HTML wird in den Compose-Editor geladen. Schritte:
 
-**Regex bleibt** wie heute: `re.sub(r'\{\{\s*(>?\s*[\w.]+)\s*\}\}', resolver, body)` — Prefix `>` markiert Snippet-Includes.
+1. **Sections strippen** — `<!-- @section ID --> ... <!-- @end -->`, deren ID nicht in der aktiven Liste steht, entfernen (Regex, non-greedy).
+2. **Snippets auflösen** — `{{> snippet_name}}` → `email_snippets.html` (einmaliger Pass).
+3. **Globale Variablen ersetzen** — `{{key}}` aufgelöst gegen `email_variables`.
+4. **Kontakt-Variablen NICHT anfassen** — `{{name}}`, `{{email}}` bleiben als Platzhalter.
+
+Ergebnis: HTML mit fertigem Inhalt, aber Kontakt-Personalisierung steht noch aus.
+
+### Phase 2 — Pre-Send (eigentlicher Versand)
+
+Wird ausgeführt unmittelbar vor jedem Mail-Versand, pro Empfänger:
+
+1. **Sections strippen** (idempotent — schon in Phase 1 erledigt, aber Schutz falls User im Compose-Editor Section-Marker reingeschrieben hat)
+2. **Snippets auflösen** (idempotent — schon in Phase 1 erledigt)
+3. **Globale Variablen ersetzen** (idempotent — schon in Phase 1 erledigt)
+4. **Kontakt-Variablen ersetzen** — `{{name}}` → Empfänger-Name, `{{email}}` → Empfänger-E-Mail.
+
+### Beim „Direkt versenden"-Modus
+
+Phasen 1 und 2 laufen am Stück nacheinander pro Empfänger; Stefan sieht nur die Vorschau, kein Compose-Editor dazwischen.
+
+### Strict mode
+
+Unbekannte Variable in Phase 2 → Sub-Job wird mit `status: "failed"`, Reason „Variable `{{xyz}}` nicht definiert" markiert. Keine kaputten Mails raus. In Phase 1 ist Strict weicher: globale Variable fehlt → bleibt Platzhalter, User sieht's im Compose und kann reagieren.
+
+### Regex
+
+`re.sub(r'\{\{\s*(>?\s*[\w.]+)\s*\}\}', resolver, body)` — Prefix `>` markiert Snippet-Includes.
 
 ---
 
@@ -133,12 +152,26 @@ Mailflow bekommt auf oberster Ebene drei Tabs in der Topbar: **Inbox** (bestehen
 
 Implementierungs-Hinweis: ein einfacher View-Switcher im Frontend, kein Router-Library. Aktiver Tab wird in `localStorage` gemerkt, Default ist Inbox. Compose-Mode bleibt wie heute Teil des Inbox-Tabs.
 
-### Tab „Inbox"
+### Tab „Inbox" — zwei Vorlagen-Modi
 
-Unverändert zum heutigen Zustand. Neu darin nur zwei zusätzliche Compose-Action-Bar-Buttons:
-- **„Aus Vorlage"** → Modal mit Präfix-Filter + Liste → Auswahl → Subject+HTML in Compose laden, Banner „Vorlage: HPA24-Einladung" mit Checkboxen für erkannte Sections
-- **„Gruppen-Versand"** → Modal mit Gruppen-Liste → Auswahl → gelber Banner im An-Feld („Gruppe Kurs Husum · 47 Empfänger · 3 abgemeldet ausgeschlossen") analog zum 2026-05-13-Bulk-Banner; Button „Vorschau" → Modal mit Empfänger-Liste, Klick auf Empfänger → gerenderte Mail im iframe
-- **Senden** → `bulk-send-template`, Status-Panel unverändert
+Unverändert zum heutigen Zustand. Neu sind zwei Compose-Action-Bar-Buttons mit **klar getrennten Workflows**:
+
+#### Modus 1: „Aus Vorlage" — flexibel, editierbar
+- Modal mit Präfix-Filter + Liste → Auswahl → Section-Checkboxen → **Phase-1-Rendering serverseitig** (Sections strippen, Snippets auflösen, globale Variablen ersetzen — `{{name}}`/`{{email}}` bleiben Platzhalter) → Subject+HTML in Compose laden
+- Banner „Vorlage: HPA24-Einladung" mit Hinweis welche Kontakt-Variablen noch offen sind
+- Stefan editiert frei — Begrüßung anpassen, Block ergänzen
+- Senden via Send-/Bulk-Send-Endpoint. Backend macht **Phase 2** pro Mail (Kontakt-Vars ersetzen).
+- Use Case: persönliche Mails, einzelne Antworten, individuelle Anpassungen
+
+#### Modus 2: „Gruppen-Versand" — Template 1:1, kein Editor
+- Modal:
+  1. Vorlage wählen + Section-Checkboxen
+  2. Gruppe wählen
+  3. Vorschau (gerenderte Mail pro Empfänger durchklickbar)
+  4. Senden
+- Keine Edit-Stufe — Template-HTML geht serverseitig durch Phase 1+2 und raus
+- Bestehende Bulk-Send-Pipeline (5 s Delay, SSE, Status-Panel) bleibt unverändert
+- Use Case: Massenversand an Kursgruppe, alles wo Stefan sicher sein will dass exakt das rausgeht was im Template steht
 
 ### Tab „Vorlagen" — drei-spaltiger Editor mit Untermenü
 
@@ -169,7 +202,9 @@ Unverändert zum heutigen Zustand. Neu darin nur zwei zusätzliche Compose-Actio
 - **Toolbar über der Textarea:**
   - `[Box einfügen]` öffnet Mini-Modal (BG-Farbe, Border-Farbe+Breite, Padding, Width) → fügt Inline-CSS-HTML an Cursor-Position
   - `[Button einfügen]`, `[Trenner einfügen]` (analog mit eigenen Mini-Modals)
-  - `[Snippet einfügen ▾]` → Dropdown der `email_snippets` → fügt `{{> snippet_name}}` ein
+  - `[Snippet einfügen ▾]` → Dropdown der `email_snippets`, mit **zwei Einfüge-Modi pro Snippet:**
+    - **Als Referenz** → fügt `{{> snippet_name}}` ein. Dynamisch — Snippet-Änderung wirkt überall. Use Case: Header, Footer, Standard-Hinweise.
+    - **Code kopieren** → HTML-Inhalt wird inline ins Template kopiert. Statisch — Verbindung gekappt, im Template anpassbar. Use Case: Box-/Layout-Gerüst als Startpunkt für individuelle Anpassung.
   - `[Section einfügen]` → fragt ID-Name ab → fügt `<!-- @section ID -->\n\n<!-- @end -->` ein
 - **Unter dem Editor „Erkannt":** Variablen, Snippet-Referenzen, Section-IDs (auto-extrahiert), klickbar → springt zur Zeile im Editor
 
