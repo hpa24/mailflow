@@ -149,10 +149,19 @@
     const iframe = document.getElementById('snippet-preview-iframe');
     if (!iframe || !_draft) return;
     clearTimeout(_previewTimer);
-    _previewTimer = setTimeout(() => {
-      // Preview rendert das rohe Snippet-HTML in ein neutrales Wrapper-Dokument
-      iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:16px;font-family:-apple-system,sans-serif;color:#1c1c1e;background:#fff;}</style></head><body>${_draft.html || '<em style="color:#aaa">Leeres Snippet</em>'}</body></html>`;
-    }, 200);
+    const captured = _draft.html || '';
+    _previewTimer = setTimeout(async () => {
+      let rendered;
+      try {
+        // Snippet kann Variablen enthalten — Render-Endpoint loest sie auf.
+        const result = await api.templates.render({ html: captured });
+        rendered = result.html;
+      } catch (err) {
+        rendered = captured;
+        console.warn('Snippet-Preview-Render fehlgeschlagen:', err);
+      }
+      iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:16px;font-family:-apple-system,sans-serif;color:#1c1c1e;background:#fff;}</style></head><body>${rendered || '<em style="color:#aaa">Leeres Snippet</em>'}</body></html>`;
+    }, 300);
   }
 
   function updateDirtyIndicator() {

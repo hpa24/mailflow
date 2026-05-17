@@ -230,9 +230,18 @@
     const iframe = document.getElementById('tpl-preview-iframe');
     if (!iframe || !_draft) return;
     clearTimeout(_previewTimer);
-    _previewTimer = setTimeout(() => {
-      iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;font-family:-apple-system,sans-serif;}</style></head><body>${_draft.html_body || '<em style="color:#aaa;padding:16px;display:block">Leere Vorlage</em>'}</body></html>`;
-    }, 200);
+    const captured = _draft.html_body || '';
+    _previewTimer = setTimeout(async () => {
+      let rendered;
+      try {
+        const result = await api.templates.render({ html: captured });
+        rendered = result.html;
+      } catch (err) {
+        rendered = captured;
+        console.warn('Template-Preview-Render fehlgeschlagen:', err);
+      }
+      iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;font-family:-apple-system,sans-serif;}</style></head><body>${rendered || '<em style="color:#aaa;padding:16px;display:block">Leere Vorlage</em>'}</body></html>`;
+    }, 300);
   }
 
   // Extrahiert Vars, Snippet-Refs und Section-IDs aus dem aktuellen HTML.

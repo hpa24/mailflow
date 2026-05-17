@@ -158,6 +158,7 @@ window.api = {
     create(data)            { return apiJson('/templates', 'POST', data); },
     update(id, data)        { return apiJson(`/templates/${id}`, 'PATCH', data); },
     delete(id)              { return apiFetch(`/templates/${id}`, { method: 'DELETE' }); },
+    render(data)            { return apiJson('/templates/render', 'POST', data); },
   },
 
   ai: {
