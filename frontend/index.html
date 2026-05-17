@@ -159,6 +159,7 @@
             <button class="action-btn primary" id="btn-send-inline">Senden</button>
             <button class="action-btn" id="btn-compose-cancel">Abbrechen</button>
             <button class="action-btn" id="btn-attach" title="Datei anhängen">Anhang</button>
+            <button class="action-btn" id="btn-from-template" title="Vorlage in diese Mail laden">Aus Vorlage</button>
             <button class="action-btn" id="btn-bulk" title="Massenversand: dieselbe Mail einzeln an viele Empfänger">Massenversand</button>
             <input type="file" id="ci-file-input" multiple style="display:none">
             <span id="draft-status"></span>
@@ -201,6 +202,12 @@
             </div>
           </div>
           <div id="ci-replyto-warning" style="display:none"></div>
+          <div id="ci-template-banner" style="display:none">
+            <span class="ci-tmpl-icon">📄</span>
+            <span class="ci-tmpl-text">Vorlage: <strong id="ci-tmpl-name"></strong></span>
+            <span id="ci-tmpl-unresolved" class="ci-tmpl-unresolved"></span>
+            <button type="button" class="ci-tmpl-clear" id="ci-tmpl-clear" title="Hinweis ausblenden">✕</button>
+          </div>
           <div id="ki-refine-bar" style="display:none"></div>
 
           <div id="compose-toolbar">
@@ -447,6 +454,22 @@
     </div>
   </div>
 
+  <!-- Vorlagen-Auswahl im Compose -->
+  <div id="template-picker-overlay" style="display:none">
+    <div id="template-picker">
+      <div class="tplp-header">
+        <span class="tplp-title">Vorlage auswählen</span>
+        <button class="tplp-close" id="tplp-close" title="Schließen">✕</button>
+      </div>
+      <div class="tplp-body">
+        <div id="tplp-prefix-filter" class="tplp-prefix-filter"></div>
+        <input type="text" id="tplp-search" class="tplp-search" placeholder="Suchen…">
+        <div id="tplp-list" class="tplp-list"></div>
+        <div id="tplp-empty" class="tplp-empty" style="display:none">Keine Vorlagen.</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Webhooks-Verwaltung -->
   <div id="webhooks-modal-overlay" style="display:none">
     <div id="webhooks-modal">
@@ -557,14 +580,15 @@ Body (JSON):
     </div>
   </div>
 
-  <script src="js/api.js?v=20260517-tpl11"></script>
-  <script src="js/tabs.js?v=20260517-tpl11"></script>
-  <script src="js/template_subnav.js?v=20260517-tpl11"></script>
-  <script src="js/editor_dropdowns.js?v=20260517-tpl11"></script>
-  <script src="js/variables.js?v=20260517-tpl11"></script>
-  <script src="js/snippets.js?v=20260517-tpl11"></script>
-  <script src="js/templates.js?v=20260517-tpl11"></script>
-  <script src="js/inbox.js?v=20260517-tpl11"></script>
+  <script src="js/api.js?v=20260518-tpl1"></script>
+  <script src="js/tabs.js?v=20260518-tpl1"></script>
+  <script src="js/template_subnav.js?v=20260518-tpl1"></script>
+  <script src="js/editor_dropdowns.js?v=20260518-tpl1"></script>
+  <script src="js/variables.js?v=20260518-tpl1"></script>
+  <script src="js/snippets.js?v=20260518-tpl1"></script>
+  <script src="js/templates.js?v=20260518-tpl1"></script>
+  <script src="js/compose_templates.js?v=20260518-tpl1"></script>
+  <script src="js/inbox.js?v=20260518-tpl1"></script>
 </body>
 </html>
 
