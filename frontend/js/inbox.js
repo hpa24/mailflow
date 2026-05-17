@@ -2339,6 +2339,12 @@ async function openCompose({ to = '', subject = '', body = null, quote = '', quo
   const toTabHandler = (e) => {
     if (e.key === 'Tab' && !e.shiftKey) {
       e.preventDefault();
+      // Wichtig für Text-Expander (z.B. Rocket Typist): Der Empfängertext muss
+      // synchron als Chip übernommen werden, bevor der Fokus ins Betreff-Feld
+      // springt. Nur auf blur zu warten ist bei schnell folgenden Tab/Text-
+      // Events zu spät und kann das erste Snippet-Feld verlieren.
+      _toField.commitPending();
+      scheduleDraftSave();
       document.getElementById('ci-subject').focus();
     }
   };
@@ -3222,16 +3228,24 @@ function makeAddressField(fieldId, inputId, suggestionsId, defaultPlaceholder) {
     }
   });
 
+  function commitPending() {
+    closeSuggestions();
+    // Beim Verlassen/Tabben des Feldes: getippten Text noch als Chip hinzufügen.
+    const v = input.value.trim();
+    if (v) {
+      addChip(v);
+      return true;
+    }
+    return false;
+  }
+
   input.addEventListener('blur', () => {
     setTimeout(() => {
-      closeSuggestions();
-      // Beim Verlassen des Feldes: getippten Text noch als Chip hinzufügen
-      const v = input.value.trim();
-      if (v) addChip(v);
+      commitPending();
     }, 150);
   });
 
-  return { getAddresses, setAddresses, clear };
+  return { getAddresses, setAddresses, clear, commitPending };
 }
 
 const _toField = makeAddressField('ci-to-field', 'ci-to-input', 'ci-to-suggestions', 'empfaenger@beispiel.de');
