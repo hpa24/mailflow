@@ -17,6 +17,7 @@ import json
 import pb_client
 from pb_client import start_token_refresh, stop_token_refresh
 import pb_setup
+import rendering
 from backfill import run_once_if_needed, rebuild_fts_if_needed, backfill_html_once, run_embed_backfill, get_embed_state
 from config import settings
 from fts import fts_setup, fts_search, fts_rebuild, fts_delete
@@ -2515,3 +2516,41 @@ async def templates_update(template_id: str, data: dict):
 async def templates_delete(template_id: str):
     await pb_client.pb_delete(f"/api/collections/email_templates/records/{template_id}")
     return {"status": "deleted"}
+
+
+@app.post("/templates/render")
+async def templates_render(data: dict):
+    """Rendert html + subject mit Snippets, globalen Variablen und optional
+    einem Kontakt. Wird vom Frontend fuer Live-Preview genutzt und spaeter
+    von Compose/Bulk-Send.
+
+    Body:
+      html (str)
+      subject (str, optional)
+      active_sections (list[str], optional — None = alle aktiv)
+      contact_id (str, optional — fuer Phase-2-Rendering)
+    """
+    html = data.get("html") or ""
+    subject = data.get("subject") or ""
+    active_sections = data.get("active_sections")
+    contact_id = data.get("contact_id")
+
+    snippets = await rendering.load_snippets_map()
+    variables = await rendering.load_variables_map()
+
+    contact = None
+    if contact_id:
+        try:
+            contact = await pb_client.pb_get(f"/api/collections/contacts/records/{contact_id}")
+        except Exception:
+            contact = None
+
+    rendered_html = rendering.render_full(html, snippets, variables, active_sections, contact)
+    rendered_subject = rendering.render_full(subject, snippets, variables, active_sections, contact)
+    unresolved = rendering.find_unresolved(rendered_html) + rendering.find_unresolved(rendered_subject)
+
+    return {
+        "html": rendered_html,
+        "subject": rendered_subject,
+        "unresolved": unresolved,
+    }
