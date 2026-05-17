@@ -656,6 +656,51 @@ def _sse_notify_all(event: dict) -> None:
             pass
 
 
+async def _finalize_for_recipient(to_field: str, subject: str,
+                                  body: str, body_html: str) -> tuple[str, str, str]:
+    """Phase-2-Rendering vor SMTP-Versand:
+    - Bei einem Empfänger: Kontakt-Lookup in DB, {{name}}/{{email}} ersetzen.
+    - Bei mehreren oder unbekanntem Empfänger: kein Kontakt-Replace.
+    - Anschließend strip_unresolved auf alle Felder, damit Platzhalter nicht
+      sichtbar in der Mail landen.
+    Variablen/Snippets werden nochmal aufgelöst (idempotent für bereits
+    aufgelöste Stellen)."""
+    emails = re.findall(r'[\w.+-]+@[\w.-]+\.\w+', to_field or "")
+    contact = None
+    if len(emails) == 1:
+        email_addr = emails[0].lower()
+        try:
+            resp = await pb_client.pb_get(
+                "/api/collections/contacts/records",
+                params={"filter": f'email="{email_addr}"', "perPage": 1},
+            )
+            items = resp.get("items", [])
+            if items:
+                contact = {"name": items[0].get("name") or "", "email": email_addr}
+            else:
+                contact = {"name": "", "email": email_addr}
+        except Exception as exc:
+            logger.warning("Kontakt-Lookup fehlgeschlagen für %s: %s", email_addr, exc)
+            contact = {"name": "", "email": email_addr}
+
+    try:
+        snippets = await rendering.load_snippets_map()
+        variables = await rendering.load_variables_map()
+    except Exception as exc:
+        logger.warning("Rendering-Maps konnten nicht geladen werden: %s", exc)
+        snippets, variables = {}, {}
+
+    rendered_subject = rendering.render_full(subject or "", snippets, variables, None, contact)
+    rendered_body = rendering.render_full(body or "", snippets, variables, None, contact) if body else body
+    rendered_html = rendering.render_full(body_html or "", snippets, variables, None, contact) if body_html else body_html
+
+    return (
+        rendering.strip_unresolved(rendered_subject),
+        rendering.strip_unresolved(rendered_body) if body else body,
+        rendering.strip_unresolved(rendered_html) if body_html else body_html,
+    )
+
+
 async def _do_send_job(job_id: str, data: dict, attachments: list) -> None:
     """Führt den SMTP-Versand im Hintergrund aus und meldet das Ergebnis via SSE."""
     to      = data["to"]
@@ -663,6 +708,15 @@ async def _do_send_job(job_id: str, data: dict, attachments: list) -> None:
     cc      = data.get("cc", "")
     from_account = data["from_account"]
     smtp_server  = data["smtp_server"]
+    body         = data.get("body", "")
+    body_html    = data.get("body_html", "")
+
+    # Phase-2-Rendering + unaufgelöste Platzhalter entfernen
+    try:
+        subject, body, body_html = await _finalize_for_recipient(to, subject, body, body_html)
+        data["subject"] = subject
+    except Exception as exc:
+        logger.warning("Phase-2-Render fehlgeschlagen (job=%s): %s", job_id, exc)
 
     try:
         await smtp_send_email(
@@ -671,8 +725,8 @@ async def _do_send_job(job_id: str, data: dict, attachments: list) -> None:
             to=to,
             cc=cc,
             subject=subject,
-            body=data.get("body", ""),
-            body_html=data.get("body_html", ""),
+            body=body,
+            body_html=body_html,
             quote=data.get("quote", ""),
             quote_html=data.get("quote_html", ""),
             attachments=attachments or None,

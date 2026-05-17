@@ -147,3 +147,12 @@ def find_unresolved(text: str) -> list:
             "placeholder": m.group(0),
         })
     return found
+
+
+def strip_unresolved(text: str) -> str:
+    """Entfernt alle uebrig gebliebenen {{...}}-Platzhalter (zu leerem String).
+    Wird vor SMTP-Versand aufgerufen, damit unaufgeloeste Variablen nicht
+    sichtbar in der Mail landen."""
+    if not text:
+        return text
+    return _PLACEHOLDER_RE.sub("", text)
