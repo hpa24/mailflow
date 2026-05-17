@@ -153,6 +153,11 @@ async def _api_key_middleware(request: Request, call_next):
     # Externer Webhook-Send: eigener API-Key pro Webhook im Endpoint selbst
     if request.url.path.startswith("/webhooks/") and request.url.path.endswith("/send"):
         return await call_next(request)
+    # Kontakt-Import: akzeptiert zusätzlich X-Import-Key (für externe Quellen wie FileMaker)
+    if request.url.path == "/contacts/import" and settings.IMPORT_API_KEY:
+        import_key = request.headers.get("X-Import-Key", "")
+        if import_key == settings.IMPORT_API_KEY:
+            return await call_next(request)
     expected = settings.API_KEY
     if not expected:
         return await call_next(request)
@@ -2635,6 +2640,195 @@ async def contact_groups_members(group_id: str):
         params={"filter": f'groups~"{group_id}"', "perPage": 1000, "sort": "name"},
     )
     return data.get("items", [])
+
+
+# ─── Kontakt-Import ──────────────────────────────────────────────────────
+# Format pro Zeile: email,name,gruppen
+#   - email:    erforderlich
+#   - name:     optional, leerer Name = bestehenden Wert nicht überschreiben
+#   - gruppen:  optional, mit ; getrennt; mehrfache Zeilen pro email werden gemerged
+#
+# Modes:
+#   add    (default): Kontakt anlegen oder aktualisieren, Gruppen additiv,
+#                     name überschreiben wenn nicht leer, unbekannte Gruppen
+#                     werden automatisch angelegt
+#   remove: Kontakt-Gruppen-Zuordnungen entfernen; Kontakt + andere Gruppen
+#           bleiben unverändert; unbekannte Email = "not_found"
+
+_IMPORT_EMAIL_RE = re.compile(r'^[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}$')
+
+
+def _norm_group_name(raw: str) -> str | None:
+    """Lowercase + Whitespace zu _ → fertiger Gruppen-Name. None wenn ungültig."""
+    if not raw:
+        return None
+    name = re.sub(r'\s+', '_', raw.strip().lower())
+    if _GROUP_NAME_RE.match(name):
+        return name
+    return None
+
+
+def _parse_import_line(line: str, lineno: int) -> tuple | None:
+    """Returns (email, name, [group_names], invalid_reason)."""
+    parts = [p.strip() for p in line.split(',', 2)]
+    while len(parts) < 3:
+        parts.append('')
+    email_raw, name, groups_raw = parts
+    email = email_raw.strip().lower()
+    if not email:
+        return (None, None, None, "Email leer")
+    if not _IMPORT_EMAIL_RE.match(email):
+        return (None, None, None, f"Email ungültig: {email_raw}")
+    groups = []
+    invalid_groups = []
+    if groups_raw:
+        for g in groups_raw.split(';'):
+            normalized = _norm_group_name(g)
+            if normalized:
+                groups.append(normalized)
+            elif g.strip():
+                invalid_groups.append(g.strip())
+    invalid_reason = None
+    if invalid_groups:
+        invalid_reason = f"Gruppen-Namen ungültig: {', '.join(invalid_groups)}"
+    return (email, name, groups, invalid_reason)
+
+
+@app.post("/contacts/import")
+async def contacts_import(data: dict):
+    """Importiert Kontakte + Gruppen-Zuordnungen aus einer Multiline-Liste."""
+    lines_raw = data.get("lines") or ""
+    mode = (data.get("mode") or "add").lower()
+    if mode not in ("add", "remove"):
+        raise HTTPException(status_code=400, detail="mode muss 'add' oder 'remove' sein")
+    if not lines_raw.strip():
+        raise HTTPException(status_code=400, detail="lines fehlt")
+
+    # Parse alle Zeilen, merge nach email
+    contacts_map: dict[str, dict] = {}   # email -> {name, groups (set)}
+    invalid: list[dict] = []
+    for lineno, line in enumerate(lines_raw.splitlines(), start=1):
+        if not line.strip():
+            continue
+        parsed = _parse_import_line(line, lineno)
+        email, name, groups, invalid_reason = parsed
+        if invalid_reason and not email:
+            invalid.append({"line": lineno, "raw": line, "reason": invalid_reason})
+            continue
+        if email is None:
+            continue
+        entry = contacts_map.setdefault(email, {"name": "", "groups": set()})
+        if name:
+            entry["name"] = name  # letzter nicht-leerer Name gewinnt
+        for g in groups or []:
+            entry["groups"].add(g)
+        if invalid_reason and groups is not None and not groups:
+            # nur fehlerhafte Gruppen-Namen, kein gültiger Eintrag
+            invalid.append({"line": lineno, "raw": line, "reason": invalid_reason})
+
+    # Lade bestehende Gruppen, Auto-Anlegen wo nötig (nur im add-Mode)
+    existing_groups_resp = await pb_client.pb_get(
+        "/api/collections/contact_groups/records",
+        params={"perPage": 500},
+    )
+    group_name_to_id = {g["name"]: g["id"] for g in existing_groups_resp.get("items", [])}
+
+    auto_created_groups: list[str] = []
+    all_used_groups = set()
+    for entry in contacts_map.values():
+        all_used_groups.update(entry["groups"])
+
+    if mode == "add":
+        for gname in all_used_groups:
+            if gname not in group_name_to_id:
+                try:
+                    created = await pb_client.pb_post(
+                        "/api/collections/contact_groups/records",
+                        {"name": gname, "description": ""},
+                    )
+                    group_name_to_id[gname] = created["id"]
+                    auto_created_groups.append(gname)
+                except Exception as exc:
+                    logger.warning("Auto-Anlegen Gruppe %s fehlgeschlagen: %s", gname, exc)
+
+    # Pro email: bestehenden Kontakt finden + add/remove anwenden
+    counts = {"added": 0, "updated": 0, "unchanged": 0,
+              "removed_from": 0, "not_found": 0, "errors": 0}
+
+    for email, entry in contacts_map.items():
+        try:
+            resp = await pb_client.pb_get(
+                "/api/collections/contacts/records",
+                params={"filter": f'email="{email}"', "perPage": 1},
+            )
+            items = resp.get("items", [])
+            current = items[0] if items else None
+
+            new_group_ids = []
+            for gname in entry["groups"]:
+                gid = group_name_to_id.get(gname)
+                if gid:
+                    new_group_ids.append(gid)
+
+            if mode == "add":
+                if current:
+                    patch = {}
+                    if entry["name"] and entry["name"] != (current.get("name") or ""):
+                        patch["name"] = entry["name"]
+                    current_groups = set(current.get("groups") or [])
+                    merged = current_groups | set(new_group_ids)
+                    if merged != current_groups:
+                        patch["groups"] = list(merged)
+                    if patch:
+                        await pb_client.pb_patch(
+                            f"/api/collections/contacts/records/{current['id']}",
+                            patch,
+                        )
+                        counts["updated"] += 1
+                    else:
+                        counts["unchanged"] += 1
+                else:
+                    await pb_client.pb_post(
+                        "/api/collections/contacts/records",
+                        {
+                            "email": email,
+                            "name": entry["name"] or "",
+                            "groups": new_group_ids,
+                            "unsubscribed": False,
+                        },
+                    )
+                    counts["added"] += 1
+
+            elif mode == "remove":
+                if not current:
+                    counts["not_found"] += 1
+                    continue
+                if not new_group_ids:
+                    # Keine Gruppen angegeben → no-op, in unchanged zählen
+                    counts["unchanged"] += 1
+                    continue
+                current_groups = set(current.get("groups") or [])
+                remaining = current_groups - set(new_group_ids)
+                if remaining != current_groups:
+                    await pb_client.pb_patch(
+                        f"/api/collections/contacts/records/{current['id']}",
+                        {"groups": list(remaining)},
+                    )
+                    counts["removed_from"] += 1
+                else:
+                    counts["unchanged"] += 1
+
+        except Exception as exc:
+            logger.warning("Import-Fehler für %s: %s", email, exc)
+            counts["errors"] += 1
+
+    return {
+        "mode": mode,
+        "counts": counts,
+        "invalid": invalid,
+        "auto_created_groups": auto_created_groups,
+        "total_lines_parsed": len(contacts_map) + len(invalid),
+    }
 
 
 @app.post("/templates/render")

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # Wenn gesetzt, müssen alle API-Anfragen diesen Key mitsenden.
     # Leer lassen für lokale Entwicklung ohne Auth.
     API_KEY: str = ""
+    # Optionaler separater Key für externen Kontakt-Import (FileMaker, Xano etc.).
+    # Wird per X-Import-Key-Header geprüft. Leer = nur globaler API_KEY akzeptiert.
+    IMPORT_API_KEY: str = ""
     # Kommagetrennte Liste erlaubter CORS-Origins, z.B. "https://mailflow.barres.de"
     CORS_ORIGINS: str = "https://mailflow.barres.de"
     XANO_API_KEY: str = "rnj!wkj7nzj_ezw8QZW"
