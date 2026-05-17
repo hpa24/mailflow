@@ -176,11 +176,13 @@
   document.addEventListener('DOMContentLoaded', () => {
     const btn = document.getElementById('btn-var-new');
     if (btn) btn.addEventListener('click', onCreate);
-    window.addEventListener('mf:tab-changed', (e) => {
-      if (e.detail.tab === 'templates') load();
+    window.addEventListener('mf:section-changed', (e) => {
+      if (e.detail.section === 'variables') load();
     });
-    // Falls templates schon beim Start aktiv (via localStorage)
-    if (document.body.dataset.activeTab === 'templates') load();
+    if (document.body.dataset.activeTab === 'templates' &&
+        document.getElementById('templates-main')?.dataset.activeSection === 'variables') {
+      load();
+    }
   });
 
   window.mfVariables = { load, reload: () => load(true) };

@@ -146,6 +146,13 @@ window.api = {
     delete(id)              { return apiFetch(`/variables/${id}`, { method: 'DELETE' }); },
   },
 
+  snippets: {
+    list()                  { return apiFetch('/snippets'); },
+    create(data)            { return apiJson('/snippets', 'POST', data); },
+    update(id, data)        { return apiJson(`/snippets/${id}`, 'PATCH', data); },
+    delete(id)              { return apiFetch(`/snippets/${id}`, { method: 'DELETE' }); },
+  },
+
   ai: {
     triage(accountId, folder) {
       const body = {};

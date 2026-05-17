@@ -239,9 +239,9 @@
     <!-- Tab: Vorlagen -->
     <div id="tab-templates" class="tab-pane">
       <aside id="templates-submenu">
-        <button class="submenu-btn active" data-section="variables">Variablen</button>
+        <button class="submenu-btn" data-section="variables">Variablen</button>
+        <button class="submenu-btn" data-section="snippets">Snippets</button>
         <button class="submenu-btn" data-section="templates" disabled>Vorlagen <small>(folgt)</small></button>
-        <button class="submenu-btn" data-section="snippets" disabled>Snippets <small>(folgt)</small></button>
         <button class="submenu-btn" data-section="groups" disabled>Gruppen <small>(folgt)</small></button>
         <button class="submenu-btn" data-section="contacts" disabled>Kontakte <small>(folgt)</small></button>
       </aside>
@@ -264,6 +264,33 @@
             <tbody id="variables-tbody"></tbody>
           </table>
           <div id="variables-empty" style="display:none">Noch keine Variablen angelegt. Mit „+ Neue Variable" anfangen.</div>
+        </section>
+
+        <section id="section-snippets" class="templates-section">
+          <aside class="snippets-list-pane">
+            <div class="snippets-list-header">
+              <h2>Snippets</h2>
+              <input type="text" id="snippets-search" class="snippets-list-search" placeholder="Suchen…">
+              <button class="action-btn primary" id="btn-snippet-new">+ Neu</button>
+            </div>
+            <div id="snippets-list-items" class="snippets-list-items"></div>
+            <div id="snippets-list-empty" class="snippets-list-empty" style="display:none">Noch keine Snippets.</div>
+          </aside>
+          <div id="snippets-editor-empty">
+            <p>Wähle ein Snippet links aus oder klicke „+ Neu" für ein neues.</p>
+          </div>
+          <div id="snippets-editor-pane">
+            <div class="snippets-editor-header">
+              <input type="text" id="snippet-name-input" placeholder="snippet_name">
+              <code id="snippet-ref" title="Referenz im Template">{{> name}}</code>
+              <button class="action-btn primary" id="snippet-save-btn">Speichern</button>
+              <button class="action-btn danger" id="snippet-delete-btn">Löschen</button>
+            </div>
+            <div class="snippets-editor-body">
+              <textarea id="snippet-html-textarea" spellcheck="false" placeholder="HTML hier eingeben…"></textarea>
+              <div class="snippets-preview"><iframe id="snippet-preview-iframe" sandbox="allow-same-origin"></iframe></div>
+            </div>
+          </div>
         </section>
       </main>
     </div>
@@ -494,10 +521,12 @@ Body (JSON):
     </div>
   </div>
 
-  <script src="js/api.js?v=20260517-tpl2"></script>
-  <script src="js/tabs.js?v=20260517-tpl2"></script>
-  <script src="js/variables.js?v=20260517-tpl2"></script>
-  <script src="js/inbox.js?v=20260517-tpl2"></script>
+  <script src="js/api.js?v=20260517-tpl3"></script>
+  <script src="js/tabs.js?v=20260517-tpl3"></script>
+  <script src="js/template_subnav.js?v=20260517-tpl3"></script>
+  <script src="js/variables.js?v=20260517-tpl3"></script>
+  <script src="js/snippets.js?v=20260517-tpl3"></script>
+  <script src="js/inbox.js?v=20260517-tpl3"></script>
 </body>
 </html>
 
