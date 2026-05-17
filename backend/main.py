@@ -2384,3 +2384,58 @@ async def variables_update(var_id: str, data: dict):
 async def variables_delete(var_id: str):
     await pb_client.pb_delete(f"/api/collections/email_variables/records/{var_id}")
     return {"status": "deleted"}
+
+
+_SNIPPET_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{0,49}$")
+
+
+@app.get("/snippets")
+async def snippets_list():
+    data = await pb_client.pb_get(
+        "/api/collections/email_snippets/records",
+        params={"perPage": 500, "sort": "name"},
+    )
+    return data.get("items", [])
+
+
+@app.post("/snippets")
+async def snippets_create(data: dict):
+    name = (data.get("name") or "").strip().lower()
+    if not _SNIPPET_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="name ungültig (1–50 Zeichen, nur a-z, 0-9, _; Start mit Buchstabe oder _)")
+    record = {
+        "name": name,
+        "html": data.get("html") or "",
+    }
+    try:
+        return await pb_client.pb_post("/api/collections/email_snippets/records", record)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 400 and "name" in exc.response.text:
+            raise HTTPException(status_code=409, detail=f"Snippet '{name}' existiert bereits")
+        raise
+
+
+@app.patch("/snippets/{snippet_id}")
+async def snippets_update(snippet_id: str, data: dict):
+    patch: dict = {}
+    if "html" in data:
+        patch["html"] = data["html"] or ""
+    if "name" in data:
+        new_name = (data["name"] or "").strip().lower()
+        if not _SNIPPET_NAME_RE.match(new_name):
+            raise HTTPException(status_code=400, detail="name ungültig")
+        patch["name"] = new_name
+    if not patch:
+        raise HTTPException(status_code=400, detail="nichts zu ändern")
+    try:
+        return await pb_client.pb_patch(f"/api/collections/email_snippets/records/{snippet_id}", patch)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 400 and "name" in exc.response.text:
+            raise HTTPException(status_code=409, detail="Snippet mit diesem Namen existiert bereits")
+        raise
+
+
+@app.delete("/snippets/{snippet_id}")
+async def snippets_delete(snippet_id: str):
+    await pb_client.pb_delete(f"/api/collections/email_snippets/records/{snippet_id}")
+    return {"status": "deleted"}
