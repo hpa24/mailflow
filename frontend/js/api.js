@@ -153,6 +153,13 @@ window.api = {
     delete(id)              { return apiFetch(`/snippets/${id}`, { method: 'DELETE' }); },
   },
 
+  templates: {
+    list(params = {})       { return apiGet('/templates', params); },
+    create(data)            { return apiJson('/templates', 'POST', data); },
+    update(id, data)        { return apiJson(`/templates/${id}`, 'PATCH', data); },
+    delete(id)              { return apiFetch(`/templates/${id}`, { method: 'DELETE' }); },
+  },
+
   ai: {
     triage(accountId, folder) {
       const body = {};

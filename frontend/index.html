@@ -241,7 +241,7 @@
       <aside id="templates-submenu">
         <button class="submenu-btn" data-section="variables">Variablen</button>
         <button class="submenu-btn" data-section="snippets">Snippets</button>
-        <button class="submenu-btn" data-section="templates" disabled>Vorlagen <small>(folgt)</small></button>
+        <button class="submenu-btn" data-section="templates">Vorlagen</button>
         <button class="submenu-btn" data-section="groups" disabled>Gruppen <small>(folgt)</small></button>
         <button class="submenu-btn" data-section="contacts" disabled>Kontakte <small>(folgt)</small></button>
       </aside>
@@ -265,6 +265,36 @@
             <tbody id="variables-tbody"></tbody>
           </table>
           <div id="variables-empty" style="display:none">Noch keine Variablen angelegt. Mit „+ Neue Variable" anfangen.</div>
+        </section>
+
+        <section id="section-templates" class="templates-section">
+          <aside class="templates-list-pane">
+            <div class="templates-list-header">
+              <h2>Vorlagen</h2>
+              <div id="templates-prefix-filter" class="templates-prefix-filter"></div>
+              <input type="text" id="templates-search" placeholder="Suchen…">
+              <button class="action-btn primary" id="btn-tpl-new">+ Neu</button>
+            </div>
+            <div id="templates-list-items" class="templates-list-items"></div>
+            <div id="templates-list-empty" class="snippets-list-empty" style="display:none"></div>
+          </aside>
+          <div id="templates-editor-empty">
+            <p>Wähle eine Vorlage links aus oder klicke „+ Neu" für eine neue.</p>
+          </div>
+          <div id="templates-editor-pane">
+            <div class="tpl-editor-header">
+              <input type="text" id="tpl-prefix-input" placeholder="präfix">
+              <input type="text" id="tpl-name-input" placeholder="Vorlagen-Name">
+              <button class="action-btn primary" id="tpl-save-btn">Speichern</button>
+              <button class="action-btn danger" id="tpl-delete-btn">Löschen</button>
+            </div>
+            <input type="text" id="tpl-subject-input" placeholder="Betreff (Subject)">
+            <div class="templates-editor-body">
+              <textarea id="tpl-html-textarea" spellcheck="false" placeholder="HTML hier eingeben…"></textarea>
+              <div class="tpl-preview"><iframe id="tpl-preview-iframe" sandbox="allow-same-origin"></iframe></div>
+            </div>
+            <div id="tpl-detected"></div>
+          </div>
         </section>
 
         <section id="section-snippets" class="templates-section">
@@ -524,12 +554,13 @@ Body (JSON):
     </div>
   </div>
 
-  <script src="js/api.js?v=20260517-tpl8"></script>
-  <script src="js/tabs.js?v=20260517-tpl8"></script>
-  <script src="js/template_subnav.js?v=20260517-tpl8"></script>
-  <script src="js/variables.js?v=20260517-tpl8"></script>
-  <script src="js/snippets.js?v=20260517-tpl8"></script>
-  <script src="js/inbox.js?v=20260517-tpl8"></script>
+  <script src="js/api.js?v=20260517-tpl9"></script>
+  <script src="js/tabs.js?v=20260517-tpl9"></script>
+  <script src="js/template_subnav.js?v=20260517-tpl9"></script>
+  <script src="js/variables.js?v=20260517-tpl9"></script>
+  <script src="js/snippets.js?v=20260517-tpl9"></script>
+  <script src="js/templates.js?v=20260517-tpl9"></script>
+  <script src="js/inbox.js?v=20260517-tpl9"></script>
 </body>
 </html>
 

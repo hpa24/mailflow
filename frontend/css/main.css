@@ -2605,3 +2605,193 @@ body[data-active-tab="contacts"]  #tab-contacts  { display: flex; align-items: c
   padding: 32px;
   text-align: center;
 }
+
+/* ── Templates-Section ────────────────────────────────────── */
+body[data-active-tab="templates"] #templates-main[data-active-section="templates"] #section-templates { display: grid; }
+#templates-main[data-active-section="templates"] #section-templates {
+  grid-template-columns: 320px 1fr;
+  gap: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.templates-list-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  padding: 16px;
+  gap: 10px;
+}
+.templates-list-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.templates-list-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+}
+.templates-prefix-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.tpl-prefix-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  cursor: pointer;
+}
+.tpl-prefix-btn:hover { background: var(--bg); }
+.tpl-prefix-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+#templates-search {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--bg2);
+}
+#btn-tpl-new {
+  align-self: flex-start;
+  flex: 0 0 auto;
+  padding: 7px 18px;
+}
+.templates-list-items {
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.templates-list-group {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 10px 4px 4px;
+}
+.templates-list-item {
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 7px 12px;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.templates-list-item:hover { background: rgba(0,0,0,0.04); }
+.templates-list-item.active { background: var(--accent); color: white; }
+.templates-error { color: var(--danger); padding: 12px; font-size: 13px; }
+
+#templates-editor-pane {
+  display: none;
+  grid-template-rows: auto auto 1fr auto;
+  overflow: hidden;
+  padding: 16px 20px;
+  gap: 10px;
+}
+.tpl-editor-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+#tpl-prefix-input,
+#tpl-name-input,
+#tpl-subject-input {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+}
+#tpl-prefix-input {
+  width: 120px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+#tpl-name-input { flex: 1; min-width: 200px; }
+#tpl-subject-input { width: 100%; }
+#tpl-save-btn.dirty {
+  background: var(--accent);
+  color: white;
+}
+#tpl-delete-btn { margin-left: auto; }
+.templates-editor-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  overflow: hidden;
+  min-height: 0;
+}
+#tpl-html-textarea {
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 17px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  color: var(--text);
+  background: var(--bg2);
+}
+#tpl-html-textarea:focus { border-color: var(--accent); }
+.tpl-preview {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: white;
+}
+.tpl-preview iframe { width: 100%; height: 100%; border: none; }
+
+#tpl-detected {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 90px;
+  overflow-y: auto;
+}
+.tpl-pill {
+  display: inline-block;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  margin-right: 4px;
+}
+.tpl-pill.var      { color: #0a84ff; }
+.tpl-pill.snippet  { color: #6a1b9a; }
+.tpl-pill.section  { color: #2e7d32; }
+.tpl-detected-empty { color: var(--text2); font-style: italic; }
+
+#templates-editor-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text2);
+  font-size: 14px;
+  padding: 32px;
+  text-align: center;
+}
