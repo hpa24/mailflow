@@ -1,8 +1,62 @@
 # Mailflow — Vorlagen, Snippets, Variablen, Gruppenversand (Plan)
 
-**Stand:** 2026-05-17
+**Stand:** 2026-05-18
 **Ziel:** Ablöse des FileMaker-Versandtools. Vorlagen + wiederverwendbare Snippets + globale Variablen + Kontaktgruppen + Gruppenversand mit per-Empfänger gerendertem `{{name}}`. Conditional Sections via HTML-Marker.
 **Limit-Check:** mailbox.org 10.000 Mails/Tag, Kursgruppen 20–200 Empfänger, 5 s Delay → 200er-Gruppe ≈ 17 min. Passt.
+
+---
+
+## Umsetzungsstand 2026-05-18
+
+### Erledigt (Phase 1 + Phase 2a)
+
+- ✅ **Variablen**: Collection `email_variables` (name unique, value), CRUD-Endpoints, UI-Tabelle mit Inline-Edit, Präfix-Filter-Buttons
+- ✅ **Snippets**: Collection `email_snippets`, CRUD, UI mit Liste + Editor + Live-Preview, Copy-Buttons für Referenz/HTML, Variable-Einfügen-Dropdown, Outlook-kompatibles Default-Skelett
+- ✅ **Templates**: Collection `email_templates` (prefix, name unique-Combo), CRUD, UI mit Präfix-Filter + Suche + Gruppen-Liste + Editor mit Subject/HTML + Live-Preview, Variable- und Snippet-Einfügen-Dropdowns (Snippet hat Referenz- und Code-Modus)
+- ✅ **Render-Pipeline** `backend/rendering.py`: `render_phase1` (Sections + Snippets + globale Vars), `render_phase2` (Kontakt-Vars), `render_full`, `find_unresolved`, `strip_unresolved`. Section-Regex akzeptiert `if=role:X` als no-op (Rollen-Vorbereitung).
+- ✅ **Endpoint** `POST /templates/render` für Live-Preview im Editor und für Compose-„Aus Vorlage"
+- ✅ **Wiederverwendbare Editor-Dropdown-Komponente** `js/editor_dropdowns.js`
+- ✅ **Topbar-Tabs** (Inbox / Vorlagen / Kontakte) mit `localStorage`-Memo
+- ✅ **Compose „Aus Vorlage"**: Action-Bar-Button, Modal mit Vorlagen-Auswahl, Banner mit offenen Platzhaltern, beim Senden Phase-2-Auto-Render + `strip_unresolved`
+- ✅ **Schema-Migration**: Collection `contact_groups`, `contacts.groups` (multi-relation) + `contacts.unsubscribed` (bool)
+- ✅ **CRUD-Endpoints** für Gruppen + `GET /contact-groups/{id}/members`
+- ✅ **Import-Endpoint** `POST /contacts/import` mit Format `email,name,gruppen`, Modi `add`/`remove`, Auto-Anlegen unbekannter Gruppen, Name-Auto-Normalisierung. Auth via globalem `API_KEY` ODER neuem optionalem `IMPORT_API_KEY` per `X-Import-Key`-Header (für externe Quellen wie FileMaker).
+- ✅ **Live-Test der Import-Endpoint-Logik** per Node-Fetch aus dem Terminal — alle Modi und Edge Cases bestätigt. Test-Daten (4 Kontakte + 6 Gruppen) bleiben in der DB für UI-Tests.
+
+### Test-Daten in der Production-DB
+
+Kontakte: `test@example.com` (Tester Neu), `anna@example.com` (Anna), `bob@example.com` (Bob), `good@x.de` (Good).
+Gruppen: `dritte_gruppe`, `gross_geschrieben`, `kurs_a`, `kurs_b`, `test_gruppe` (leer), `zweite_gruppe`.
+
+### Als nächstes — Phase 2b: Gruppen-UI
+
+- **Untermenü-Eintrag „Gruppen"** im Vorlagen-Tab aktivieren (aktuell `(folgt)`)
+- **Layout**: analog zur Templates-Section, 320px Liste + Detail-Pane
+  - Liste links: Suchfeld + „+ Neu" + Gruppen-Liste (Name + Mitglieder-Count)
+  - Detail rechts: Gruppen-Name editierbar, Beschreibung, Mitglieder-Tabelle, Multiline-Import-Feld unten („email,name,gruppen"), Vor-Bestätigung-Preview mit Counts pro Eintrag (`anlegen` / `bereits in Gruppe` / `in anderer Gruppe` / `invalid`)
+  - Bulk-Aktionen: Mitglieder entfernen, Gruppe löschen mit Confirm
+- **Datei-Stubs**: neues `js/groups.js` analog zu `js/templates.js`, `template_subnav.js` muss `groups` in `KNOWN` aufnehmen
+- **Backend-Stand**: alle Endpoints existieren bereits (`/contact-groups` CRUD + members + `/contacts/import`). Keine Backend-Änderungen nötig für 2b.
+
+### Danach — Phase 2c: Gruppen-Versand
+
+- **Bulk-Send-Template-Endpoint** `POST /emails/bulk-send-template` mit Body `{template_id, group_id, active_sections, delay_seconds, from_account_id?}`. Lädt Gruppen-Mitglieder (filter `unsubscribed=false`), rendert pro Empfänger via `render_full(html, snippets, variables, active_sections, contact)`, erzeugt Sub-Jobs in `_send_jobs` mit gerendertem Inhalt (self-contained, kein Re-Render im Versandzyklus), sequenzieller Versand mit `asyncio.sleep(delay_seconds)` wie bei `_do_bulk_send`.
+- **Compose-Integration**: zweiter Action-Bar-Button (alternativ eigener Menüpunkt im Vorlagen-Tab) „Gruppen-Versand": Vorlage wählen → Section-Checkboxen → Gruppe wählen → Vorschau (gerenderte Mail pro Empfänger durchklickbar) → Senden mit Status-Panel.
+
+### Phase 3 (später)
+
+- Sections-UI (Checkbox-Auswahl-Modal vor dem Versand)
+- Unsubscribe-Link mit signiertem Token + Endpoint
+- Bounce-Erkennung im IMAP-Sync
+- Tagesversand-Counter gegen das 10K-mailbox.org-Limit
+- Rollenbasierte Conditional Sections (`if=role:X` ist schon syntaktisch erlaubt, Auswertung fehlt; Kontakt-Feld `roles` als JSON-Array)
+
+### Wichtige Konventionen für Folge-Sessions
+
+- **Push-Strategie**: direkt nach `main`, kein Staging. Pro Push eine kohärente Einheit, niemals broken halfway. Backend-Schema-Migrationen sind idempotent (via `_ensure_collection` + `_add_missing_fields`).
+- **Cachebust** für JS/CSS: Versions-Param `?v=YYYYMMDD-tplN` in `index.html` bei jedem Frontend-Push hochzählen.
+- **Auth lokal**: `~/Syncthing/Claude/_Web-Apps/mailflow/.env` enthält `API_KEY` als `API_KEY=...` für Curl/Node-Tests aus dem Terminal (`.env` ist `.gitignore`d).
+- **Tab-Pane-Layout**: alle Top-Level-Container brauchen `grid-row: 3` im `#layout`-Grid, sonst kollabieren sie im Auto-Placement.
 
 ---
 

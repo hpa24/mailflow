@@ -116,3 +116,86 @@ Bei Kunden-Reklamationen („Mail nicht angekommen") drei voneinander unabhängi
 - **Templates / Platzhalter** im Webhook-Body — Xano liefert fertige Texte. Wenn später nötig, würde das in `webhooks` als `subject_template` / `body_html_template` mit Jinja-ähnlichem Rendering ergänzt.
 - **From-Address-Override per Payload** — der Absender ist bewusst pro Webhook in der Config festgenagelt (Anti-Spoofing). Wenn ein Workflow mehrere Absender braucht: pro Absender ein eigener Webhook.
 - **Rate-Limiting** im Endpoint — bisher kein Bedarf, der eigene API-Key pro Webhook + die externe Netcup-Firewall reichen. Würde sich bei Missbrauch trivial via fastapi-limiter ergänzen lassen.
+
+## Vorlagen-System 2026-05-17
+
+Ablöse des FileMaker-Versandtools. Globale Variablen, wiederverwendbare HTML-Snippets, Templates mit Live-Preview, Compose-Integration. Vollständiger Plan in `MAILFLOW-TEMPLATES-PLAN.md`.
+
+### Collections
+
+| Collection | Felder | Zweck |
+|---|---|---|
+| `email_variables` | name (unique), value | Globale Werte (`{{kurs_termin}}` etc.), beim Versand ersetzt |
+| `email_snippets` | name (unique), html | Wiederverwendbare HTML-Blöcke, in Templates via `{{> name}}` |
+| `email_templates` | prefix, name, subject, html_body, text_body | Volle Vorlagen mit (prefix, name) unique |
+| `contact_groups` | name (unique), description | Sets von Kontakten für Gruppen-Versand |
+| `contacts` (existierte) | + groups (multi-relation), unsubscribed | M:N mit `contact_groups` |
+
+### Render-Pipeline (`backend/rendering.py`)
+
+Zweiphasig, gesteuert durch optionale `contact`-Parameter:
+
+1. **Phase 1 (Pre-Compose)** — Sections strippen (`<!-- @section X --> … <!-- @end -->` mit `active_sections`-Filter), Snippets auflösen (`{{> name}}`), globale Variablen ersetzen. `{{name}}`/`{{email}}` bleiben Platzhalter.
+2. **Phase 2 (Pre-Send pro Empfänger)** — Kontakt-Variablen ersetzen, danach `strip_unresolved` für übrige Platzhalter.
+
+Section-Regex akzeptiert bereits optionales `if=role:X`-Suffix als no-op — Vorbereitung für rollenbasierte Sections (kommt mit Phase 3).
+
+### UI: Topbar-Tabs
+
+Drei Top-Level-Tabs in der Topbar: **Inbox / Vorlagen / Kontakte**. Aktiver Tab in `localStorage`. Tab-Panes sitzen via `grid-row: 3` in der `1fr`-Row des `#layout`-Grids.
+
+**Vorlagen-Tab** ist dreispaltig: Untermenü links (Variablen / Snippets / Vorlagen / Gruppen / Kontakte — letzte zwei noch `(folgt)`), Liste in der Mitte, Editor + Live-Preview rechts.
+
+- **Variablen**: Inline-Tabelle mit Doppelklick-Edit auf Wert, Präfix-Filter-Buttons (Konvention `präfix_name`). Reserved Names: `name`, `email`.
+- **Snippets**: Liste + Editor mit HTML-Textarea + Live-Preview-iframe. Default-HTML beim Neu = Outlook-kompatibles Tabellen-Skelett mit H2 + zwei P-Tags (Inline-Margins). Copy-Buttons für Referenz `{{> name}}` und HTML. Variable-Einfügen-Dropdown.
+- **Vorlagen**: Liste mit Präfix-Filter + Suche + Gruppierung. Editor mit Präfix/Name/Subject + Textarea + Preview. „Erkannt"-Box zeigt Variablen, Snippets, Sections live. Variable- und Snippet-Einfügen-Dropdowns; Snippet hat zwei Action-Buttons: **Referenz** (`{{> name}}`, dynamisch) oder **Code** (HTML inline kopiert, statisch).
+
+### Compose: „Aus Vorlage"
+
+Action-Bar-Button öffnet Modal mit Vorlagen-Liste. Auswahl ruft `POST /templates/render` mit Template-HTML, schreibt Subject + Phase-1-gerendertes HTML in `#ci-subject` und `#ci-body`. Banner zeigt Vorlagenname und übrige Platzhalter. Stefan editiert manuell (persönliche Anpassungen), Phase 2 läuft automatisch beim Senden.
+
+### Send-Endpoint mit Phase 2
+
+`_do_send_job` ruft vor SMTP-Versand `_finalize_for_recipient` auf:
+- Ein Empfänger im `to`-Feld → Kontakt-Lookup in DB, `{{name}}`/`{{email}}` ersetzen
+- Mehrere Empfänger oder unbekannt → kein Auto-Replace
+- Anschließend `strip_unresolved` auf Subject/Body/HTML
+
+Idempotent für Mails ohne Platzhalter. Funktioniert auch bei Bulk-Send (jeder Sub-Job hat ein eigenes `to`).
+
+### Kontakt-Import
+
+`POST /contacts/import` mit Body `{lines, mode: "add" | "remove"}`. Format pro Zeile:
+
+```
+email,name,gruppen
+```
+
+- `email` erforderlich, `name` optional (leer = bestehenden Wert nicht überschreiben), `gruppen` optional mit `;` getrennt **oder** mehrfach pro Email in eigenen Zeilen
+- Gruppen-Namen werden lowercase + whitespace_zu_underscore normalisiert
+- **Add-Mode**: Kontakt upserten, Name überschreibend, Gruppen additiv mergen, unbekannte Gruppen werden automatisch angelegt
+- **Remove-Mode**: nur angegebene Gruppen-Zuordnungen entfernen; Kontakt + andere Gruppen bleiben unverändert
+
+**Auth**: globaler `API_KEY` (für die Mailflow-UI) **oder** optionaler separater `IMPORT_API_KEY` per `X-Import-Key`-Header — gedacht für externe Quellen wie FileMaker. `IMPORT_API_KEY` default leer = externer Zugang aus.
+
+### Endpoints
+
+| Route | Zweck |
+|---|---|
+| `GET/POST/PATCH/DELETE /variables` | CRUD |
+| `GET/POST/PATCH/DELETE /snippets` | CRUD |
+| `GET/POST/PATCH/DELETE /templates` | CRUD (Filter `prefix=`, `search=`) |
+| `POST /templates/render` | `{html, subject, active_sections?, contact_id?}` → `{html, subject, unresolved}` |
+| `GET/POST/PATCH/DELETE /contact-groups` | CRUD |
+| `GET /contact-groups/{id}/members` | Mitglieder einer Gruppe |
+| `POST /contacts/import` | `{lines, mode}` → Counts + invalid-Report + auto_created_groups |
+
+### Bewusst nicht gebaut
+
+- **WYSIWYG-Editor**: Textarea + Live-iframe reicht; E-Mail-HTML braucht ohnehin Inline-Styles und Tabellen-Layout.
+- **CodeMirror / Syntax-Highlighting**: Plain Textarea + Monospace + 17px reicht aktuell. Nachrüstbar wenn Stefan das im Alltag vermisst.
+- **Sections-UI**: Backend kann Sections strippen (Marker im HTML), Editor-UI und Compose-Section-Checkboxen kommen mit Phase 2b.
+- **Pro-Kontakt-Variablen** (`{{vars.anrede}}` etc.): Stefan nutzt nur globale Werte. Bei Bedarf später nachrüstbar (Feld `vars` JSON auf Kontakt + Resolver-Erweiterung).
+- **Phase 2b**: Gruppen-UI im Vorlagen-Tab (Liste + Detail + Multiline-Import-UI).
+- **Phase 2c**: `bulk-send-template`-Endpoint und „Gruppen-Versand"-Compose-Workflow (Vorlage + Gruppe → direkter Bulk-Send ohne Editor-Stufe).
+- **Phase 3**: Unsubscribe-Token-Link, Bounce-Erkennung, Tagesversand-Counter, rollenbasierte Conditional Sections.
