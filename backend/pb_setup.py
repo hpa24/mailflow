@@ -51,6 +51,9 @@ async def setup_pocketbase_schema(token: str) -> None:
         # 11. email_snippets (no dependencies) — wiederverwendbare HTML-Blöcke
         await _ensure_collection(client, headers, existing, _email_snippets_schema())
 
+        # 12. email_templates (no dependencies) — Vorlagen für Versand
+        await _ensure_collection(client, headers, existing, _email_templates_schema())
+
         # Migrations: add fields to existing collections if missing
         if "accounts" in existing:
             await _add_missing_fields(client, headers, "accounts", existing["accounts"], [
@@ -450,5 +453,28 @@ def _email_snippets_schema() -> dict:
         "fields": [
             _field("name", "text", required=True),
             _field("html", "text", max=MAX_UNLIMITED),
+        ],
+    }
+
+
+def _email_templates_schema() -> dict:
+    return {
+        "name": "email_templates",
+        "type": "base",
+        "listRule": None,
+        "viewRule": None,
+        "createRule": None,
+        "updateRule": None,
+        "deleteRule": None,
+        "indexes": [
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_email_templates_prefix_name ON email_templates (prefix, name)",
+            "CREATE INDEX IF NOT EXISTS idx_email_templates_prefix ON email_templates (prefix)",
+        ],
+        "fields": [
+            _field("prefix", "text"),
+            _field("name", "text", required=True),
+            _field("subject", "text"),
+            _field("html_body", "text", max=MAX_UNLIMITED),
+            _field("text_body", "text", max=MAX_UNLIMITED),
         ],
     }

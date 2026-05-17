@@ -2439,3 +2439,79 @@ async def snippets_update(snippet_id: str, data: dict):
 async def snippets_delete(snippet_id: str):
     await pb_client.pb_delete(f"/api/collections/email_snippets/records/{snippet_id}")
     return {"status": "deleted"}
+
+
+_TEMPLATE_PREFIX_RE = re.compile(r"^[a-z0-9_]{0,30}$")
+
+
+@app.get("/templates")
+async def templates_list(prefix: str = "", search: str = ""):
+    filters = []
+    if prefix:
+        filters.append(f'prefix="{prefix}"')
+    if search:
+        s = search.replace('"', '')
+        filters.append(f'(name~"{s}" || subject~"{s}")')
+    params = {"perPage": 500, "sort": "prefix,name"}
+    if filters:
+        params["filter"] = " && ".join(filters)
+    data = await pb_client.pb_get(
+        "/api/collections/email_templates/records",
+        params=params,
+    )
+    return data.get("items", [])
+
+
+@app.post("/templates")
+async def templates_create(data: dict):
+    prefix = (data.get("prefix") or "").strip().lower()
+    name = (data.get("name") or "").strip()
+    if not _TEMPLATE_PREFIX_RE.match(prefix):
+        raise HTTPException(status_code=400, detail="prefix ungültig (max 30 Zeichen, nur a-z, 0-9, _)")
+    if not name or len(name) > 100:
+        raise HTTPException(status_code=400, detail="name muss 1–100 Zeichen lang sein")
+    record = {
+        "prefix": prefix,
+        "name": name,
+        "subject": (data.get("subject") or "").strip(),
+        "html_body": data.get("html_body") or "",
+        "text_body": data.get("text_body") or "",
+    }
+    try:
+        return await pb_client.pb_post("/api/collections/email_templates/records", record)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 400 and ("prefix" in exc.response.text or "name" in exc.response.text):
+            raise HTTPException(status_code=409, detail=f"Vorlage '{prefix}/{name}' existiert bereits")
+        raise
+
+
+@app.patch("/templates/{template_id}")
+async def templates_update(template_id: str, data: dict):
+    patch: dict = {}
+    if "prefix" in data:
+        p = (data["prefix"] or "").strip().lower()
+        if not _TEMPLATE_PREFIX_RE.match(p):
+            raise HTTPException(status_code=400, detail="prefix ungültig")
+        patch["prefix"] = p
+    if "name" in data:
+        n = (data["name"] or "").strip()
+        if not n or len(n) > 100:
+            raise HTTPException(status_code=400, detail="name muss 1–100 Zeichen lang sein")
+        patch["name"] = n
+    for key in ("subject", "html_body", "text_body"):
+        if key in data:
+            patch[key] = data[key] or ""
+    if not patch:
+        raise HTTPException(status_code=400, detail="nichts zu ändern")
+    try:
+        return await pb_client.pb_patch(f"/api/collections/email_templates/records/{template_id}", patch)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 400 and ("prefix" in exc.response.text or "name" in exc.response.text):
+            raise HTTPException(status_code=409, detail="Vorlage mit diesem Präfix+Name existiert bereits")
+        raise
+
+
+@app.delete("/templates/{template_id}")
+async def templates_delete(template_id: str):
+    await pb_client.pb_delete(f"/api/collections/email_templates/records/{template_id}")
+    return {"status": "deleted"}
