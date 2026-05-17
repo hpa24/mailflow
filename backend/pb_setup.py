@@ -428,6 +428,5 @@ def _email_variables_schema() -> dict:
         "fields": [
             _field("name", "text", required=True),
             _field("value", "text", max=MAX_UNLIMITED),
-            _field("description", "text"),
         ],
     }

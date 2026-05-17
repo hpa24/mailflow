@@ -50,14 +50,12 @@
     tr.innerHTML = `
       <td class="var-name"><code>{{${escapeHtml(v.name)}}}</code></td>
       <td class="var-value" data-field="value"></td>
-      <td class="var-description" data-field="description"></td>
       <td class="var-updated">${escapeHtml(formatDate(v.updated))}</td>
       <td class="var-actions">
         <button class="row-btn" data-action="delete" title="Löschen">✕</button>
       </td>
     `;
     tr.querySelector('[data-field="value"]').textContent = v.value || '';
-    tr.querySelector('[data-field="description"]').textContent = v.description || '';
 
     tr.querySelectorAll('[data-field]').forEach(td => {
       td.addEventListener('dblclick', () => startEdit(tr, td, v));
@@ -135,7 +133,6 @@
     tr.innerHTML = `
       <td><input type="text" class="var-inline-input draft-name" placeholder="variable_name"></td>
       <td><input type="text" class="var-inline-input draft-value" placeholder="Wert"></td>
-      <td><input type="text" class="var-inline-input draft-description" placeholder="Beschreibung"></td>
       <td>—</td>
       <td class="var-actions">
         <button class="row-btn" data-action="save" title="Speichern">✓</button>
@@ -149,10 +146,9 @@
     async function save() {
       const name = tr.querySelector('.draft-name').value.trim();
       const value = tr.querySelector('.draft-value').value;
-      const description = tr.querySelector('.draft-description').value.trim();
       if (!name) { alert('Name fehlt'); return; }
       try {
-        const created = await api.variables.create({ name, value, description });
+        const created = await api.variables.create({ name, value });
         _variables.push(created);
         _variables.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
         render();

@@ -2349,7 +2349,6 @@ async def variables_create(data: dict):
     record = {
         "name": name,
         "value": data.get("value") or "",
-        "description": (data.get("description") or "").strip(),
     }
     try:
         return await pb_client.pb_post("/api/collections/email_variables/records", record)
@@ -2364,8 +2363,6 @@ async def variables_update(var_id: str, data: dict):
     patch: dict = {}
     if "value" in data:
         patch["value"] = data["value"] or ""
-    if "description" in data:
-        patch["description"] = (data["description"] or "").strip()
     if "name" in data:
         new_name = (data["name"] or "").strip().lower()
         if not _VAR_NAME_RE.match(new_name):
