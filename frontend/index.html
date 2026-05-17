@@ -285,6 +285,8 @@
             <div class="tpl-editor-header">
               <input type="text" id="tpl-prefix-input" placeholder="präfix">
               <input type="text" id="tpl-name-input" placeholder="Vorlagen-Name">
+              <button class="copy-btn" id="tpl-insert-var" title="Variable an Cursor-Position einfügen">＋ Variable ▾</button>
+              <button class="copy-btn" id="tpl-insert-snippet" title="Snippet an Cursor-Position einfügen">＋ Snippet ▾</button>
               <button class="action-btn primary" id="tpl-save-btn">Speichern</button>
               <button class="action-btn danger" id="tpl-delete-btn">Löschen</button>
             </div>
@@ -315,6 +317,7 @@
               <input type="text" id="snippet-name-input" placeholder="snippet_name">
               <button class="copy-btn" id="snippet-copy-ref" title="Referenz {{> name}} in Zwischenablage kopieren">⧉ Referenz</button>
               <button class="copy-btn" id="snippet-copy-html" title="HTML-Inhalt in Zwischenablage kopieren">⧉ HTML</button>
+              <button class="copy-btn" id="snippet-insert-var" title="Variable an Cursor-Position einfügen">＋ Variable ▾</button>
               <code id="snippet-ref">{{> name}}</code>
               <button class="action-btn primary" id="snippet-save-btn">Speichern</button>
               <button class="action-btn danger" id="snippet-delete-btn">Löschen</button>
@@ -554,13 +557,14 @@ Body (JSON):
     </div>
   </div>
 
-  <script src="js/api.js?v=20260517-tpl9"></script>
-  <script src="js/tabs.js?v=20260517-tpl9"></script>
-  <script src="js/template_subnav.js?v=20260517-tpl9"></script>
-  <script src="js/variables.js?v=20260517-tpl9"></script>
-  <script src="js/snippets.js?v=20260517-tpl9"></script>
-  <script src="js/templates.js?v=20260517-tpl9"></script>
-  <script src="js/inbox.js?v=20260517-tpl9"></script>
+  <script src="js/api.js?v=20260517-tpl10"></script>
+  <script src="js/tabs.js?v=20260517-tpl10"></script>
+  <script src="js/template_subnav.js?v=20260517-tpl10"></script>
+  <script src="js/editor_dropdowns.js?v=20260517-tpl10"></script>
+  <script src="js/variables.js?v=20260517-tpl10"></script>
+  <script src="js/snippets.js?v=20260517-tpl10"></script>
+  <script src="js/templates.js?v=20260517-tpl10"></script>
+  <script src="js/inbox.js?v=20260517-tpl10"></script>
 </body>
 </html>
 

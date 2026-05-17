@@ -264,12 +264,34 @@
     copyToClipboard(_draft.html || '', e.currentTarget);
   }
 
+  function onInsertVariable(e) {
+    if (!_draft) return;
+    mfDropdown.open({
+      trigger: e.currentTarget,
+      searchPlaceholder: 'Variable suchen…',
+      emptyText: 'Noch keine Variablen angelegt. Lege welche im Variablen-Tab an.',
+      loadItems: async () => {
+        const list = await api.variables.list();
+        list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        return list.map(v => ({
+          label: `{{${v.name}}}`,
+          sublabel: v.value ? (v.value.length > 60 ? v.value.slice(0, 60) + '…' : v.value) : '',
+          value: v.name,
+        }));
+      },
+      onSelect: (item) => {
+        mfDropdown.insertAtCursor('snippet-html-textarea', `{{${item.value}}}`);
+      },
+    });
+  }
+
   function bindGlobal() {
     document.getElementById('btn-snippet-new')?.addEventListener('click', onNew);
     document.getElementById('snippet-save-btn')?.addEventListener('click', onSave);
     document.getElementById('snippet-delete-btn')?.addEventListener('click', onDelete);
     document.getElementById('snippet-copy-ref')?.addEventListener('click', onCopyRef);
     document.getElementById('snippet-copy-html')?.addEventListener('click', onCopyHtml);
+    document.getElementById('snippet-insert-var')?.addEventListener('click', onInsertVariable);
     document.getElementById('snippets-search')?.addEventListener('input', renderList);
 
     window.addEventListener('mf:tab-changed', (e) => {

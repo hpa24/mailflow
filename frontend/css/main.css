@@ -2562,6 +2562,89 @@ body[data-active-tab="contacts"]  #tab-contacts  { display: flex; align-items: c
   border-color: var(--success);
 }
 
+/* ── Editor-Dropdown (Variable/Snippet einfuegen) ─────────── */
+.editor-dropdown {
+  position: fixed;
+  z-index: 10000;
+  background: var(--bg2);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+  width: 360px;
+  max-height: 400px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ed-search {
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
+  font-size: 14px;
+  outline: none;
+  font-family: inherit;
+  background: var(--bg2);
+  color: var(--text);
+}
+.ed-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+}
+.ed-loading, .ed-empty, .ed-error {
+  padding: 14px;
+  color: var(--text2);
+  font-size: 13px;
+  text-align: center;
+}
+.ed-error { color: var(--danger); }
+
+.ed-row {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  gap: 8px;
+}
+.ed-row.active { background: rgba(10,132,255,0.10); }
+.ed-row:hover  { background: rgba(10,132,255,0.06); }
+.ed-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ed-row-label {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ed-row-sub {
+  font-size: 12px;
+  color: var(--text2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ed-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.ed-action-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 9px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.ed-action-btn:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
 .snippets-editor-body {
   display: grid;
   grid-template-columns: 1fr 1fr;

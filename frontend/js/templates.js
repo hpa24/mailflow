@@ -369,10 +369,62 @@
     });
   }
 
+  function onInsertVariable(e) {
+    if (!_draft) return;
+    mfDropdown.open({
+      trigger: e.currentTarget,
+      searchPlaceholder: 'Variable suchen…',
+      emptyText: 'Noch keine Variablen angelegt.',
+      loadItems: async () => {
+        const list = await api.variables.list();
+        list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        return list.map(v => ({
+          label: `{{${v.name}}}`,
+          sublabel: v.value ? (v.value.length > 60 ? v.value.slice(0, 60) + '…' : v.value) : '',
+          value: v.name,
+        }));
+      },
+      onSelect: (item) => {
+        mfDropdown.insertAtCursor('tpl-html-textarea', `{{${item.value}}}`);
+      },
+    });
+  }
+
+  function onInsertSnippet(e) {
+    if (!_draft) return;
+    mfDropdown.open({
+      trigger: e.currentTarget,
+      searchPlaceholder: 'Snippet suchen…',
+      emptyText: 'Noch keine Snippets angelegt.',
+      loadItems: async () => {
+        const list = await api.snippets.list();
+        list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        return list.map(s => ({
+          label: s.name,
+          sublabel: s.html ? (s.html.replace(/\s+/g, ' ').slice(0, 60) + (s.html.length > 60 ? '…' : '')) : '',
+          value: s,
+          actions: [
+            { label: 'Referenz', value: 'ref', title: 'Als {{> name}} einfügen (dynamisch, ändert sich mit Snippet)' },
+            { label: 'Code', value: 'code', title: 'HTML-Inhalt inline kopieren (statisch, unabhängig vom Snippet)' },
+          ],
+        }));
+      },
+      onSelect: (item, actionValue) => {
+        if (actionValue === 'ref') {
+          mfDropdown.insertAtCursor('tpl-html-textarea', `{{> ${item.value.name}}}`);
+        } else if (actionValue === 'code') {
+          mfDropdown.insertAtCursor('tpl-html-textarea', item.value.html || '');
+        }
+      },
+    });
+  }
+
   function bindGlobal() {
     document.getElementById('btn-tpl-new')?.addEventListener('click', onNew);
     document.getElementById('tpl-save-btn')?.addEventListener('click', onSave);
     document.getElementById('tpl-delete-btn')?.addEventListener('click', onDelete);
+    document.getElementById('tpl-insert-var')?.addEventListener('click', onInsertVariable);
+    document.getElementById('tpl-insert-snippet')?.addEventListener('click', onInsertSnippet);
     document.getElementById('templates-search')?.addEventListener('input', renderList);
 
     window.addEventListener('mf:section-changed', (e) => {
