@@ -11,12 +11,14 @@
   let _activePrefix = 'all';
 
   // Empfaengt-sicheres Tabellen-Skelett als Startpunkt fuer neue Vorlagen.
-  const DEFAULT_TEMPLATE_HTML = `<table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse; background:#f5f5f7;">
-  <tr>
-    <td align="center" style="padding:24px 16px;">
-      <table width="600" cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse; background:#ffffff; max-width:600px; width:100%;">
-        <tr>
-          <td style="padding:24px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:16px; line-height:1.5; color:#1c1c1e;">
+  const DEFAULT_TEMPLATE_HTML = `
+<table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse; background:#f5f5f7;">
+<tr>
+<td align="left" style="padding:0px;">
+
+<table width="600" cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse; background:#ffffff; max-width:600px; width:100%;">
+<tr>
+<td style="padding:24px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:16px; line-height:1.2; color:#1c1c1e;">
 
             <h1 style="margin:0 0 16px 0; font-size:24px; font-weight:700; color:#005a93;">
               Hallo {{name}},
@@ -28,11 +30,12 @@
               Viele Gruesse
             </p>
 
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
+</td>
+</tr>
+</table>
+
+</td>
+</tr>
 </table>`;
 
   function escapeHtml(s) {
