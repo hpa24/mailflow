@@ -13,6 +13,13 @@
   // Empfaengt-sicheres Tabellen-Skelett als Startpunkt fuer neue Vorlagen.
   const DEFAULT_TEMPLATE_HTML = `<table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse; background:#f5f5f7;">
 <tr>
+
+<tr>
+<td align="left" style="padding:0px;">
+{{> header_hpa24}}
+</td>
+</tr>
+
 <td align="left" style="padding:0px;">
 
 <table width="600" cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse; background:#ffffff; max-width:600px; width:100%;">
@@ -35,6 +42,13 @@ Viele Gruesse
 
 </td>
 </tr>
+
+<tr>
+<td align="left" style="padding:0px;">
+{{> footer_hpa24_kurs}}
+</td>
+</tr>
+
 </table>`;
 
   function escapeHtml(s) {
