@@ -14,15 +14,17 @@
   // Alle margin-Werte sind inline gesetzt, weil Browser-Defaults auf <p>/<h*>
   // zwischen Clients inkonsistent sind.
   const DEFAULT_SNIPPET_HTML = `<table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse;">
-  <tr>
-    <td style="padding:16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:16px; line-height:1.5; color:#1c1c1e;">
-      <h2 style="margin:0 0 12px 0; font-size:22px; font-weight:700; color:#005a93;">
-        Überschrift
-      </h2>
-      <p style="margin:0 0 16px 0;">Erster Absatz.</p>
-      <p style="margin:0;">Zweiter Absatz ohne Abstand danach.</p>
-    </td>
-  </tr>
+<tr>
+ <td style="padding:0px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:16px; line-height:1.2; color:#1c1c1e;">
+
+<h2 style="margin:0 0 12px 0; font-size:22px; font-weight:700; color:#005a93;">
+Überschrift
+</h2>
+<p style="margin:0 0 16px 0;">Erster Absatz.</p>
+<p style="margin:0;">Zweiter Absatz ohne Abstand danach.</p>
+
+</td>
+</tr>
 </table>`;
 
   function escapeHtml(s) {
