@@ -11,8 +11,7 @@
   let _activePrefix = 'all';
 
   // Empfaengt-sicheres Tabellen-Skelett als Startpunkt fuer neue Vorlagen.
-  const DEFAULT_TEMPLATE_HTML = `
-<table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse; background:#f5f5f7;">
+  const DEFAULT_TEMPLATE_HTML = `<table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse; background:#f5f5f7;">
 <tr>
 <td align="left" style="padding:0px;">
 
@@ -20,15 +19,15 @@
 <tr>
 <td style="padding:24px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:16px; line-height:1.2; color:#1c1c1e;">
 
-            <h1 style="margin:0 0 16px 0; font-size:24px; font-weight:700; color:#005a93;">
-              Hallo {{name}},
-            </h1>
-            <p style="margin:0 0 16px 0;">
-              hier kommt dein Vorlagen-Text. Variablen wie {{kurs_termin}} oder Snippet-Referenzen wie {{> footer}} werden beim Versand ersetzt.
-            </p>
-            <p style="margin:0;">
-              Viele Gruesse
-            </p>
+<h1 style="margin:0 0 16px 0; font-size:24px; font-weight:700; color:#005a93;">
+Hallo {{name}},
+</h1>
+<p style="margin:0 0 16px 0;">
+hier kommt dein Vorlagen-Text. Variablen wie {{kurs_termin}} oder Snippet-Referenzen wie {{> footer}} werden beim Versand ersetzt.
+</p>
+<p style="margin:0;">
+Viele Gruesse
+</p>
 
 </td>
 </tr>
