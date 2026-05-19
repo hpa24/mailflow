@@ -1566,17 +1566,13 @@ async function openEmail(email, itemEl) {
       text = (_tmp.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
     }
     if (full.body_html && full.body_html.trim()) {
-      // HTML in sandboxiertem Iframe rendern
+      // HTML in sandboxiertem Iframe rendern.
+      // allow-same-origin OHNE allow-scripts: Parent kann contentDocument
+      // lesen (Höhenmessung), aber eingebettetes E-Mail-JS kann nicht laufen.
       const iframe = document.createElement('iframe');
-      iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-scripts');
+      iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-same-origin');
       iframe.style.cssText = 'width:100%;border:none;display:block;';
 
-      // Script, das nach dem Laden die tatsächliche Dokumenthöhe per postMessage meldet
-      const injectHeightScript = `<script>(function(){
-        function report(){parent.postMessage({type:'mf-iframe-h',h:document.documentElement.scrollHeight||document.body.scrollHeight},'*');}
-        if(document.readyState==='complete'){report();}else{window.addEventListener('load',report);}
-        new MutationObserver(report).observe(document.body||document.documentElement,{childList:true,subtree:true,attributes:true});
-      }());<\/script>`;
       const injectCss = `<style>img{max-width:100%!important;height:auto!important}</style>`;
       const injectBase = `<base target="_blank">`;
 
@@ -1590,14 +1586,14 @@ async function openEmail(email, itemEl) {
         // Evtl. vorhandene <base>-Tags ersetzen, damit target="_blank" greift
         h = h.replace(/<base\b[^>]*>/gi, '');
         if (/<head[\s>]/i.test(h)) {
-          h = h.replace(/(<head[^>]*>)/i, `$1${injectBase}${injectCss}${injectHeightScript}`);
+          h = h.replace(/(<head[^>]*>)/i, `$1${injectBase}${injectCss}`);
         } else {
-          h = injectBase + injectCss + injectHeightScript + h;
+          h = injectBase + injectCss + h;
         }
         htmlToRender = h;
       } else {
         // HTML-Fragment: in minimales Dokument einwickeln
-        htmlToRender = `<!DOCTYPE html><html><head><meta charset="utf-8">${injectBase}${injectCss}${injectHeightScript}
+        htmlToRender = `<!DOCTYPE html><html><head><meta charset="utf-8">${injectBase}${injectCss}
           <style>
             body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
                  font-size:14px;padding:16px;margin:0;color:#1c1c1e;word-wrap:break-word;line-height:1.5}
@@ -1607,17 +1603,41 @@ async function openEmail(email, itemEl) {
           </style></head><body>${full.body_html}</body></html>`;
       }
 
-      // postMessage-Listener: empfängt Höhe vom iframe-Script
-      const onMsg = (ev) => {
-        if (ev.data && ev.data.type === 'mf-iframe-h' && ev.data.h > 0) {
-          iframe.style.height = (ev.data.h + 32) + 'px';
-        }
+      // Höhe vom Parent aus messen — kein Script-Inject in fremdes Mail-HTML.
+      // Nutzt contentDocument (durch allow-same-origin erlaubt). Reagiert auf
+      // Initial-Load + spätere Layout-Änderungen (z.B. nachladende Bilder).
+      const setHeight = () => {
+        try {
+          const doc = iframe.contentDocument;
+          if (!doc) return;
+          const h = Math.max(
+            doc.documentElement?.scrollHeight || 0,
+            doc.body?.scrollHeight || 0
+          );
+          if (h > 0) iframe.style.height = (h + 32) + 'px';
+        } catch (_) { /* cross-origin oder noch nicht geladen */ }
       };
-      window.addEventListener('message', onMsg);
-      // Listener aufräumen wenn iframe entfernt wird
+      let resizeObs = null;
+      iframe.addEventListener('load', () => {
+        setHeight();
+        try {
+          const doc = iframe.contentDocument;
+          if (doc && doc.body && 'ResizeObserver' in window) {
+            resizeObs = new ResizeObserver(setHeight);
+            resizeObs.observe(doc.body);
+          }
+          // Spät ladende Bilder triggern keinen ResizeObserver-Reflow zuverlässig
+          if (doc) {
+            doc.querySelectorAll('img').forEach(img => {
+              if (!img.complete) img.addEventListener('load', setHeight, { once: true });
+            });
+          }
+        } catch (_) { /* same-origin-Zugriff fehlgeschlagen */ }
+      });
+      // ResizeObserver + Image-Listener aufräumen, wenn iframe entfernt wird
       const cleanup = new MutationObserver(() => {
         if (!document.body.contains(iframe)) {
-          window.removeEventListener('message', onMsg);
+          if (resizeObs) resizeObs.disconnect();
           cleanup.disconnect();
         }
       });
