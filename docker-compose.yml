@@ -37,8 +37,6 @@ services:
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
       - ./nginx-templates:/etc/nginx/templates:ro
-    environment:
-      - MAILFLOW_API_KEY=${MAILFLOW_API_KEY}
     ports:
       - "80:80"
     restart: unless-stopped
