@@ -209,7 +209,20 @@
     if (!_selectedId) return;
     const cur = _snippets.find(s => s.id === _selectedId);
     if (!cur) return;
-    if (!confirm(`Snippet "${cur.name}" wirklich löschen?`)) return;
+    let usage;
+    try {
+      usage = await api.snippets.usage(_selectedId);
+    } catch (err) {
+      alert('Verwendungs-Prüfung fehlgeschlagen: ' + (err.message || err));
+      return;
+    }
+    const refCount = (usage?.templates?.length || 0);
+    if (refCount === 0) {
+      if (!confirm(`Snippet "${cur.name}" wirklich löschen?`)) return;
+    } else {
+      const force = await mfDeleteGuard.show({ kind: 'Snippet', name: cur.name, usage });
+      if (!force) return;
+    }
     try {
       await api.snippets.delete(_selectedId);
       _snippets = _snippets.filter(s => s.id !== _selectedId);

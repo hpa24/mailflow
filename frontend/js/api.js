@@ -144,6 +144,7 @@ window.api = {
     create(data)            { return apiJson('/variables', 'POST', data); },
     update(id, data)        { return apiJson(`/variables/${id}`, 'PATCH', data); },
     delete(id)              { return apiFetch(`/variables/${id}`, { method: 'DELETE' }); },
+    usage(id)               { return apiFetch(`/variables/${id}/usage`); },
   },
 
   snippets: {
@@ -151,6 +152,7 @@ window.api = {
     create(data)            { return apiJson('/snippets', 'POST', data); },
     update(id, data)        { return apiJson(`/snippets/${id}`, 'PATCH', data); },
     delete(id)              { return apiFetch(`/snippets/${id}`, { method: 'DELETE' }); },
+    usage(id)               { return apiFetch(`/snippets/${id}/usage`); },
   },
 
   templates: {
@@ -159,6 +161,18 @@ window.api = {
     update(id, data)        { return apiJson(`/templates/${id}`, 'PATCH', data); },
     delete(id)              { return apiFetch(`/templates/${id}`, { method: 'DELETE' }); },
     render(data)            { return apiJson('/templates/render', 'POST', data); },
+  },
+
+  contactGroups: {
+    list()                  { return apiFetch('/contact-groups'); },
+    create(data)            { return apiJson('/contact-groups', 'POST', data); },
+    update(id, data)        { return apiJson(`/contact-groups/${id}`, 'PATCH', data); },
+    delete(id)              { return apiFetch(`/contact-groups/${id}`, { method: 'DELETE' }); },
+    members(id)             { return apiFetch(`/contact-groups/${id}/members`); },
+  },
+
+  contacts: {
+    import(lines, mode = 'add') { return apiJson('/contacts/import', 'POST', { lines, mode }); },
   },
 
   ai: {

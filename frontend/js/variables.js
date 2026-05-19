@@ -159,11 +159,23 @@
   }
 
   async function onDelete(v) {
-    if (!confirm(`Variable {{${v.name}}} wirklich löschen?`)) return;
+    let usage;
+    try {
+      usage = await api.variables.usage(v.id);
+    } catch (err) {
+      alert('Verwendungs-Prüfung fehlgeschlagen: ' + (err.message || err));
+      return;
+    }
+    const refCount = (usage?.templates?.length || 0) + (usage?.snippets?.length || 0);
+    if (refCount === 0) {
+      if (!confirm(`Variable {{${v.name}}} wirklich löschen?`)) return;
+    } else {
+      const force = await mfDeleteGuard.show({ kind: 'Variable', name: v.name, usage });
+      if (!force) return;
+    }
     try {
       await api.variables.delete(v.id);
       _variables = _variables.filter(x => x.id !== v.id);
-      // Falls aktives Präfix nicht mehr vorhanden, zurück auf 'all'
       if (_activePrefix !== 'all' && !_variables.some(x => prefixOf(x.name) === _activePrefix)) {
         _activePrefix = 'all';
       }

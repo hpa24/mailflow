@@ -22,6 +22,7 @@
 - ✅ **CRUD-Endpoints** für Gruppen + `GET /contact-groups/{id}/members`
 - ✅ **Import-Endpoint** `POST /contacts/import` mit Format `email,name,gruppen`, Modi `add`/`remove`, Auto-Anlegen unbekannter Gruppen, Name-Auto-Normalisierung. Auth via globalem `API_KEY` ODER neuem optionalem `IMPORT_API_KEY` per `X-Import-Key`-Header (für externe Quellen wie FileMaker).
 - ✅ **Live-Test der Import-Endpoint-Logik** per Node-Fetch aus dem Terminal — alle Modi und Edge Cases bestätigt. Test-Daten (4 Kontakte + 6 Gruppen) bleiben in der DB für UI-Tests.
+- ✅ **Lösch-Schutz für Variablen + Snippets** (2026-05-19): Backend-Endpoints `GET /variables/{id}/usage` (scannt `email_templates.subject` + `html_body` + `email_snippets.html`) und `GET /snippets/{id}/usage` (scannt nur Templates — Snippet-in-Snippet ist per Plan verboten). Frontend `js/delete_guard.js` zeigt Modal mit Treffer-Liste vor dem Löschen, Option „Trotzdem löschen". Genutzt von `variables.js` + `snippets.js`.
 
 ### Test-Daten in der Production-DB
 
@@ -353,8 +354,7 @@ Identisch zum Untermenü-Eintrag „Kontakte" im Vorlagen-Tab — als eigener To
 | **Snippets dynamisch:** Templates speichern nur `{{> snippet_name}}`-Referenz. Beim Versand wird Snippet-HTML live aus Collection gezogen. Snippet-Änderung wirkt sofort auf alle Templates. | bestätigt 2026-05-17 |
 | Reserved Names — `name`, `email` als Kontakt-Felder dürfen nicht in `email_variables` definiert werden; validieren beim Anlegen | implementieren |
 | Section-Marker-Syntax `<!-- @section X -->` ↔ E-Mail-Clients: HTML-Kommentare werden von allen Clients ignoriert, das ist sicher | OK |
-| Migration der FileMaker-Variablen-Werte → `email_variables` | manuell, einmaliger Aufwand |
-| Snippet-Löschung-Schutz: bevor ein Snippet gelöscht wird, prüfen ob es noch referenziert ist (Volltextsuche über `email_templates.html_body`); Warnung mit Treffer-Liste | implementieren in Phase 1 |
+| **FileMaker → Kontakte-Sync**: Stefan ruft in FileMaker einen Kunden/Kurs auf und triggert einen API-Push. Backend-Endpoint `POST /contacts/import` (Format `email,name,gruppen`, Auth via `X-Import-Key`-Header) existiert bereits. Offen: `IMPORT_API_KEY` in Server-`.env` setzen + FileMaker-Skript schreiben das pro Teilnehmer (oder als Batch) eine Zeile POSTet. | Endpoint fertig, FileMaker-Skript offen |
 
 ---
 

@@ -2440,10 +2440,78 @@ async def variables_update(var_id: str, data: dict):
         raise
 
 
+@app.get("/variables/{var_id}/usage")
+async def variables_usage(var_id: str):
+    """Findet alle Templates + Snippets, die diese Variable referenzieren."""
+    var = await pb_client.pb_get(f"/api/collections/email_variables/records/{var_id}")
+    name = var.get("name") or ""
+    if not name:
+        return {"name": "", "templates": [], "snippets": []}
+    return await _find_placeholder_usage(name, include_snippets=True, snippet_prefix=False)
+
+
 @app.delete("/variables/{var_id}")
 async def variables_delete(var_id: str):
     await pb_client.pb_delete(f"/api/collections/email_variables/records/{var_id}")
     return {"status": "deleted"}
+
+
+async def _find_placeholder_usage(name: str, *, include_snippets: bool, snippet_prefix: bool) -> dict:
+    """Sucht `{{name}}` (oder `{{> name}}` wenn snippet_prefix=True) in
+    email_templates.subject + html_body und optional email_snippets.html.
+    Nutzt rendering._PLACEHOLDER_RE: (>?)(name).
+    """
+    target = name.strip().lower()
+    matched_templates: list[dict] = []
+    matched_snippets: list[dict] = []
+
+    tpls_resp = await pb_client.pb_get(
+        "/api/collections/email_templates/records",
+        params={"perPage": 500, "sort": "prefix,name"},
+    )
+    for t in tpls_resp.get("items", []):
+        hits: list[str] = []
+        for field in ("subject", "html_body"):
+            text = t.get(field) or ""
+            for m in rendering._PLACEHOLDER_RE.finditer(text):
+                is_snippet = bool(m.group(1))
+                placeholder_name = (m.group(2) or "").strip().lower()
+                if placeholder_name != target:
+                    continue
+                if snippet_prefix and not is_snippet:
+                    continue
+                if not snippet_prefix and is_snippet:
+                    continue
+                hits.append(field)
+                break  # ein Treffer pro Feld reicht
+        if hits:
+            matched_templates.append({
+                "id": t["id"],
+                "prefix": t.get("prefix") or "",
+                "name": t.get("name") or "",
+                "fields": hits,
+            })
+
+    if include_snippets:
+        snips_resp = await pb_client.pb_get(
+            "/api/collections/email_snippets/records",
+            params={"perPage": 500, "sort": "name"},
+        )
+        for s in snips_resp.get("items", []):
+            text = s.get("html") or ""
+            for m in rendering._PLACEHOLDER_RE.finditer(text):
+                is_snippet = bool(m.group(1))
+                placeholder_name = (m.group(2) or "").strip().lower()
+                if placeholder_name != target:
+                    continue
+                # Snippet-in-Snippet ist per Plan-Konvention verboten — also
+                # zaehlen wir hier nur Nicht-Prefix-Treffer (Variablen).
+                if is_snippet:
+                    continue
+                matched_snippets.append({"id": s["id"], "name": s.get("name") or ""})
+                break
+
+    return {"name": target, "templates": matched_templates, "snippets": matched_snippets}
 
 
 _SNIPPET_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{0,49}$")
@@ -2493,6 +2561,18 @@ async def snippets_update(snippet_id: str, data: dict):
         if exc.response.status_code == 400 and "name" in exc.response.text:
             raise HTTPException(status_code=409, detail="Snippet mit diesem Namen existiert bereits")
         raise
+
+
+@app.get("/snippets/{snippet_id}/usage")
+async def snippets_usage(snippet_id: str):
+    """Findet alle Templates, die dieses Snippet via {{> name}} referenzieren.
+    Snippets duerfen keine anderen Snippets includen (Plan-Konvention), deshalb
+    wird email_snippets nicht gescannt."""
+    snip = await pb_client.pb_get(f"/api/collections/email_snippets/records/{snippet_id}")
+    name = snip.get("name") or ""
+    if not name:
+        return {"name": "", "templates": [], "snippets": []}
+    return await _find_placeholder_usage(name, include_snippets=False, snippet_prefix=True)
 
 
 @app.delete("/snippets/{snippet_id}")
