@@ -199,3 +199,21 @@ email,name,gruppen
 - **Phase 2b**: Gruppen-UI im Vorlagen-Tab (Liste + Detail + Multiline-Import-UI).
 - **Phase 2c**: `bulk-send-template`-Endpoint und „Gruppen-Versand"-Compose-Workflow (Vorlage + Gruppe → direkter Bulk-Send ohne Editor-Stufe).
 - **Phase 3**: Unsubscribe-Token-Link, Bounce-Erkennung, Tagesversand-Counter, rollenbasierte Conditional Sections.
+
+## Webhook-Filter im Sent-Ordner 2026-05-19
+
+Nachzug zum Webhook-System (s.o.): Sent-Mails, die per `/webhooks/{slug}/send` rausgingen, sind jetzt in der UI vom normalen Compose-Versand trennbar.
+
+### Sync-Markierung
+
+Neues Feld `emails.webhook` (relation → `webhooks`, optional, single) — per Migration in `pb_setup.py` über `_add_missing_fields()` ergänzt, greift nur wenn die `webhooks`-Collection schon existiert.
+
+Befüllt wird das Feld im IMAP-Sync (`imap_sync._fetch_and_save`): für `folder == "Sent"` wird die `message_id` der eingehenden Mail in `webhook_logs` mit `status="success"` nachgeschlagen. Bei Treffer landet die Webhook-Record-ID im Feld, sonst bleibt es leer (= normaler Versand). Lookup-Helper: `_webhook_id_for_message()`. Bestehende Sent-Mails behalten ihr leeres Feld und erscheinen damit korrekt unter „Normal".
+
+### Backend-Filter
+
+`_email_filters()` in `main.py` versteht neuen Param `webhook="true"` / `webhook="false"` → PocketBase-Filter `webhook!=""` bzw. `webhook=""`. Greift in `/emails`, `/emails/threaded`, `/emails/by-sender`. Bewusst **nicht** in `/search` — dort ordnerübergreifend semantisch unklar.
+
+### UI-Filter
+
+Im Sent-Ordner zeigt die Filter-Leiste statt „Alle / Ungelesen / Gelesen" jetzt **„Alle / Webhook / Normal"** — gleiches Markup, gleicher Stil (`.read-filter-btn`). `renderReadFilterButtons()` in `inbox.js` rendert die passenden Buttons abhängig von `state.activeFolder`, Click-Handler läuft via Event-Delegation auf dem `.read-filter`-Container (weil die Buttons je nach Ordner neu gemounted werden). State: `state.sentFilter` parallel zu `state.readFilter`. Cache-Key in `_cacheKey()` zieht je nach aktivem Ordner den richtigen Filter.
