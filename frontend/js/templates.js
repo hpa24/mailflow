@@ -169,9 +169,21 @@ Viele Gruesse
       }
       const item = document.createElement('button');
       item.className = 'templates-list-item';
-      item.classList.toggle('active', t.id === _selectedId);
+      const isActive = t.id === _selectedId;
+      item.classList.toggle('active', isActive);
       item.dataset.id = t.id;
-      item.textContent = t.name;
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'list-item-name';
+      nameSpan.textContent = t.name;
+      item.appendChild(nameSpan);
+      if (isActive) {
+        const saveSpan = document.createElement('span');
+        saveSpan.className = 'list-item-save';
+        saveSpan.setAttribute('role', 'button');
+        saveSpan.textContent = '✓ Speichern';
+        saveSpan.addEventListener('click', (e) => { e.stopPropagation(); onSave(); });
+        item.appendChild(saveSpan);
+      }
       item.addEventListener('click', () => onSelect(t));
       list.appendChild(item);
     });
@@ -298,14 +310,17 @@ Viele Gruesse
   }
 
   function updateDirtyIndicator() {
+    const dirty = isDirty();
     const btn = document.getElementById('tpl-save-btn');
-    if (!btn) return;
-    if (isDirty()) {
-      btn.classList.add('dirty');
-      btn.textContent = 'Speichern *';
-    } else {
-      btn.classList.remove('dirty');
-      btn.textContent = 'Speichern';
+    if (btn) {
+      btn.classList.toggle('dirty', dirty);
+      btn.textContent = dirty ? 'Speichern *' : 'Speichern';
+    }
+    const activeItem = document.querySelector('.templates-list-item.active');
+    if (activeItem) {
+      activeItem.classList.toggle('dirty', dirty);
+      const inline = activeItem.querySelector('.list-item-save');
+      if (inline) inline.textContent = dirty ? '✓ Speichern *' : '✓ Speichern';
     }
   }
 

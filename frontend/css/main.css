@@ -2491,6 +2491,10 @@ body[data-active-tab="contacts"]  #tab-contacts  { display: flex; align-items: c
   gap: 2px;
 }
 .snippets-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   text-align: left;
   background: transparent;
   border: none;
@@ -2500,6 +2504,12 @@ body[data-active-tab="contacts"]  #tab-contacts  { display: flex; align-items: c
   color: var(--text);
   cursor: pointer;
   border-radius: 4px;
+}
+.snippets-list-item > .list-item-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .snippets-list-item:hover { background: rgba(0,0,0,0.04); }
 .snippets-list-item.active { background: var(--accent); color: white; }
@@ -2906,14 +2916,25 @@ body[data-active-tab="templates"] #templates-main[data-active-section="templates
   padding: 10px 4px 4px;
 }
 .templates-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   text-align: left;
   background: transparent;
   border: none;
   padding: 7px 12px;
   font-size: 14px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
   color: var(--text);
   cursor: pointer;
   border-radius: 4px;
+}
+.templates-list-item > .list-item-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .templates-list-item:hover { background: rgba(0,0,0,0.04); }
 .templates-list-item.active { background: var(--accent); color: white; }
@@ -3017,6 +3038,35 @@ body[data-active-tab="templates"] #templates-main[data-active-section="templates
   padding: 32px;
   text-align: center;
 }
+
+/* Inline-Save am aktiven Listen-Eintrag (Templates + Snippets) */
+.list-item-save {
+  display: none;
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.18);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.25);
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0.3px;
+  user-select: none;
+}
+.templates-list-item.active .list-item-save,
+.snippets-list-item.active  .list-item-save {
+  display: inline-flex;
+  align-items: center;
+}
+.templates-list-item.active.dirty .list-item-save,
+.snippets-list-item.active.dirty  .list-item-save {
+  background: #ffcc00;
+  color: #1c1c1e;
+  border-color: #ffcc00;
+}
+.list-item-save:hover { filter: brightness(1.1); }
 
 /* ── Groups-Section ───────────────────────────────────────── */
 #section-groups {
