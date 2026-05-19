@@ -183,12 +183,38 @@ email,name,gruppen
 | Route | Zweck |
 |---|---|
 | `GET/POST/PATCH/DELETE /variables` | CRUD |
+| `GET /variables/{id}/usage` | Findet Templates + Snippets, die `{{name}}` referenzieren — für Lösch-Schutz |
 | `GET/POST/PATCH/DELETE /snippets` | CRUD |
+| `GET /snippets/{id}/usage` | Findet Templates, die `{{> name}}` referenzieren — für Lösch-Schutz |
 | `GET/POST/PATCH/DELETE /templates` | CRUD (Filter `prefix=`, `search=`) |
 | `POST /templates/render` | `{html, subject, active_sections?, contact_id?}` → `{html, subject, unresolved}` |
 | `GET/POST/PATCH/DELETE /contact-groups` | CRUD |
 | `GET /contact-groups/{id}/members` | Mitglieder einer Gruppe |
 | `POST /contacts/import` | `{lines, mode}` → Counts + invalid-Report + auto_created_groups |
+
+### Phase 2b: Gruppen-Tab + Lösch-Schutz 2026-05-19
+
+**Gruppen-Tab** im Vorlagen-Bereich: Liste links (mit Mitglieder-Count-Badge) + Detail rechts (Name/Beschreibung editierbar, Mitglieder-Tabelle mit Einzel- und Bulk-Entfernen, Multiline-Import-Feld). Member-Entfernen läuft über `POST /contacts/import` mit `mode=remove` (kein extra Endpoint). Beim Gruppen-Delete räumt PocketBase die Relations automatisch auf (`cascadeDelete=False` auf `contacts.groups`).
+
+**Lösch-Schutz** für Variablen + Snippets via `GET /{var|snippet}/{id}/usage`:
+- Variable: scannt `email_templates.subject` + `html_body` + `email_snippets.html`
+- Snippet: scannt nur Templates (Snippet-in-Snippet ist per Plan verboten)
+- Frontend `js/delete_guard.js`: Modal mit Treffer-Liste, Option „Trotzdem löschen". Bei 0 Treffern fällt das Modal weg und es kommt nur ein einfaches `confirm()`.
+
+**Snippet-Editor** hat einen `+ Snippet ▾`-Button — fügt ein anderes Snippet als HTML-Code inline ein (keine `{{> }}`-Referenz, weil Snippet-in-Snippet verboten). Aktiv editiertes Snippet wird im Dropdown ausgeblendet.
+
+**Inline-Save-Button** am aktiven Listen-Eintrag (Templates + Snippets): rechts in der Liste neben dem Namen, gelb hervorgehoben bei Dirty-State. Verhindert dass der Editor-Header-Save-Button beim Scrollen aus dem Sichtfeld verschwindet.
+
+### Phase 2c: Gruppen im Massenversand 2026-05-19
+
+Statt eines separaten Gruppen-Versand-Workflows kommt eine Gruppen-Auswahl ins bestehende Bulk-Modal:
+- Button **„＋ Gruppe ▾"** über der Textarea → `mfDropdown` mit allen `contact_groups`
+- Auswahl lädt Mitglieder (filter `unsubscribed=false`) und hängt Emails an die Textarea (Dedup gegen bestehende Zeilen)
+- Mehrfach klickbar für mehrere Gruppen kumulativ
+- Status-Info nach jedem Klick: `X ergänzt · Y doppelt · Z unsubscribed`
+- Bestehende `/emails/bulk-send`-Pipeline macht ohnehin Phase-2-Rendering pro Empfänger — kein zweiter Send-Pfad nötig
+
+**Test-Versand-Button „✉ Test senden"** in der Compose-Action-Bar: sendet die aktuelle Mail mit Subject-Prefix `[TEST] ` an die Adresse des eingeloggten PocketBase-Users. `{{name}}` und `{{email}}` werden clientseitig mit den User-Daten gefüllt — Vorschau ist die fertig gerenderte Mail. Bestätigungs-Popup nach Erfolg.
 
 ### Bewusst nicht gebaut
 
@@ -196,8 +222,7 @@ email,name,gruppen
 - **CodeMirror / Syntax-Highlighting**: Plain Textarea + Monospace + 17px reicht aktuell. Nachrüstbar wenn Stefan das im Alltag vermisst.
 - **Sections-UI**: Backend kann Sections strippen (Marker im HTML), Editor-UI und Compose-Section-Checkboxen kommen mit Phase 2b.
 - **Pro-Kontakt-Variablen** (`{{vars.anrede}}` etc.): Stefan nutzt nur globale Werte. Bei Bedarf später nachrüstbar (Feld `vars` JSON auf Kontakt + Resolver-Erweiterung).
-- **Phase 2b**: Gruppen-UI im Vorlagen-Tab (Liste + Detail + Multiline-Import-UI).
-- **Phase 2c** (revised 2026-05-19): Statt eines separaten „Gruppen-Versand"-Workflows kommt eine **Gruppen-Auswahl ins bestehende Massenversand-Modal**. Flow: „Aus Vorlage" → Compose-Editor → „Massenversand" → Gruppe(n) wählen → Senden. Schritt 1 (Gruppen-Picker) ist umgesetzt; Rendered-Preview im Compose folgt als Schritt 2.
+- **Rendered-Preview-Iframe im Compose**: Stefans Feststellung 2026-05-19 — der `contenteditable`-Div rendert das HTML bereits direkt, ein zusätzliches Iframe wäre redundant. Der Test-Versand-Button deckt den End-Empfänger-Check ab.
 - **Phase 3**: Unsubscribe-Token-Link, Bounce-Erkennung, Tagesversand-Counter, rollenbasierte Conditional Sections.
 
 ## Webhook-Filter im Sent-Ordner 2026-05-19 #webhook #xano
