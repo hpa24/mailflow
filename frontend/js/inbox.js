@@ -2604,6 +2604,57 @@ function _closeBulkModal() {
   document.getElementById('bulk-modal-overlay').style.display = 'none';
 }
 
+document.getElementById('btn-test-send').addEventListener('click', async () => {
+  const a = auth.getAuth();
+  const userEmail = a?.record?.email;
+  const userName  = a?.record?.name || a?.record?.email || '';
+  if (!userEmail) {
+    alert('Test-Versand nicht möglich: keine eingeloggte E-Mail-Adresse gefunden.');
+    return;
+  }
+  const subject   = document.getElementById('ci-subject').value.trim();
+  const ciBodyEl  = document.getElementById('ci-body');
+  const body      = (ciBodyEl.innerText || '').trim();
+  const body_html = _linkifyHtml(ciBodyEl.innerHTML || '');
+  const fromAccId = document.getElementById('ci-from-account').value;
+  const smtpId    = document.getElementById('ci-smtp-server').value;
+  const statusEl  = document.getElementById('draft-status');
+  if (!subject) {
+    statusEl.textContent = 'Bitte Betreff ausfüllen für den Test-Versand.';
+    statusEl.style.color = 'var(--danger)';
+    return;
+  }
+  // {{name}} / {{email}} clientseitig durch User-Daten ersetzen — Backend
+  // wuerde sonst contacts-Lookup machen und ggf. leeren Namen einsetzen.
+  const namePh  = /\{\{\s*name\s*\}\}/g;
+  const emailPh = /\{\{\s*email\s*\}\}/g;
+  const subjectFilled = subject.replace(namePh, userName).replace(emailPh, userEmail);
+  const bodyFilled    = body.replace(namePh, userName).replace(emailPh, userEmail);
+  const htmlFilled    = body_html.replace(namePh, userName).replace(emailPh, userEmail);
+
+  const btn = document.getElementById('btn-test-send');
+  btn.disabled = true;
+  const origLabel = btn.textContent;
+  btn.textContent = 'Sende…';
+  try {
+    await api.sendEmail({
+      to: userEmail,
+      subject: '[TEST] ' + subjectFilled,
+      body: bodyFilled,
+      body_html: htmlFilled,
+      from_account: fromAccId,
+      smtp_server: smtpId,
+      attachment_ids: _composeAttachments.map(a => a.id),
+    });
+    alert(`Test-E-Mail wurde an ${userEmail} versendet.`);
+  } catch (err) {
+    alert('Test-Versand fehlgeschlagen: ' + (err.message || err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origLabel;
+  }
+});
+
 document.getElementById('btn-bulk').addEventListener('click', _openBulkModal);
 document.getElementById('ci-bulk-edit').addEventListener('click', _openBulkModal);
 document.getElementById('ci-bulk-clear').addEventListener('click', _clearBulkMode);
