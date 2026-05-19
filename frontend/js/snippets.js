@@ -324,6 +324,30 @@
     });
   }
 
+  function onInsertSnippet(e) {
+    if (!_draft) return;
+    mfDropdown.open({
+      trigger: e.currentTarget,
+      searchPlaceholder: 'Snippet suchen…',
+      emptyText: 'Noch keine anderen Snippets angelegt.',
+      loadItems: async () => {
+        const list = await api.snippets.list();
+        // aktuell editiertes Snippet ausblenden — Snippet kann sich nicht selbst includen
+        const filtered = _selectedId ? list.filter(s => s.id !== _selectedId) : list;
+        filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        return filtered.map(s => ({
+          label: s.name,
+          sublabel: s.html ? (s.html.replace(/\s+/g, ' ').slice(0, 60) + (s.html.length > 60 ? '…' : '')) : '',
+          value: s,
+        }));
+      },
+      onSelect: (item) => {
+        // Snippet-in-Snippet ist per Plan-Konvention verboten — daher nur Code-Kopie.
+        mfDropdown.insertAtCursor('snippet-html-textarea', item.value.html || '');
+      },
+    });
+  }
+
   function bindGlobal() {
     document.getElementById('btn-snippet-new')?.addEventListener('click', onNew);
     document.getElementById('snippet-save-btn')?.addEventListener('click', onSave);
@@ -331,6 +355,7 @@
     document.getElementById('snippet-copy-ref')?.addEventListener('click', onCopyRef);
     document.getElementById('snippet-copy-html')?.addEventListener('click', onCopyHtml);
     document.getElementById('snippet-insert-var')?.addEventListener('click', onInsertVariable);
+    document.getElementById('snippet-insert-snippet')?.addEventListener('click', onInsertSnippet);
     document.getElementById('snippets-search')?.addEventListener('input', renderList);
 
     window.addEventListener('mf:tab-changed', (e) => {
