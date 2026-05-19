@@ -6,6 +6,9 @@
   let _loaded = false;
   let _activePrefix = 'all';
 
+  const RESERVED_NAMES = new Set(['name', 'email']);
+  const NAME_RE = /^[a-z_][a-z0-9_]*$/;
+
   function prefixOf(name) {
     const i = (name || '').indexOf('_');
     return i > 0 ? name.slice(0, i) : null;
@@ -96,13 +99,14 @@
     const tr = document.createElement('tr');
     tr.dataset.id = v.id;
     tr.innerHTML = `
-      <td class="var-name"><code>{{${escapeHtml(v.name)}}}</code></td>
+      <td class="var-name" data-field="name" title="Doppelklick zum Umbenennen"></td>
       <td class="var-value" data-field="value"></td>
       <td class="var-updated">${escapeHtml(formatDate(v.updated))}</td>
       <td class="var-actions">
         <button class="row-btn" data-action="delete" title="Löschen">✕</button>
       </td>
     `;
+    tr.querySelector('[data-field="name"]').innerHTML = `<code>{{${escapeHtml(v.name)}}}</code>`;
     tr.querySelector('[data-field="value"]').textContent = v.value || '';
 
     tr.querySelectorAll('[data-field]').forEach(td => {
@@ -125,30 +129,42 @@
     input.focus();
     input.select();
 
+    function restoreDisplay(value) {
+      if (field === 'name') {
+        td.innerHTML = `<code>{{${escapeHtml(value)}}}</code>`;
+      } else {
+        td.textContent = value;
+      }
+    }
+
     let done = false;
     async function commit() {
       if (done) return;
       done = true;
-      const newValue = input.value;
+      const newValue = input.value.trim();
       if (newValue === oldValue) {
-        td.textContent = oldValue;
+        restoreDisplay(oldValue);
+        return;
+      }
+      if (field === 'name') {
+        await commitNameRename(tr, td, v, oldValue, newValue.toLowerCase(), restoreDisplay);
         return;
       }
       try {
         const updated = await api.variables.update(v.id, { [field]: newValue });
         v[field] = updated[field] != null ? updated[field] : newValue;
         v.updated = updated.updated || new Date().toISOString();
-        td.textContent = v[field];
+        restoreDisplay(v[field]);
         tr.querySelector('.var-updated').textContent = formatDate(v.updated);
       } catch (err) {
         alert('Speichern fehlgeschlagen: ' + (err.message || err));
-        td.textContent = oldValue;
+        restoreDisplay(oldValue);
       }
     }
     function cancel() {
       if (done) return;
       done = true;
-      td.textContent = oldValue;
+      restoreDisplay(oldValue);
     }
 
     input.addEventListener('blur', commit);
@@ -156,6 +172,61 @@
       if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
       else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
     });
+  }
+
+  async function commitNameRename(tr, td, v, oldName, newName, restoreDisplay) {
+    if (RESERVED_NAMES.has(newName)) {
+      alert(`„${newName}" ist für Kontakt-Felder reserviert. Bitte anderen Namen wählen.`);
+      restoreDisplay(oldName);
+      return;
+    }
+    if (!NAME_RE.test(newName)) {
+      alert('Name ungültig — nur Kleinbuchstaben, Ziffern, Unterstriche; Start mit Buchstabe oder _');
+      restoreDisplay(oldName);
+      return;
+    }
+
+    let usage;
+    try {
+      usage = await api.variables.usage(v.id);
+    } catch (err) {
+      alert('Verwendungs-Prüfung fehlgeschlagen: ' + (err.message || err));
+      restoreDisplay(oldName);
+      return;
+    }
+    const refCount = (usage?.templates?.length || 0) + (usage?.snippets?.length || 0);
+
+    let replace_in_usage = false;
+    if (refCount > 0) {
+      const decision = await mfRenameGuard.show({
+        kind: 'Variable', oldName, newName, usage,
+      });
+      if (decision === 'cancel') {
+        restoreDisplay(oldName);
+        return;
+      }
+      replace_in_usage = (decision === 'replace');
+    }
+
+    try {
+      const result = await api.variables.rename(v.id, { new_name: newName, replace_in_usage });
+      v.name = result.new_name;
+      v.updated = new Date().toISOString();
+      restoreDisplay(v.name);
+      tr.querySelector('.var-updated').textContent = formatDate(v.updated);
+      _variables.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      renderPrefixFilter();
+      render();
+      if (replace_in_usage) {
+        const parts = [];
+        if (result.replaced_templates) parts.push(`${result.replaced_templates} Vorlage(n)`);
+        if (result.replaced_snippets) parts.push(`${result.replaced_snippets} Snippet(s)`);
+        if (parts.length) console.info(`Variable umbenannt — Refs aktualisiert in ${parts.join(' + ')}`);
+      }
+    } catch (err) {
+      alert('Umbenennen fehlgeschlagen: ' + (err.message || err));
+      restoreDisplay(oldName);
+    }
   }
 
   async function onDelete(v) {
@@ -209,9 +280,17 @@
     nameInput.focus();
 
     async function save() {
-      const name = tr.querySelector('.draft-name').value.trim();
+      const name = tr.querySelector('.draft-name').value.trim().toLowerCase();
       const value = tr.querySelector('.draft-value').value;
       if (!name) { alert('Name fehlt'); return; }
+      if (RESERVED_NAMES.has(name)) {
+        alert(`„${name}" ist für Kontakt-Felder reserviert (wird beim Versand pro Empfänger ersetzt). Bitte anderen Namen wählen.`);
+        return;
+      }
+      if (!NAME_RE.test(name)) {
+        alert('Name ungültig — nur Kleinbuchstaben, Ziffern, Unterstriche; Start mit Buchstabe oder _');
+        return;
+      }
       try {
         const created = await api.variables.create({ name, value });
         _variables.push(created);

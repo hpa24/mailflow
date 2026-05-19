@@ -311,6 +311,46 @@ async def get_accounts():
                                   params={"perPage": 100, "fields": _ACCOUNT_SAFE_FIELDS})
 
 
+# Tagesversand-Limit von mailbox.org. Wenn sich Stefans Tarif ändert,
+# zentral hier anpassen — Frontend liest den Wert aus der Response.
+_SEND_DAILY_LIMIT = 10000
+
+
+@app.get("/accounts/sent-today")
+async def accounts_sent_today():
+    """Anzahl heute gesendete Mails pro Account aus dem Sent-Ordner.
+
+    Cutoff ist Mitternacht Europa/Berlin → UTC. PocketBase speichert
+    ``date_sent`` als UTC-Timestamp ``YYYY-MM-DD HH:MM:SS``.
+    """
+    from datetime import datetime, timezone
+    try:
+        from zoneinfo import ZoneInfo
+        now_local = datetime.now(ZoneInfo("Europe/Berlin"))
+    except Exception:
+        now_local = datetime.now(timezone.utc)
+    midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    cutoff = midnight_local.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    accounts_data = await pb_client.pb_get(
+        "/api/collections/accounts/records",
+        params={"perPage": 100, "fields": "id"},
+    )
+    counts: dict[str, int] = {}
+    for acc in accounts_data.get("items", []):
+        aid = acc["id"]
+        cnt_data = await pb_client.pb_get(
+            "/api/collections/emails/records",
+            params={
+                "filter": f'account="{aid}" && folder="Sent" && date_sent>="{cutoff}"',
+                "perPage": 1,
+                "fields": "id",
+            },
+        )
+        counts[aid] = cnt_data.get("totalItems", 0)
+    return {"counts": counts, "limit": _SEND_DAILY_LIMIT, "cutoff_utc": cutoff}
+
+
 @app.patch("/accounts/{account_id}")
 async def update_account(account_id: str, data: dict):
     """Update account fields (name, from_name, signature, etc.)."""
@@ -2469,6 +2509,112 @@ async def variables_delete(var_id: str):
     return {"status": "deleted"}
 
 
+@app.post("/variables/{var_id}/rename")
+async def variables_rename(var_id: str, data: dict):
+    """Benennt eine Variable um und ersetzt optional alle `{{old}}`-Vorkommen
+    in Templates+Snippets durch `{{new}}`.
+
+    Body: ``{new_name: str, replace_in_usage: bool}``.
+    Response: ``{old_name, new_name, replaced_templates, replaced_snippets}``.
+    """
+    new_name = (data.get("new_name") or "").strip().lower()
+    replace = bool(data.get("replace_in_usage", False))
+    if not _VAR_NAME_RE.match(new_name):
+        raise HTTPException(status_code=400, detail="name ungültig")
+    if new_name in _VAR_RESERVED_NAMES:
+        raise HTTPException(status_code=400, detail=f"name '{new_name}' ist reserviert")
+
+    cur = await pb_client.pb_get(f"/api/collections/email_variables/records/{var_id}")
+    old_name = (cur.get("name") or "").strip().lower()
+    if old_name == new_name:
+        return {"old_name": old_name, "new_name": new_name,
+                "replaced_templates": 0, "replaced_snippets": 0}
+
+    replaced_t = replaced_s = 0
+    if replace:
+        replaced_t, replaced_s = await _replace_placeholder_refs(
+            old_name, new_name, is_snippet=False
+        )
+
+    try:
+        await pb_client.pb_patch(
+            f"/api/collections/email_variables/records/{var_id}",
+            {"name": new_name},
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 400 and "name" in exc.response.text:
+            raise HTTPException(status_code=409, detail=f"Variable '{new_name}' existiert bereits")
+        raise
+
+    return {"old_name": old_name, "new_name": new_name,
+            "replaced_templates": replaced_t, "replaced_snippets": replaced_s}
+
+
+async def _replace_placeholder_refs(old: str, new: str, *, is_snippet: bool) -> tuple[int, int]:
+    """Ersetzt `{{old}}` (Variable) bzw. `{{> old}}` (Snippet) in
+    email_templates (subject+html_body) und — nur bei Variablen — auch
+    in email_snippets (html). Snippet-in-Snippet ist per Plan verboten,
+    daher überspringen wir Snippets, wenn ein Snippet umbenannt wird.
+
+    Returns (templates_modified, snippets_modified).
+    """
+    old_l = old.strip().lower()
+    new_l = new.strip().lower()
+
+    def rewrite(text: str) -> tuple[str, bool]:
+        changed = False
+
+        def repl(m: re.Match) -> str:
+            nonlocal changed
+            is_snip = bool(m.group(1))
+            name = (m.group(2) or "").strip().lower()
+            if name != old_l:
+                return m.group(0)
+            if is_snippet != is_snip:
+                return m.group(0)
+            changed = True
+            return f"{{{{> {new_l}}}}}" if is_snip else f"{{{{{new_l}}}}}"
+
+        result = rendering._PLACEHOLDER_RE.sub(repl, text or "")
+        return result, changed
+
+    tpl_modified = 0
+    tpls = await pb_client.pb_get(
+        "/api/collections/email_templates/records",
+        params={"perPage": 500, "fields": "id,subject,html_body"},
+    )
+    for t in tpls.get("items", []):
+        new_subj, ch1 = rewrite(t.get("subject") or "")
+        new_body, ch2 = rewrite(t.get("html_body") or "")
+        if ch1 or ch2:
+            patch: dict = {}
+            if ch1:
+                patch["subject"] = new_subj
+            if ch2:
+                patch["html_body"] = new_body
+            await pb_client.pb_patch(
+                f"/api/collections/email_templates/records/{t['id']}", patch
+            )
+            tpl_modified += 1
+
+    snip_modified = 0
+    if not is_snippet:
+        snips = await pb_client.pb_get(
+            "/api/collections/email_snippets/records",
+            params={"perPage": 500, "fields": "id,html"},
+        )
+        for s in snips.get("items", []):
+            new_html, ch = rewrite(s.get("html") or "")
+            if ch:
+                await pb_client.pb_patch(
+                    f"/api/collections/email_snippets/records/{s['id']}",
+                    {"html": new_html},
+                )
+                snip_modified += 1
+
+    return tpl_modified, snip_modified
+
+
 async def _find_placeholder_usage(name: str, *, include_snippets: bool, snippet_prefix: bool) -> dict:
     """Sucht `{{name}}` (oder `{{> name}}` wenn snippet_prefix=True) in
     email_templates.subject + html_body und optional email_snippets.html.
@@ -2592,6 +2738,43 @@ async def snippets_usage(snippet_id: str):
 async def snippets_delete(snippet_id: str):
     await pb_client.pb_delete(f"/api/collections/email_snippets/records/{snippet_id}")
     return {"status": "deleted"}
+
+
+@app.post("/snippets/{snippet_id}/rename")
+async def snippets_rename(snippet_id: str, data: dict):
+    """Benennt ein Snippet um und ersetzt optional alle `{{> old}}`-Refs
+    in Templates durch `{{> new}}`.
+
+    Body: ``{new_name: str, replace_in_usage: bool}``.
+    Response: ``{old_name, new_name, replaced_templates}``.
+    """
+    new_name = (data.get("new_name") or "").strip().lower()
+    replace = bool(data.get("replace_in_usage", False))
+    if not _SNIPPET_NAME_RE.match(new_name):
+        raise HTTPException(status_code=400, detail="name ungültig")
+
+    cur = await pb_client.pb_get(f"/api/collections/email_snippets/records/{snippet_id}")
+    old_name = (cur.get("name") or "").strip().lower()
+    if old_name == new_name:
+        return {"old_name": old_name, "new_name": new_name, "replaced_templates": 0}
+
+    replaced_t = 0
+    if replace:
+        replaced_t, _ = await _replace_placeholder_refs(
+            old_name, new_name, is_snippet=True
+        )
+
+    try:
+        await pb_client.pb_patch(
+            f"/api/collections/email_snippets/records/{snippet_id}",
+            {"name": new_name},
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 400 and "name" in exc.response.text:
+            raise HTTPException(status_code=409, detail=f"Snippet '{new_name}' existiert bereits")
+        raise
+
+    return {"old_name": old_name, "new_name": new_name, "replaced_templates": replaced_t}
 
 
 _TEMPLATE_PREFIX_RE = re.compile(r"^[a-z0-9_]{0,30}$")

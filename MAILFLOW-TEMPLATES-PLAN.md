@@ -23,6 +23,7 @@
 - ✅ **Import-Endpoint** `POST /contacts/import` mit Format `email,name,gruppen`, Modi `add`/`remove`, Auto-Anlegen unbekannter Gruppen, Name-Auto-Normalisierung. Auth via globalem `API_KEY` ODER neuem optionalem `IMPORT_API_KEY` per `X-Import-Key`-Header (für externe Quellen wie FileMaker).
 - ✅ **Live-Test der Import-Endpoint-Logik** per Node-Fetch aus dem Terminal — alle Modi und Edge Cases bestätigt. Test-Daten (4 Kontakte + 6 Gruppen) bleiben in der DB für UI-Tests.
 - ✅ **Lösch-Schutz für Variablen + Snippets** (2026-05-19): Backend-Endpoints `GET /variables/{id}/usage` (scannt `email_templates.subject` + `html_body` + `email_snippets.html`) und `GET /snippets/{id}/usage` (scannt nur Templates — Snippet-in-Snippet ist per Plan verboten). Frontend `js/delete_guard.js` zeigt Modal mit Treffer-Liste vor dem Löschen, Option „Trotzdem löschen". Genutzt von `variables.js` + `snippets.js`.
+- ✅ **Umbenennen-Schutz für Variablen + Snippets** (2026-05-19): Backend `POST /variables/{id}/rename` und `POST /snippets/{id}/rename` (Body `{new_name, replace_in_usage}`) mit gemeinsamem `_replace_placeholder_refs`-Helper, der `{{old}}` bzw. `{{> old}}` in Templates+Snippets atomisch durch `{{new}}` ersetzt. Variablen-Tabelle: Name-Spalte ist jetzt per Doppelklick editierbar; bei Rename mit Vorkommen zeigt `mfRenameGuard` ein Modal mit drei Optionen (Abbrechen / Nur Namen ändern / Auch in Vorlagen ändern). Snippet-Editor: gleiches Verhalten beim Speichern, wenn der Name geändert wurde.
 
 ### Test-Daten in der Production-DB
 
@@ -58,7 +59,7 @@ Gruppen: `dritte_gruppe`, `gross_geschrieben`, `kurs_a`, `kurs_b`, `test_gruppe`
 - Sections-UI (Checkbox-Auswahl-Modal vor dem Versand)
 - Unsubscribe-Link mit signiertem Token + Endpoint
 - Bounce-Erkennung im IMAP-Sync
-- Tagesversand-Counter gegen das 10K-mailbox.org-Limit
+- ✅ **Tagesversand-Counter (2026-05-19):** Backend `GET /accounts/sent-today` zählt `emails` mit `folder=Sent` + `date_sent >= heute 00:00 Europa/Berlin` pro Account; Limit zentral als `_SEND_DAILY_LIMIT=10000` in `main.py`. Frontend zeigt Pill in der Account-Header-Zeile der Sidebar (`X / 10.000`), färbt sich gelb ab 80 %, rot ab 100 %. Refresh: initial nach `loadAccounts`, debounced 1,5 s nach jedem `send-result`-SSE.
 - Rollenbasierte Conditional Sections (`if=role:X` ist schon syntaktisch erlaubt, Auswertung fehlt; Kontakt-Feld `roles` als JSON-Array)
 
 ### Wichtige Konventionen für Folge-Sessions
@@ -361,7 +362,7 @@ Identisch zum Untermenü-Eintrag „Kontakte" im Vorlagen-Tab — als eigener To
 | Punkt | Status |
 |---|---|
 | **Snippets dynamisch:** Templates speichern nur `{{> snippet_name}}`-Referenz. Beim Versand wird Snippet-HTML live aus Collection gezogen. Snippet-Änderung wirkt sofort auf alle Templates. | bestätigt 2026-05-17 |
-| Reserved Names — `name`, `email` als Kontakt-Felder dürfen nicht in `email_variables` definiert werden; validieren beim Anlegen | implementieren |
+| Reserved Names — `name`, `email` als Kontakt-Felder dürfen nicht in `email_variables` definiert werden; validieren beim Anlegen | ✅ 2026-05-19 — Backend POST/PATCH `/variables` lehnt `name`/`email` ab (`_VAR_RESERVED_NAMES` in `main.py`); Frontend prüft Draft-Zeile in `variables.js` vor dem Server-Call |
 | Section-Marker-Syntax `<!-- @section X -->` ↔ E-Mail-Clients: HTML-Kommentare werden von allen Clients ignoriert, das ist sicher | OK |
 | **FileMaker → Kontakte-Sync**: Stefan ruft in FileMaker einen Kunden/Kurs auf und triggert einen API-Push. Backend-Endpoint `POST /contacts/import` (Format `email,name,gruppen`, Auth via `X-Import-Key`-Header) existiert bereits. Offen: `IMPORT_API_KEY` in Server-`.env` setzen + FileMaker-Skript schreiben das pro Teilnehmer (oder als Batch) eine Zeile POSTet. | Endpoint fertig, FileMaker-Skript offen |
 

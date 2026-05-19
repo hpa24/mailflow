@@ -1371,6 +1371,23 @@ margin-bottom:5px;
 .account-label:hover .account-settings-btn { opacity: 1; }
 .account-settings-btn:hover { background: var(--bg3); color: var(--text); }
 
+.account-sent-counter {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text2);
+  background: rgba(0, 0, 0, 0.06);
+  padding: 2px 8px;
+  border-radius: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.account-sent-counter.warn { background: #fde68a; color: #854d0e; }
+.account-sent-counter.over { background: #fecaca; color: #991b1b; }
+.account-label .account-settings-btn { margin-left: 4px; }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -3410,6 +3427,85 @@ body[data-active-tab="templates"] #templates-main[data-active-section="templates
   font-style: italic;
 }
 #delete-guard-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+}
+
+/* ── Umbenennen-Guard-Modal (rename_guard) ────────────────────── */
+#rename-guard-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+}
+#rename-guard-box {
+  background: var(--bg);
+  border-radius: 10px;
+  width: min(560px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.3);
+  overflow: hidden;
+}
+#rename-guard-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text);
+}
+#rename-guard-body {
+  padding: 14px 18px;
+  overflow-y: auto;
+  flex: 1;
+  font-size: 13px;
+}
+#rename-guard-intro {
+  margin: 0 0 12px 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+#rename-guard-intro code {
+  background: var(--bg2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+}
+#rename-guard-usage .dg-section { margin-top: 12px; }
+#rename-guard-usage h4 {
+  margin: 0 0 6px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+#rename-guard-usage ul { margin: 0; padding-left: 20px; }
+#rename-guard-usage li { margin: 2px 0; line-height: 1.4; }
+#rename-guard-usage .dg-prefix {
+  display: inline-block;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  background: var(--bg2);
+  color: var(--text2);
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-right: 4px;
+}
+#rename-guard-usage .dg-where {
+  color: var(--text2);
+  font-size: 12px;
+  font-style: italic;
+}
+#rename-guard-footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;

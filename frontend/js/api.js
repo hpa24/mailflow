@@ -77,6 +77,7 @@ window.api = {
   getFolders(accountId)          { return apiGet('/folders', { account: accountId }); },
   getCategories()                { return apiGet('/categories'); },
   getAccounts()                  { return apiFetch('/accounts'); },
+  getSentToday()                 { return apiFetch('/accounts/sent-today'); },
   getSmtpServers()               { return apiFetch('/smtp-servers'); },
   getSyncStatus()                { return apiFetch('/sync/status'); },
   getEmail(id)                   { return apiFetch(`/emails/${id}`); },
@@ -145,6 +146,7 @@ window.api = {
     update(id, data)        { return apiJson(`/variables/${id}`, 'PATCH', data); },
     delete(id)              { return apiFetch(`/variables/${id}`, { method: 'DELETE' }); },
     usage(id)               { return apiFetch(`/variables/${id}/usage`); },
+    rename(id, data)        { return apiJson(`/variables/${id}/rename`, 'POST', data); },
   },
 
   snippets: {
@@ -153,6 +155,7 @@ window.api = {
     update(id, data)        { return apiJson(`/snippets/${id}`, 'PATCH', data); },
     delete(id)              { return apiFetch(`/snippets/${id}`, { method: 'DELETE' }); },
     usage(id)               { return apiFetch(`/snippets/${id}/usage`); },
+    rename(id, data)        { return apiJson(`/snippets/${id}/rename`, 'POST', data); },
   },
 
   templates: {

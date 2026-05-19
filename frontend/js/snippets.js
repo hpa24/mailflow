@@ -202,8 +202,43 @@
     }
     try {
       if (_selectedId) {
-        const updated = await api.snippets.update(_selectedId, { name, html: _draft.html });
-        Object.assign(_snippets.find(s => s.id === _selectedId), updated);
+        const orig = _snippets.find(s => s.id === _selectedId);
+        const oldName = (orig?.name || '').toLowerCase();
+        const isRename = oldName && oldName !== name;
+
+        // Rename: prüfen ob alter Name noch referenziert wird; ggf. fragen.
+        if (isRename) {
+          let usage;
+          try {
+            usage = await api.snippets.usage(_selectedId);
+          } catch (err) {
+            alert('Verwendungs-Prüfung fehlgeschlagen: ' + (err.message || err));
+            return;
+          }
+          const refCount = (usage?.templates?.length || 0);
+          let replace_in_usage = false;
+          if (refCount > 0) {
+            const decision = await mfRenameGuard.show({
+              kind: 'Snippet', oldName, newName: name, usage,
+            });
+            if (decision === 'cancel') return;
+            replace_in_usage = (decision === 'replace');
+          }
+          const result = await api.snippets.rename(_selectedId, { new_name: name, replace_in_usage });
+          if (replace_in_usage && result.replaced_templates) {
+            console.info(`Snippet umbenannt — Refs aktualisiert in ${result.replaced_templates} Vorlage(n)`);
+          }
+          // HTML evtl. parallel geändert — separat speichern, falls dirty.
+          if (_draft.html !== (orig?.html || '')) {
+            const updated = await api.snippets.update(_selectedId, { html: _draft.html });
+            Object.assign(orig, updated);
+          } else {
+            orig.name = name;
+          }
+        } else {
+          const updated = await api.snippets.update(_selectedId, { name, html: _draft.html });
+          Object.assign(_snippets.find(s => s.id === _selectedId), updated);
+        }
       } else {
         const created = await api.snippets.create({ name, html: _draft.html });
         _snippets.push(created);

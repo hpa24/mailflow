@@ -140,6 +140,7 @@ let state = {
   delimiters: {},       // accountId → '/' | '.' | null
   collapsedFolders: new Set(JSON.parse(localStorage.getItem('mf_collapsed') || '[]')),
   smtpServers: [],
+  sentToday: { counts: {}, limit: 10000 },  // Tagesversand pro Account, refreshed nach jedem send-result
   activeAccount: null,
   activeFolder: 'INBOX',
   groupMode: 'thread',   // 'thread' | 'sender'
@@ -252,6 +253,7 @@ function startEventSource() {
           await silentRefresh();
         } else if (data.type === 'send-result') {
           _handleSendResult(data);
+          if (data.success) scheduleSentTodayRefresh();
         }
       } catch (_) {}
     };
@@ -711,6 +713,7 @@ async function loadAccounts() {
     await loadAllFolders();
     renderSidebar();
     loadUnreadCounts();
+    refreshSentToday();
   } catch (e) {
     console.error('loadAccounts:', e);
   }
@@ -976,6 +979,32 @@ function setupInfiniteScroll() {
   });
 }
 
+let _sentTodayTimer = null;
+async function refreshSentToday() {
+  try {
+    const data = await api.getSentToday();
+    state.sentToday.counts = data.counts || {};
+    state.sentToday.limit = data.limit || 10000;
+    document.querySelectorAll('.account-sent-counter').forEach(el => {
+      const aid = el.dataset.account;
+      const c = state.sentToday.counts[aid] || 0;
+      const lim = state.sentToday.limit;
+      el.textContent = `${c}/${lim.toLocaleString('de-DE')}`;
+      el.classList.toggle('warn', c >= lim * 0.8);
+      el.classList.toggle('over', c >= lim);
+    });
+  } catch (err) {
+    console.warn('sent-today refresh failed', err);
+  }
+}
+function scheduleSentTodayRefresh() {
+  if (_sentTodayTimer) return;
+  _sentTodayTimer = setTimeout(() => {
+    _sentTodayTimer = null;
+    refreshSentToday();
+  }, 1500);
+}
+
 function renderSidebar() {
   const sidebar = document.getElementById('sidebar-accounts');
   sidebar.innerHTML = '';
@@ -984,8 +1013,11 @@ function renderSidebar() {
     section.className = 'account-section';
     const label = document.createElement('div');
     label.className = 'account-label';
+    const sent = state.sentToday.counts[account.id] || 0;
+    const limit = state.sentToday.limit || 10000;
     label.innerHTML = `
       <span>${account.name || account.from_email}</span>
+      <span class="account-sent-counter" title="Heute versendet (Mailbox.org-Tageslimit ${limit.toLocaleString('de-DE')})" data-account="${account.id}">${sent}/${limit.toLocaleString('de-DE')}</span>
       <button class="account-settings-btn" title="Einstellungen">⚙</button>
     `;
     label.querySelector('.account-settings-btn').addEventListener('click', (e) => {
