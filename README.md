@@ -242,3 +242,54 @@ Befüllt wird das Feld im IMAP-Sync (`imap_sync._fetch_and_save`): für `folder 
 ### UI-Filter
 
 Im Sent-Ordner zeigt die Filter-Leiste statt „Alle / Ungelesen / Gelesen" jetzt **„Alle / Webhook / Normal"** — gleiches Markup, gleicher Stil (`.read-filter-btn`). `renderReadFilterButtons()` in `inbox.js` rendert die passenden Buttons abhängig von `state.activeFolder`, Click-Handler läuft via Event-Delegation auf dem `.read-filter`-Container (weil die Buttons je nach Ordner neu gemounted werden). State: `state.sentFilter` parallel zu `state.readFilter`. Cache-Key in `_cacheKey()` zieht je nach aktivem Ordner den richtigen Filter.
+
+## Aussendungs-Historie 2026-05-19 #aussendung #bouncetracking
+
+Persistierung aller Massenversände als Audit-Records — Grundlage für Re-Send-Workflows und kommendes Bounce-Tracking (Phase 3b).
+
+### Collection `bulk_sends`
+
+Schema in `backend/pb_setup.py` → `_bulk_sends_schema(accounts_id)`. Felder: `subject`, `from_account` (rel), `from_account_email`, `smtp_server`, `body_html`/`body_text` (Snapshot), `sent_at`, `delay_seconds`, `recipients` (JSON-Array), Counts `total_count` / `sent_count` / `error_count` / `bounced_count`. Index auf `sent_at DESC`.
+
+`recipients`-Schema pro Eintrag:
+```json
+{"email": "x@y.de", "name": "Max", "raw": "Max <x@y.de>",
+ "status": "queued|sent|error|bounced",
+ "message_id": "<...@host>", "error": null, "sent_at": null}
+```
+
+### Backend-Pipeline
+
+`bulk_send_endpoint` legt **vor** dem Versand den `bulk_sends`-Record an. Pro Sub-Job:
+- `_do_send_job` empfängt `_bulk_send_id` über `base_data` und reicht die von `smtp_send_email` zurückgegebene Message-ID weiter.
+- `_bulk_record_recipient_result(bulk_send_id, recipient, status=, message_id=, error=)` patcht den eigenen Empfänger-Eintrag im JSON-Array.
+- Race-Schutz: `_bulk_send_locks: dict[str, asyncio.Lock]` mit einem Lock pro Bulk-Send-ID, weil mehrere Sub-Jobs gleichzeitig dasselbe `recipients`-Array lesen + schreiben.
+- Counts werden bei jedem Update neu summiert und mitgepatcht.
+
+### Endpoints
+
+| Route | Zweck |
+|---|---|
+| `GET /bulk-sends?limit=N` | Liste neueste zuerst, **ohne** `recipients`-Array (Performance) |
+| `GET /bulk-sends/{id}` | Volldetail inkl. `recipients` |
+| `DELETE /bulk-sends/{id}` | Audit-Eintrag löschen (gesendete Mails sind nicht betroffen) |
+
+### Frontend `js/bulk_sends.js`
+
+Neuer Subnav-Eintrag „Aussendungen" zwischen „Gruppen" und „Kontakte". Liste links (320px), Detail rechts mit Empfänger-Tabelle, Status-Filter-Chips (Alle/Erfolgreich/Fehler/Bounce/Ausstehend) und Selection-Hint. Vorschau-Modal mit iframe-srcdoc. Bouncte sind in der Tabelle default markiert.
+
+### Re-Send-Workflow
+
+Button „Auswahl als neuer Versand" → `window.mfComposeResend.open({subject, body_html, body_text, recipients, from_account, smtp_server})` (definiert in `inbox.js`):
+1. `mfTabs.setActiveTab('inbox')` — zurück zum Inbox-Tab
+2. `openCompose({subject, fromAccountId})` — Compose öffnet
+3. `#ci-body.innerHTML = body_html` — HTML direkt setzen (statt Plain-`body` über `openCompose`)
+4. `#ci-smtp-server.value = smtp_server` — SMTP-Vorauswahl, Stefan kann im Dropdown wechseln
+5. `_bulkRecipients = [...]` + `_openBulkModal()` — Bulk-Modal sofort offen mit den vorgefüllten Adressen
+
+Bulk-Send läuft danach durch die normale `/emails/bulk-send`-Pipeline und legt einen **neuen** `bulk_sends`-Record an.
+
+### Bewusst nicht jetzt
+
+- **Bounce-Erkennung** (Phase 3b, geplant): IMAP-Sync-Heuristik für Mailer-Daemon/DSN-Mails, Message-ID-Match gegen `bulk_sends.recipients[*].message_id`, `contacts.bounced`-Flag, UI-Badges. Vorbereitung dafür ist mit der Message-ID-Persistierung schon getan.
+- **Tagesversand-Counter** ist bereits live (siehe „Tagesversand-Counter" unten / Plan-Eintrag).
