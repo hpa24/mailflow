@@ -197,10 +197,10 @@ email,name,gruppen
 - **Sections-UI**: Backend kann Sections strippen (Marker im HTML), Editor-UI und Compose-Section-Checkboxen kommen mit Phase 2b.
 - **Pro-Kontakt-Variablen** (`{{vars.anrede}}` etc.): Stefan nutzt nur globale Werte. Bei Bedarf später nachrüstbar (Feld `vars` JSON auf Kontakt + Resolver-Erweiterung).
 - **Phase 2b**: Gruppen-UI im Vorlagen-Tab (Liste + Detail + Multiline-Import-UI).
-- **Phase 2c**: `bulk-send-template`-Endpoint und „Gruppen-Versand"-Compose-Workflow (Vorlage + Gruppe → direkter Bulk-Send ohne Editor-Stufe).
+- **Phase 2c** (revised 2026-05-19): Statt eines separaten „Gruppen-Versand"-Workflows kommt eine **Gruppen-Auswahl ins bestehende Massenversand-Modal**. Flow: „Aus Vorlage" → Compose-Editor → „Massenversand" → Gruppe(n) wählen → Senden. Schritt 1 (Gruppen-Picker) ist umgesetzt; Rendered-Preview im Compose folgt als Schritt 2.
 - **Phase 3**: Unsubscribe-Token-Link, Bounce-Erkennung, Tagesversand-Counter, rollenbasierte Conditional Sections.
 
-## Webhook-Filter im Sent-Ordner 2026-05-19
+## Webhook-Filter im Sent-Ordner 2026-05-19 #webhook #xano
 
 Nachzug zum Webhook-System (s.o.): Sent-Mails, die per `/webhooks/{slug}/send` rausgingen, sind jetzt in der UI vom normalen Compose-Versand trennbar.
 

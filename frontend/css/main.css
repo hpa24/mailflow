@@ -1912,6 +1912,16 @@ justify-content: center;
   color: var(--text2);
   line-height: 1.5;
 }
+#bulk-modal-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+#bulk-modal-info {
+  font-size: 12px;
+  color: var(--text2);
+}
 #bulk-modal-textarea {
   width: 100%;
   padding: 10px 12px;

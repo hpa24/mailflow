@@ -39,10 +39,19 @@ Gruppen: `dritte_gruppe`, `gross_geschrieben`, `kurs_a`, `kurs_b`, `test_gruppe`
 - **Datei-Stubs**: neues `js/groups.js` analog zu `js/templates.js`, `template_subnav.js` muss `groups` in `KNOWN` aufnehmen
 - **Backend-Stand**: alle Endpoints existieren bereits (`/contact-groups` CRUD + members + `/contacts/import`). Keine Backend-Änderungen nötig für 2b.
 
-### Danach — Phase 2c: Gruppen-Versand
+### Danach — Phase 2c: Gruppen im Massenversand (revised 2026-05-19)
 
-- **Bulk-Send-Template-Endpoint** `POST /emails/bulk-send-template` mit Body `{template_id, group_id, active_sections, delay_seconds, from_account_id?}`. Lädt Gruppen-Mitglieder (filter `unsubscribed=false`), rendert pro Empfänger via `render_full(html, snippets, variables, active_sections, contact)`, erzeugt Sub-Jobs in `_send_jobs` mit gerendertem Inhalt (self-contained, kein Re-Render im Versandzyklus), sequenzieller Versand mit `asyncio.sleep(delay_seconds)` wie bei `_do_bulk_send`.
-- **Compose-Integration**: zweiter Action-Bar-Button (alternativ eigener Menüpunkt im Vorlagen-Tab) „Gruppen-Versand": Vorlage wählen → Section-Checkboxen → Gruppe wählen → Vorschau (gerenderte Mail pro Empfänger durchklickbar) → Senden mit Status-Panel.
+**Designentscheidung:** Kein separater „Gruppen-Versand"-Workflow. Stattdessen kommt eine **Gruppen-Auswahl ins bestehende Massenversand-Modal**. Der User-Flow wird damit einheitlich: „Aus Vorlage" → Compose-Editor (optional anpassen) → „Massenversand" → Gruppe(n) wählen → Senden.
+
+**Begründung:** Spart einen zweiten parallelen Send-Pfad (Endpoint, Modal, Vorschau-Stufe, eigene State-Verwaltung). Bestehende Bulk-Pipeline macht ohnehin schon Phase-2-Rendering pro Empfänger (`{{name}}`/`{{email}}`). Section-Auswahl passiert beim „Aus Vorlage"-Klick wie bisher. Risiko-Diskussion (versehentliche Last-Minute-Edits) wird durch Bedienungs-Disziplin abgedeckt — der User ist Solo-Operator.
+
+**Schritt 1 (umgesetzt 2026-05-19):**
+- Bulk-Modal: Button „＋ Gruppe ▾" über der Textarea. Klick öffnet `mfDropdown` mit allen `contact_groups`. Auswahl lädt Mitglieder (filter `unsubscribed=false`) und hängt deren Email-Adressen an die Textarea. Mehrfach klickbar → mehrere Gruppen kumulativ. Dedup gegen bereits eingegebene Adressen. Status-Info pro Klick: `X ergänzt · Y doppelt · Z unsubscribed`.
+- Bestehende `_parseBulkInput` + `bulk-modal-apply` + `/emails/bulk-send`-Pipeline bleiben unverändert.
+- **Backend-Änderungen: keine.**
+
+**Schritt 2 (geplant):**
+- Rendered Live-Preview im Compose-Editor (Toggle „Vorschau" mit iframe-srcdoc, analog Template-/Snippet-Editor). Hilft bei der Inspektion vor dem Massenversand.
 
 ### Phase 3 (später)
 

@@ -2591,9 +2591,11 @@ function _openBulkModal() {
   const overlay  = document.getElementById('bulk-modal-overlay');
   const textarea = document.getElementById('bulk-modal-textarea');
   const errors   = document.getElementById('bulk-modal-errors');
+  const info     = document.getElementById('bulk-modal-info');
   textarea.value = _bulkRecipients.join('\n');
   errors.style.display = 'none';
   errors.textContent = '';
+  if (info) info.textContent = '';
   overlay.style.display = 'flex';
   setTimeout(() => textarea.focus(), 0);
 }
@@ -2609,6 +2611,66 @@ document.getElementById('bulk-modal-close').addEventListener('click', _closeBulk
 document.getElementById('bulk-modal-cancel').addEventListener('click', _closeBulkModal);
 document.getElementById('bulk-modal-overlay').addEventListener('click', (e) => {
   if (e.target.id === 'bulk-modal-overlay') _closeBulkModal();
+});
+
+function _setBulkInfo(msg, isError = false) {
+  const el = document.getElementById('bulk-modal-info');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.color = isError ? 'var(--danger)' : 'var(--text2)';
+}
+
+async function _bulkAddGroupMembers(group) {
+  let members;
+  try {
+    members = await api.contactGroups.members(group.id);
+  } catch (err) {
+    _setBulkInfo(`Mitglieder laden fehlgeschlagen: ${err.message || err}`, true);
+    return;
+  }
+  const subscribed = members.filter(m => m.email && !m.unsubscribed);
+  const unsubCount = members.length - subscribed.length;
+  if (subscribed.length === 0) {
+    _setBulkInfo(`Gruppe „${group.name}" hat keine versendbaren Mitglieder${unsubCount ? ` (${unsubCount} unsubscribed)` : ''}.`, true);
+    return;
+  }
+  const textarea = document.getElementById('bulk-modal-textarea');
+  const existing = new Set(
+    (textarea.value || '').split(/[\n,;]+/).map(l => l.trim().toLowerCase()).filter(Boolean)
+  );
+  const newAddrs = [];
+  let duplicate = 0;
+  subscribed.forEach(m => {
+    const email = (m.email || '').trim();
+    if (!email) return;
+    if (existing.has(email.toLowerCase())) { duplicate++; return; }
+    newAddrs.push(email);
+    existing.add(email.toLowerCase());
+  });
+  const sep = textarea.value && !textarea.value.endsWith('\n') ? '\n' : '';
+  textarea.value = textarea.value + sep + newAddrs.join('\n');
+  const parts = [`Gruppe „${group.name}": ${newAddrs.length} ergänzt`];
+  if (duplicate)  parts.push(`${duplicate} doppelt`);
+  if (unsubCount) parts.push(`${unsubCount} unsubscribed`);
+  _setBulkInfo(parts.join(' · '));
+}
+
+document.getElementById('bulk-modal-add-group').addEventListener('click', (e) => {
+  mfDropdown.open({
+    trigger: e.currentTarget,
+    searchPlaceholder: 'Gruppe suchen…',
+    emptyText: 'Keine Kontakt-Gruppen angelegt.',
+    loadItems: async () => {
+      const groups = await api.contactGroups.list();
+      groups.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      return groups.map(g => ({
+        label: g.name,
+        sublabel: g.description || '',
+        value: g,
+      }));
+    },
+    onSelect: (item) => _bulkAddGroupMembers(item.value),
+  });
 });
 
 document.getElementById('bulk-modal-apply').addEventListener('click', () => {
