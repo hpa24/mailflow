@@ -425,8 +425,8 @@ async def _delete_emails_for_folder(account_id: str, folder_name: str) -> None:
     )
     for email in result.get("items", []):
         try:
-            await pb_client.pb_post(
-                f"/api/collections/emails/records/{email['id']}", {}
+            await pb_client.pb_delete(
+                f"/api/collections/emails/records/{email['id']}"
             )
         except Exception:
             pass
