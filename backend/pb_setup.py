@@ -97,6 +97,11 @@ async def setup_pocketbase_schema(token: str) -> None:
                 _field("spam_suggested", "bool"),
                 _field("spam_rule_match", "text"),
             ])
+        if "emails" in existing and "webhooks" in existing:
+            await _add_missing_fields(client, headers, "emails", existing["emails"], [
+                _field("webhook", "relation",
+                       collectionId=existing["webhooks"], maxSelect=1, cascadeDelete=False),
+            ])
         if "contacts" in existing:
             await _add_missing_fields(client, headers, "contacts", existing["contacts"], [
                 _field("xano_context", "text", max=MAX_UNLIMITED),

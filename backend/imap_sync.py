@@ -215,6 +215,13 @@ async def _fetch_and_save(server: IMAPClient, account_id: str,
     in_reply_to = parsed.get("in_reply_to", "")
     thread_id = await _compute_thread_id(message_id, in_reply_to)
 
+    # Webhook-Quelle nur im Sent-Ordner prüfen — markiert E-Mails, die via
+    # /webhooks/{slug}/send rausgingen, damit die UI im Sent-Ordner Webhook
+    # von normalem Versand trennen kann.
+    webhook_id = ""
+    if folder_name == "Sent" and message_id:
+        webhook_id = await _webhook_id_for_message(message_id)
+
     body_plain = (parsed.get("body_plain") or "")[:500_000]
     body_html  = (parsed.get("body_html")  or "")[:500_000]
     record = {
@@ -240,6 +247,7 @@ async def _fetch_and_save(server: IMAPClient, account_id: str,
         "is_flagged": is_flagged,
         "is_answered": is_answered,
         "has_attachments": parsed.get("has_attachments", False),
+        "webhook": webhook_id,
     }
 
     # In PocketBase speichern (doppelte message_id wird durch unique index abgefangen)
@@ -440,6 +448,29 @@ async def _compute_thread_id(message_id: str, in_reply_to: str) -> str:
     except Exception:
         pass
     return message_id
+
+
+async def _webhook_id_for_message(message_id: str) -> str:
+    """Sucht in webhook_logs nach einem erfolgreichen Versand mit dieser
+    message_id und gibt die Webhook-Record-ID zurück. Leerer String bei
+    keinem Treffer — Mail wurde dann normal via Mailflow-Compose gesendet."""
+    try:
+        # PocketBase-Filter: doppelte Anführungszeichen escapen
+        safe_id = message_id.replace('"', '')
+        result = await pb_client.pb_get(
+            "/api/collections/webhook_logs/records",
+            params={
+                "filter": f'message_id="{safe_id}" && status="success"',
+                "perPage": 1,
+                "fields": "id,webhook",
+            },
+        )
+        items = result.get("items", [])
+        if items:
+            return items[0].get("webhook", "") or ""
+    except Exception as exc:
+        logger.warning("webhook-Lookup für message_id=%s fehlgeschlagen: %s", message_id, exc)
+    return ""
 
 
 FLAG_SYNC_WINDOW = 200  # Wie viele der letzten UIDs auf Flag-Änderungen geprüft werden

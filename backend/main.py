@@ -47,8 +47,14 @@ def _pb_safe(q: str) -> str:
     return q.strip().replace('"', '').replace("'", "").replace("\\", "")
 
 
-def _email_filters(account: str | None, folder: str | None, is_read: str | None) -> list[str]:
-    """Baut PocketBase-Filter für E-Mail-Abfragen."""
+def _email_filters(account: str | None, folder: str | None,
+                   is_read: str | None, webhook: str | None = None) -> list[str]:
+    """Baut PocketBase-Filter für E-Mail-Abfragen.
+
+    `webhook="true"` → nur Webhook-Versand (Feld nicht leer);
+    `webhook="false"` → nur normaler Versand (Feld leer).
+    Wird im Sent-Ordner statt is_read als Filter genutzt.
+    """
     filters = []
     if account:
         filters.append(f'account="{account}"')
@@ -58,6 +64,10 @@ def _email_filters(account: str | None, folder: str | None, is_read: str | None)
         filters.append("is_read=true")
     elif is_read == "false":
         filters.append("is_read=false")
+    if webhook == "true":
+        filters.append('webhook!=""')
+    elif webhook == "false":
+        filters.append('webhook=""')
     return filters
 
 
@@ -423,8 +433,9 @@ async def search_emails(q: str, account: str | None = None,
 
 @app.get("/emails")
 async def get_emails(account: str | None = None, folder: str | None = None,
-                     page: int = 1, limit: int = 50, is_read: str | None = None):
-    filters = _email_filters(account, folder, is_read)
+                     page: int = 1, limit: int = 50, is_read: str | None = None,
+                     webhook: str | None = None):
+    filters = _email_filters(account, folder, is_read, webhook)
 
     params = {
         "perPage": limit,
@@ -509,12 +520,13 @@ async def get_folder_counts():
 @app.get("/emails/threaded")
 async def get_emails_threaded(account: str | None = None, folder: str | None = None,
                               page: int = 1, limit: int = 100,
-                              is_read: str | None = None):
+                              is_read: str | None = None,
+                              webhook: str | None = None):
     """
     Returns emails sorted by thread: newest thread first, within thread oldest-first.
     Threads split by Fwd: are merged when normalized subject + participants overlap.
     """
-    filters = _email_filters(account, folder, is_read)
+    filters = _email_filters(account, folder, is_read, webhook)
 
     fields = ("id,account,folder,message_id,thread_id,in_reply_to,from_email,"
               "from_name,reply_to,to_emails,subject,snippet,date_sent,is_read,is_flagged,"
@@ -595,12 +607,13 @@ async def get_emails_threaded(account: str | None = None, folder: str | None = N
 @app.get("/emails/by-sender")
 async def get_emails_by_sender(account: str | None = None, folder: str | None = None,
                                page: int = 1, limit: int = 100,
-                               is_read: str | None = None):
+                               is_read: str | None = None,
+                               webhook: str | None = None):
     """
     Returns emails grouped by sender: most-recent-contact first,
     within each sender group newest email first.
     """
-    filters = _email_filters(account, folder, is_read)
+    filters = _email_filters(account, folder, is_read, webhook)
 
     fields = ("id,account,folder,message_id,thread_id,in_reply_to,from_email,"
               "from_name,reply_to,to_emails,subject,snippet,date_sent,is_read,is_flagged,"

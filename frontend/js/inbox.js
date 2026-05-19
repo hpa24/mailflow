@@ -30,7 +30,8 @@ const _folderCache = {};
 const FOLDER_CACHE_TTL = 3 * 60 * 1000; // 3 Minuten
 
 function _cacheKey() {
-  return `${state.activeAccount}|${state.activeFolder}|${state.readFilter}|${state.groupMode}`;
+  const f = state.activeFolder === 'Sent' ? state.sentFilter : state.readFilter;
+  return `${state.activeAccount}|${state.activeFolder}|${f}|${state.groupMode}`;
 }
 function _saveToCache() {
   if (state.searchQuery) return;
@@ -142,7 +143,8 @@ let state = {
   activeAccount: null,
   activeFolder: 'INBOX',
   groupMode: 'thread',   // 'thread' | 'sender'
-  readFilter: 'all',     // 'all' | 'unread' | 'read'
+  readFilter: 'all',     // 'all' | 'unread' | 'read' — Posteingang etc.
+  sentFilter: 'all',     // 'all' | 'webhook' | 'normal' — nur im Sent-Ordner aktiv
   newCount: 0,           // is_new=true Zähler — für Tab-Badge
   searchQuery: '',
   emails: [],
@@ -610,15 +612,40 @@ function setupViewToggle() {
   });
 }
 
+// Buttons je nach aktivem Ordner umschriften.
+// Posteingang & co: Alle / Ungelesen / Gelesen.
+// Sent: Alle / Webhook / Normal (Filter auf emails.webhook).
+function renderReadFilterButtons() {
+  const container = document.querySelector('.read-filter');
+  if (!container) return;
+  const isSent = state.activeFolder === 'Sent';
+  const active = isSent ? state.sentFilter : state.readFilter;
+  const buttons = isSent
+    ? [['all', 'Alle'], ['webhook', 'Webhook'], ['normal', 'Normal']]
+    : [['all', 'Alle'], ['unread', 'Ungelesen'], ['read', 'Gelesen']];
+  container.innerHTML = buttons
+    .map(([f, label]) =>
+      `<button class="read-filter-btn${f === active ? ' active' : ''}" data-filter="${f}">${label}</button>`,
+    )
+    .join('');
+}
+
 function setupReadFilter() {
-  document.querySelectorAll('.read-filter-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (btn.dataset.filter === state.readFilter) return;
-      state.readFilter = btn.dataset.filter;
-      document.querySelectorAll('.read-filter-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      loadEmails(true);
-    });
+  renderReadFilterButtons();
+  const container = document.querySelector('.read-filter');
+  if (!container) return;
+  // Event-Delegation, weil die Buttons je nach Ordner neu gerendert werden.
+  container.addEventListener('click', (e) => {
+    const btn = e.target.closest('.read-filter-btn');
+    if (!btn) return;
+    const filter = btn.dataset.filter;
+    const isSent = state.activeFolder === 'Sent';
+    const currentKey = isSent ? 'sentFilter' : 'readFilter';
+    if (filter === state[currentKey]) return;
+    state[currentKey] = filter;
+    container.querySelectorAll('.read-filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    loadEmails(true);
   });
 }
 
@@ -856,8 +883,13 @@ async function loadEmails(reset = false) {
     const baseParams = {};
     if (state.activeAccount) baseParams.account = state.activeAccount;
     if (state.activeFolder)  baseParams.folder  = state.activeFolder;
-    if (state.readFilter === 'unread') baseParams.is_read = 'false';
-    if (state.readFilter === 'read')   baseParams.is_read = 'true';
+    if (state.activeFolder === 'Sent') {
+      if (state.sentFilter === 'webhook') baseParams.webhook = 'true';
+      if (state.sentFilter === 'normal')  baseParams.webhook = 'false';
+    } else {
+      if (state.readFilter === 'unread') baseParams.is_read = 'false';
+      if (state.readFilter === 'read')   baseParams.is_read = 'true';
+    }
 
     if (state.searchQuery) {
       // Suche ordnerübergreifend — kein folder-Parameter
@@ -1050,6 +1082,7 @@ function renderSidebar() {
           }
           document.querySelectorAll('.folder-item').forEach(el => el.classList.remove('active'));
           item.classList.add('active');
+          renderReadFilterButtons();
           loadEmails(true);
         });
 
