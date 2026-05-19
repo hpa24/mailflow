@@ -776,8 +776,9 @@ async def _do_send_job(job_id: str, data: dict, attachments: list) -> None:
     except Exception as exc:
         logger.warning("Phase-2-Render fehlgeschlagen (job=%s): %s", job_id, exc)
 
+    bulk_send_id = data.get("_bulk_send_id")
     try:
-        await smtp_send_email(
+        sent_message_id = await smtp_send_email(
             smtp_server_id=smtp_server,
             from_account_id=from_account,
             to=to,
@@ -792,10 +793,19 @@ async def _do_send_job(job_id: str, data: dict, attachments: list) -> None:
     except Exception as exc:
         logger.error("SMTP-Versand fehlgeschlagen (job=%s): %s", job_id, exc)
         _send_jobs[job_id]["status"] = "error"
+        if bulk_send_id:
+            asyncio.create_task(_bulk_record_recipient_result(
+                bulk_send_id, to, status="error", error=str(exc)[:500],
+            ))
         _sse_notify_all({"type": "send-result", "job_id": job_id,
                          "success": False, "to": to, "subject": subject,
                          "error": str(exc)})
         return
+
+    if bulk_send_id:
+        asyncio.create_task(_bulk_record_recipient_result(
+            bulk_send_id, to, status="sent", message_id=sent_message_id,
+        ))
 
     # Temporäre Uploads bereinigen
     for aid in data.get("attachment_ids") or []:
@@ -969,6 +979,53 @@ async def bulk_send_endpoint(data: dict):
     attachment_ids = data.get("attachment_ids") or []
     attachments = [_temp_uploads[aid] for aid in attachment_ids if aid in _temp_uploads]
 
+    # Aussendung als persistenten Audit-Record anlegen (für Historie + Re-Send + Bounce-Match)
+    from datetime import datetime, timezone
+    pb_recipients: list[dict] = []
+    for raw in recipients:
+        m = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", raw)
+        email_l = m.group(0).lower() if m else raw.lower()
+        name_m = re.match(r'^(.+?)\s*<', raw.strip())
+        rec_name = name_m.group(1).strip().strip('"') if name_m else ""
+        pb_recipients.append({
+            "email": email_l,
+            "name": rec_name,
+            "raw": raw,
+            "status": "queued",
+            "message_id": None,
+            "error": None,
+            "sent_at": None,
+        })
+
+    bulk_send_id = None
+    try:
+        acc = await pb_client.pb_get(f"/api/collections/accounts/records/{from_account}")
+        from_email = acc.get("from_email") or ""
+    except Exception:
+        from_email = ""
+    try:
+        bulk_send_rec = await pb_client.pb_post(
+            "/api/collections/bulk_sends/records",
+            {
+                "subject": subject,
+                "from_account": from_account,
+                "from_account_email": from_email,
+                "smtp_server": smtp_server,
+                "body_html": data.get("body_html") or "",
+                "body_text": data.get("body") or "",
+                "sent_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                "delay_seconds": delay_seconds,
+                "recipients": pb_recipients,
+                "total_count": len(pb_recipients),
+                "sent_count": 0,
+                "error_count": 0,
+                "bounced_count": 0,
+            },
+        )
+        bulk_send_id = bulk_send_rec.get("id")
+    except Exception as exc:
+        logger.warning("bulk_sends-Record konnte nicht angelegt werden: %s", exc)
+
     bulk_id = str(_uuid_mod.uuid4())
     jobs: list[dict] = []
     for recipient in recipients:
@@ -978,6 +1035,7 @@ async def bulk_send_endpoint(data: dict):
             "to": recipient,
             "subject": subject,
             "bulk_id": bulk_id,
+            "bulk_send_id": bulk_send_id,
         }
         jobs.append({"job_id": job_id, "to": recipient})
 
@@ -988,18 +1046,85 @@ async def bulk_send_endpoint(data: dict):
     base_data["cc"]           = ""  # CC ergibt bei N Einzel-Mails keinen Sinn
     base_data.pop("to", None)
     base_data["_bulk_attachment_ids"] = list(attachment_ids)
+    base_data["_bulk_send_id"] = bulk_send_id
 
-    logger.info("Bulk-Send angelegt: bulk=%s, n=%d, delay=%.1fs, subject=%s",
-                bulk_id, len(jobs), delay_seconds, subject)
+    logger.info("Bulk-Send angelegt: bulk=%s, audit=%s, n=%d, delay=%.1fs, subject=%s",
+                bulk_id, bulk_send_id, len(jobs), delay_seconds, subject)
 
     asyncio.create_task(_do_bulk_send(bulk_id, jobs, base_data,
                                       attachments, delay_seconds))
 
     return {
         "bulk_id": bulk_id,
+        "bulk_send_id": bulk_send_id,
         "jobs": jobs,
         "delay_seconds": delay_seconds,
     }
+
+
+# ── bulk_sends: Persistenz pro Empfänger ────────────────────────────────
+# Lock pro bulk_send_id verhindert race condition beim parallelen Update
+# desselben JSON-Recipients-Arrays durch mehrere Sub-Jobs.
+_bulk_send_locks: dict[str, asyncio.Lock] = {}
+
+
+async def _bulk_record_recipient_result(
+    bulk_send_id: str, recipient_to: str, *,
+    status: str, message_id: str | None = None, error: str | None = None,
+) -> None:
+    """Updatet einen Empfänger im bulk_sends-Record.
+
+    Args:
+      bulk_send_id: PB-ID des bulk_sends-Records (None → no-op).
+      recipient_to: Empfänger im To-Format ("Name <addr>" oder "addr").
+      status: queued|sent|error|bounced.
+      message_id: Message-ID des SMTP-Versands (für späteren Bounce-Match).
+      error: Fehlertext (nur bei status=error/bounced).
+    """
+    if not bulk_send_id:
+        return
+    m = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", recipient_to or "")
+    email_l = m.group(0).lower() if m else (recipient_to or "").lower()
+    lock = _bulk_send_locks.setdefault(bulk_send_id, asyncio.Lock())
+    async with lock:
+        try:
+            rec = await pb_client.pb_get(
+                f"/api/collections/bulk_sends/records/{bulk_send_id}"
+            )
+        except Exception as exc:
+            logger.warning("bulk_sends %s nicht lesbar: %s", bulk_send_id, exc)
+            return
+        recipients = rec.get("recipients") or []
+        found = False
+        from datetime import datetime as _dt, timezone as _tz
+        for r in recipients:
+            if (r.get("email") or "").strip().lower() == email_l:
+                r["status"] = status
+                if message_id is not None:
+                    r["message_id"] = message_id
+                if error is not None:
+                    r["error"] = error
+                if status == "sent":
+                    r["sent_at"] = _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")
+                found = True
+                break
+        if not found:
+            return  # Empfänger nicht im Audit-Record — z.B. nachträglicher Eintrag
+        sent = sum(1 for r in recipients if r.get("status") == "sent")
+        err = sum(1 for r in recipients if r.get("status") == "error")
+        bounced = sum(1 for r in recipients if r.get("status") == "bounced")
+        try:
+            await pb_client.pb_patch(
+                f"/api/collections/bulk_sends/records/{bulk_send_id}",
+                {
+                    "recipients": recipients,
+                    "sent_count": sent,
+                    "error_count": err,
+                    "bounced_count": bounced,
+                },
+            )
+        except Exception as exc:
+            logger.warning("bulk_sends %s update fehlgeschlagen: %s", bulk_send_id, exc)
 
 
 @app.post("/emails/draft")
@@ -2850,6 +2975,36 @@ async def templates_update(template_id: str, data: dict):
 @app.delete("/templates/{template_id}")
 async def templates_delete(template_id: str):
     await pb_client.pb_delete(f"/api/collections/email_templates/records/{template_id}")
+    return {"status": "deleted"}
+
+
+# ── Aussendungs-Historie (bulk_sends) ──────────────────────────
+
+
+@app.get("/bulk-sends")
+async def bulk_sends_list(limit: int = 200):
+    """Liste der Aussendungen, neueste zuerst. Liefert Metadaten ohne
+    `recipients`-Array (Performance) — Detail via GET /bulk-sends/{id}."""
+    data = await pb_client.pb_get(
+        "/api/collections/bulk_sends/records",
+        params={
+            "perPage": max(1, min(500, limit)),
+            "sort": "-sent_at",
+            "fields": "id,subject,from_account,from_account_email,smtp_server,sent_at,delay_seconds,total_count,sent_count,error_count,bounced_count,created,updated",
+        },
+    )
+    return data.get("items", [])
+
+
+@app.get("/bulk-sends/{bulk_id}")
+async def bulk_sends_get(bulk_id: str):
+    """Detail einer Aussendung inkl. recipients-Array."""
+    return await pb_client.pb_get(f"/api/collections/bulk_sends/records/{bulk_id}")
+
+
+@app.delete("/bulk-sends/{bulk_id}")
+async def bulk_sends_delete(bulk_id: str):
+    await pb_client.pb_delete(f"/api/collections/bulk_sends/records/{bulk_id}")
     return {"status": "deleted"}
 
 

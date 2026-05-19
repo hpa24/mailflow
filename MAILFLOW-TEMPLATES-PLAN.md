@@ -54,13 +54,27 @@ Gruppen: `dritte_gruppe`, `gross_geschrieben`, `kurs_a`, `kurs_b`, `test_gruppe`
 **Schritt 2 (geplant):**
 - Rendered Live-Preview im Compose-Editor (Toggle „Vorschau" mit iframe-srcdoc, analog Template-/Snippet-Editor). Hilft bei der Inspektion vor dem Massenversand.
 
-### Phase 3 (später)
+### Aussendungs-Historie (Phase 3a, 2026-05-19)
 
-- Sections-UI (Checkbox-Auswahl-Modal vor dem Versand)
-- Unsubscribe-Link mit signiertem Token + Endpoint
-- Bounce-Erkennung im IMAP-Sync
+- ✅ **Persistierung:** neue Collection `bulk_sends` mit `subject`, `from_account`, `from_account_email`, `smtp_server`, `body_html`, `body_text`, `sent_at`, `delay_seconds`, `recipients` (JSON: `[{email, name, raw, status, message_id, error, sent_at}]`), Counts `total/sent/error/bounced`. Index auf `sent_at desc`. `bulk_send_endpoint` legt den Record vor dem Versand an; jedes erfolgreiche/fehlgeschlagene `_do_send_job` patcht den eigenen Empfänger-Eintrag (Lock pro `bulk_send_id` gegen Race).
+- ✅ **Message-ID-Erfassung:** `smtp_send_email` gibt die Message-ID schon zurück; `_do_send_job` reicht sie in den `bulk_sends`-Record. Vorbereitung für Bounce-Match (Phase 3b).
+- ✅ **UI „Aussendungen":** neuer Subnav-Eintrag im Vorlagen-Tab zwischen „Gruppen" und „Kontakte". Liste links (Subject + Datum + Counts inkl. Bounce-Badge), Detail rechts mit Empfänger-Tabelle, Status-Filter (Alle/Erfolgreich/Fehler/Bounce/Ausstehend), Vorschau-Modal (iframe-srcdoc), „Aussendung löschen".
+- ✅ **Re-Send-Workflow:** Button „Auswahl als neuer Versand" sammelt markierte Empfänger (Bouncte sind default markiert), öffnet via `window.mfComposeResend.open(...)` Compose mit Subject + `body_html` + SMTP-Vorauswahl + Empfänger-Liste im Bulk-Modal. SMTP-Wechsel über den vorhandenen `#ci-smtp-server`-Select. Bulk-Send läuft danach durch die normale Pipeline und legt einen neuen `bulk_sends`-Record an.
+
+### Phase 3b — Bounce-Erkennung (geplant)
+
+- IMAP-Sync erkennt Mailer-Daemon/DSN-Mails (heuristisch: From-Adresse + Content-Type `multipart/report` + Subject-Regex).
+- **Variante B — Message-ID-Match:** Extrahiert die ursprüngliche Message-ID aus dem DSN-Body (`X-Failed-Recipients`, `Original-Message-ID`-Header im `message/rfc822`-Part, Fallback Regex). Lookup über alle `bulk_sends.recipients[*].message_id` → setzt status=`bounced`, schreibt `bounced_reason` + `bounced_at`.
+- Kontakt-Flag: `contacts.bounced` (bool) + `bounced_at` + `bounced_reason`. Bulk-Send-Pipeline filtert `bounced=true` raus, analog zu `unsubscribed`. Manueller Reset-Button im Kontakt-Edit.
+- UI: Bounce-Badge an betroffenen Adressen in Kontakte/Gruppen-Detail. Liste-Header „X bouncte (rausgefiltert)".
+
+### Phase 3 (später, ohne Datum)
+
+- Sections-UI (Checkbox-Auswahl-Modal vor dem Versand) — **gestrichen 2026-05-19**, weil Sections live im Composer editiert werden.
+- Unsubscribe-Link mit signiertem Token — **gestrichen 2026-05-19**, Stefan adressiert nur Kursteilnehmer.
 - ✅ **Tagesversand-Counter (2026-05-19):** Backend `GET /accounts/sent-today` zählt `emails` mit `folder=Sent` + `date_sent >= heute 00:00 Europa/Berlin` pro Account; Limit zentral als `_SEND_DAILY_LIMIT=10000` in `main.py`. Frontend zeigt Pill in der Account-Header-Zeile der Sidebar (`X / 10.000`), färbt sich gelb ab 80 %, rot ab 100 %. Refresh: initial nach `loadAccounts`, debounced 1,5 s nach jedem `send-result`-SSE.
 - Rollenbasierte Conditional Sections (`if=role:X` ist schon syntaktisch erlaubt, Auswertung fehlt; Kontakt-Feld `roles` als JSON-Array)
+- FileMaker → Kontakte-Sync: Skript schreiben + `IMPORT_API_KEY` setzen.
 
 ### Wichtige Konventionen für Folge-Sessions
 

@@ -57,6 +57,9 @@ async def setup_pocketbase_schema(token: str) -> None:
         # 13. contact_groups (no dependencies) — Sets von Kontakten für Gruppen-Versand
         contact_groups_id = await _ensure_collection(client, headers, existing, _contact_groups_schema())
 
+        # 14. bulk_sends (depends on accounts) — Historie der Massenversände + Empfänger-Status
+        await _ensure_collection(client, headers, existing, _bulk_sends_schema(accounts_id))
+
         # Migrations: add fields to existing collections if missing
         if "accounts" in existing:
             await _add_missing_fields(client, headers, "accounts", existing["accounts"], [
@@ -508,5 +511,38 @@ def _contact_groups_schema() -> dict:
         "fields": [
             _field("name", "text", required=True),
             _field("description", "text"),
+        ],
+    }
+
+
+def _bulk_sends_schema(accounts_id: str) -> dict:
+    return {
+        "name": "bulk_sends",
+        "type": "base",
+        "listRule": None,
+        "viewRule": None,
+        "createRule": None,
+        "updateRule": None,
+        "deleteRule": None,
+        "indexes": [
+            "CREATE INDEX IF NOT EXISTS idx_bulk_sends_sent_at ON bulk_sends (sent_at DESC)",
+        ],
+        "fields": [
+            _field("subject", "text"),
+            _field("from_account", "relation",
+                   collectionId=accounts_id, maxSelect=1, cascadeDelete=False),
+            _field("from_account_email", "text"),
+            _field("smtp_server", "text"),
+            _field("body_html", "text", max=MAX_UNLIMITED),
+            _field("body_text", "text", max=MAX_UNLIMITED),
+            _field("sent_at", "date"),
+            _field("delay_seconds", "number"),
+            # recipients: [{email, name, status, message_id, error, sent_at}]
+            # status ∈ queued|sent|error|bounced
+            _field("recipients", "json", maxSize=5_000_000),
+            _field("total_count", "number"),
+            _field("sent_count", "number"),
+            _field("error_count", "number"),
+            _field("bounced_count", "number"),
         ],
     }

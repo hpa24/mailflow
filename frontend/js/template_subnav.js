@@ -2,7 +2,7 @@
 // Setzt data-active-section auf #templates-main; CSS macht den Rest sichtbar.
 
 (function () {
-  const KNOWN = ['variables', 'snippets', 'templates', 'groups'];
+  const KNOWN = ['variables', 'snippets', 'templates', 'groups', 'bulk_sends'];
 
   function setSection(name) {
     if (!KNOWN.includes(name)) name = 'variables';

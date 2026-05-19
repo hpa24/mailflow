@@ -158,6 +158,12 @@ window.api = {
     rename(id, data)        { return apiJson(`/snippets/${id}/rename`, 'POST', data); },
   },
 
+  bulkSends: {
+    list(limit = 200)       { return apiGet('/bulk-sends', { limit }); },
+    get(id)                 { return apiFetch(`/bulk-sends/${id}`); },
+    delete(id)              { return apiFetch(`/bulk-sends/${id}`, { method: 'DELETE' }); },
+  },
+
   templates: {
     list(params = {})       { return apiGet('/templates', params); },
     create(data)            { return apiJson('/templates', 'POST', data); },

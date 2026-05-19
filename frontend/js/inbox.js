@@ -2632,6 +2632,45 @@ function _openBulkModal() {
   setTimeout(() => textarea.focus(), 0);
 }
 
+// Resend-Helper: wird vom Aussendungs-Tab aufgerufen. Wechselt zum Inbox-Tab,
+// oeffnet Compose mit Subject + body_html aus der Original-Aussendung,
+// setzt SMTP wenn moeglich und oeffnet das Bulk-Modal mit den ausgewaehlten
+// Empfaengern vorgefuellt — Stefan kann dort SMTP wechseln und absenden.
+window.mfComposeResend = {
+  async open({ subject, body_html, body_text, recipients, from_account, smtp_server } = {}) {
+    if (window.mfTabs?.setActiveTab) {
+      window.mfTabs.setActiveTab('inbox');
+    }
+    const accountId = (from_account && state.accounts.find(a => a.id === from_account))
+      ? from_account
+      : null;
+    const opened = await openCompose({
+      subject: subject || '',
+      fromAccountId: accountId,
+    });
+    if (opened === false) return false;
+    // Body als HTML setzen (openCompose hat nur Plain-body-Support)
+    const bodyEl = document.getElementById('ci-body');
+    if (bodyEl && body_html) {
+      bodyEl.innerHTML = body_html;
+    } else if (bodyEl && body_text) {
+      bodyEl.innerHTML = _escHtml(body_text).replace(/\n/g, '<br>');
+    }
+    // SMTP-Server vorwaehlen falls vorhanden — Stefan kann im Dropdown wechseln
+    if (smtp_server) {
+      const smtpSel = document.getElementById('ci-smtp-server');
+      if (smtpSel && smtpSel.querySelector(`option[value="${smtp_server}"]`)) {
+        smtpSel.value = smtp_server;
+      }
+    }
+    // Bulk-Mode aktivieren + Modal sofort oeffnen
+    _bulkRecipients = (recipients || []).map(r => String(r).trim()).filter(Boolean);
+    _renderBulkBanner();
+    _openBulkModal();
+    return true;
+  },
+};
+
 function _closeBulkModal() {
   document.getElementById('bulk-modal-overlay').style.display = 'none';
 }
