@@ -14,7 +14,7 @@ from slowapi.errors import RateLimitExceeded
 
 from rate_limit import limiter
 from routers import webhooks as webhooks_router
-from services.imap import imap_session
+from services.imap import ImapService
 
 import asyncio
 import json
@@ -32,7 +32,6 @@ from config import settings
 from fts import fts_setup, fts_search, fts_rebuild, fts_delete
 from idle_manager import idle_manager, get_sse_queues
 from imap_sync import sync_all_accounts, get_sync_status, upsert_contact
-from imap_utils import find_imap_folder, resolve_imap_path
 from models import HealthResponse, SyncStatusResponse
 import spam_filter
 from scheduler import start_scheduler, stop_scheduler
@@ -1766,51 +1765,13 @@ async def sync_draft_to_imap(draft_id: str, token: str = Depends(pb_user_auth.ge
     msg_bytes = msg.as_bytes()
     message_id = draft.get("message_id") or msg["Message-ID"]
 
-    loop = asyncio.get_running_loop()
     try:
-        await loop.run_in_executor(None, _imap_append_draft, acc, msg_bytes, message_id)
+        await asyncio.to_thread(ImapService(acc).append_draft, msg_bytes, message_id)
     except Exception as exc:
         logger.error("IMAP Draft-APPEND fehlgeschlagen: %s", exc)
         raise HTTPException(status_code=502, detail=f"IMAP-Fehler: {exc}")
 
     return {"synced": True}
-
-
-def _imap_append_draft(acc: dict, msg_bytes: bytes, message_id: str = None) -> None:
-    """Blockierender IMAP APPEND in den Drafts-Ordner.
-    Löscht vorher eine alte Version mit gleicher Message-ID (verhindert Duplikate)."""
-    from datetime import datetime, timezone
-
-    if not all([acc.get("imap_host"), acc.get("imap_user"), acc.get("imap_pass")]):
-        raise ValueError("Unvollständige IMAP-Zugangsdaten")
-
-    with imap_session(acc) as srv:
-        drafts_folder = find_imap_folder(srv, [b"\\Drafts", b"\\Draft"], ["Drafts", "Draft", "Entwürfe", "INBOX.Drafts"])
-        if not drafts_folder:
-            raise ValueError("Kein Drafts-Ordner auf dem IMAP-Server gefunden")
-
-        srv.select_folder(drafts_folder)
-
-        # Alte Version per Message-ID suchen und löschen
-        if message_id:
-            # Message-ID ohne spitze Klammern für die Suche
-            mid_clean = message_id.strip("<>")
-            try:
-                old_uids = srv.search(["HEADER", "Message-ID", mid_clean])
-                if old_uids:
-                    srv.delete_messages(old_uids)
-                    srv.expunge()
-                    logger.info("Alte Draft-Version(en) gelöscht: UIDs %s", old_uids)
-            except Exception as e:
-                logger.warning("Konnte alte Draft-Version nicht löschen: %s", e)
-
-        srv.append(
-            drafts_folder,
-            msg_bytes,
-            flags=[b"\\Draft", b"\\Seen"],
-            msg_time=datetime.now(timezone.utc),
-        )
-        logger.info("Draft in IMAP-Ordner '%s' gespeichert.", drafts_folder)
 
 
 
@@ -1875,10 +1836,9 @@ async def download_attachment(attachment_id: str):
     if not acc:
         raise HTTPException(status_code=404, detail="Account nicht gefunden")
 
-    loop = asyncio.get_running_loop()
     try:
-        payload = await loop.run_in_executor(
-            None, _imap_fetch_attachment, acc, folder, int(imap_uid), part_index
+        payload = await asyncio.to_thread(
+            ImapService(acc).fetch_attachment, folder, int(imap_uid), part_index
         )
     except Exception as exc:
         logger.error("Anhang-Download fehlgeschlagen: %s", exc)
@@ -1894,31 +1854,6 @@ async def download_attachment(attachment_id: str):
             "Access-Control-Allow-Origin": "*",
         },
     )
-
-
-def _imap_fetch_attachment(acc: dict, folder: str, imap_uid: int, part_index: int) -> bytes:
-    """Blockierende IMAP-Verbindung zum Download eines Anhangs."""
-    from mime_parser import get_attachment_payload
-
-    with imap_session(acc) as srv:
-        srv.select_folder(folder, readonly=True)
-        data = srv.fetch([imap_uid], [b"BODY[]"])
-        raw = data.get(imap_uid, {}).get(b"BODY[]") or b""
-
-    payload, _, _ = get_attachment_payload(raw, part_index)
-    return payload
-
-
-def _imap_fetch_inline_cid(acc: dict, folder: str, imap_uid: int, cid: str) -> tuple[bytes, str]:
-    """Blockierende IMAP-Verbindung zum Abruf eines Inline-Bildes per Content-ID."""
-    from mime_parser import get_inline_part_by_cid
-
-    with imap_session(acc) as srv:
-        srv.select_folder(folder, readonly=True)
-        data = srv.fetch([imap_uid], [b"BODY[]"])
-        raw = data.get(imap_uid, {}).get(b"BODY[]") or b""
-
-    return get_inline_part_by_cid(raw, cid)
 
 
 @app.get("/emails/{email_id}/inline")
@@ -1940,10 +1875,9 @@ async def get_inline_image(email_id: str, cid: str):
     if not acc:
         raise HTTPException(status_code=404, detail="Account nicht gefunden")
 
-    loop = asyncio.get_running_loop()
     try:
-        payload, mime_type = await loop.run_in_executor(
-            None, _imap_fetch_inline_cid, acc, folder, int(imap_uid), cid
+        payload, mime_type = await asyncio.to_thread(
+            ImapService(acc).fetch_inline, folder, int(imap_uid), cid
         )
     except Exception as exc:
         logger.error("Inline-Bild-Download fehlgeschlagen: %s", exc)
@@ -2090,24 +2024,12 @@ async def bulk_mark_read(req: BulkReadRequest, token: str = Depends(pb_user_auth
             accounts[account_id] = acc
 
     # 5. IMAP: eine Verbindung pro (Account, Ordner), blocking im Thread-Pool
-    def _imap_bulk_set(acc: dict, folder: str, uids: list, is_read: bool) -> None:
-        logger.info("IMAP bulk_set: folder='%s' uids=%s is_read=%s", folder, uids, is_read)
-        with imap_session(acc) as srv:
-            try:
-                srv.select_folder(folder)
-            except Exception as ex:
-                logger.warning("IMAP bulk_set: select_folder('%s') fehlgeschlagen: %s — versuche INBOX", folder, ex)
-                srv.select_folder("INBOX")
-            if is_read:
-                srv.set_flags(uids, [b"\\Seen"])
-            else:
-                srv.remove_flags(uids, [b"\\Seen"])
-            logger.info("IMAP bulk_set: %d UIDs in '%s' auf is_read=%s gesetzt", len(uids), folder, is_read)
-
     loop = asyncio.get_running_loop()
     with concurrent.futures.ThreadPoolExecutor() as pool:
         futs = [
-            loop.run_in_executor(pool, _imap_bulk_set, accounts[account_id], folder, uids, req.is_read)
+            loop.run_in_executor(
+                pool, ImapService(accounts[account_id]).bulk_set_read, folder, uids, req.is_read,
+            )
             for (account_id, folder), uids in affected_groups.items()
             if account_id in accounts
         ]
@@ -2240,40 +2162,6 @@ async def delete_spam_rule(rule_id: str, token: str = Depends(pb_user_auth.get_u
     return {"deleted": rule_id}
 
 
-def _imap_search_by_msgid(srv, folder: str, message_id: str) -> int | None:
-    """Sucht eine E-Mail im Ordner per Message-ID, gibt neue UID zurück (oder None)."""
-    try:
-        srv.select_folder(folder)
-        mid = message_id.strip()
-        results = srv.search(["HEADER", "Message-ID", mid])
-        if not results and mid.startswith("<") and mid.endswith(">"):
-            results = srv.search(["HEADER", "Message-ID", mid[1:-1]])
-        return results[-1] if results else None
-    except Exception as ex:
-        logger.warning("IMAP search by Message-ID in '%s' fehlgeschlagen: %s", folder, ex)
-        return None
-
-
-def _imap_move_to_spam_sync(acc: dict, imap_uid: int, folder: str, message_id: str) -> tuple[str, int | None]:
-    """Verschiebt im IMAP nach Junk/Spam-Folder; gibt immer den normierten UI-Namen 'Spam' zurück
-    (analog zum Mapping in imap_sync._IMAP_FLAG_TO_STANDARD)."""
-    with imap_session(acc) as srv:
-        real_source = resolve_imap_path(srv, folder)
-        srv.select_folder(real_source)
-        spam = find_imap_folder(srv, [b"\\Junk", b"\\Spam"], ["Spam", "Junk", "Junk E-Mail", "INBOX.Spam", "INBOX.Junk"])
-        if spam and spam.lower() != real_source.lower():
-            caps = srv.capabilities()
-            if b"MOVE" in caps:
-                srv.move([imap_uid], spam)
-            else:
-                srv.copy([imap_uid], spam)
-                srv.set_flags([imap_uid], [b"\\Deleted"])
-                srv.expunge()
-            new_uid = _imap_search_by_msgid(srv, spam, message_id)
-            return "Spam", new_uid
-        return "Spam", None
-
-
 async def _imap_move_to_spam(email: dict) -> tuple[str, int | None]:
     """Verschiebt E-Mail per IMAP in den Spam-Ordner.
     Gibt (spam_folder, neue_imap_uid) zurück."""
@@ -2287,8 +2175,9 @@ async def _imap_move_to_spam(email: dict) -> tuple[str, int | None]:
     if acc is None:
         return "Spam", None
 
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _imap_move_to_spam_sync, acc, imap_uid, folder, email.get("message_id", ""))
+    return await asyncio.to_thread(
+        ImapService(acc).move_to_spam, imap_uid, folder, email.get("message_id", ""),
+    )
 
 
 @app.post("/emails/{email_id}/move")
@@ -2341,21 +2230,6 @@ async def move_email(email_id: str, data: dict, token: str = Depends(pb_user_aut
     return {"moved_to": target_folder, "marked_read": True}
 
 
-def _imap_move_sync(acc: dict, imap_uid: int, source_folder: str, target_folder: str, message_id: str) -> int | None:
-    with imap_session(acc) as srv:
-        real_source = resolve_imap_path(srv, source_folder)
-        real_target = resolve_imap_path(srv, target_folder)
-        srv.select_folder(real_source)
-        caps = srv.capabilities()
-        if b"MOVE" in caps:
-            srv.move([imap_uid], real_target)
-        else:
-            srv.copy([imap_uid], real_target)
-            srv.set_flags([imap_uid], [b"\\Deleted"])
-            srv.expunge()
-        return _imap_search_by_msgid(srv, real_target, message_id)
-
-
 async def _imap_move(email: dict, target_folder: str) -> int | None:
     """Verschiebt E-Mail per IMAP in den Zielordner. Gibt neue UID zurück."""
     account_id = email.get("account")
@@ -2368,8 +2242,9 @@ async def _imap_move(email: dict, target_folder: str) -> int | None:
     if acc is None:
         return None
 
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _imap_move_sync, acc, imap_uid, source_folder, target_folder, email.get("message_id", ""))
+    return await asyncio.to_thread(
+        ImapService(acc).move, imap_uid, source_folder, target_folder, email.get("message_id", ""),
+    )
 
 
 @app.delete("/emails/{email_id}")
@@ -2400,25 +2275,6 @@ async def delete_email(email_id: str, token: str = Depends(pb_user_auth.get_user
     return {"deleted": email_id}
 
 
-def _imap_trash_sync(acc: dict, imap_uid: int, folder: str, message_id: str) -> None:
-    with imap_session(acc) as srv:
-        real_source = resolve_imap_path(srv, folder)
-        srv.select_folder(real_source)
-        caps = srv.capabilities()
-        if b"MOVE" in caps:
-            trash = find_imap_folder(srv, [b"\\Trash", b"\\Deleted"], ["Trash", "Deleted", "Deleted Items", "Papierkorb", "INBOX.Trash"])
-            if trash and trash.lower() != real_source.lower():
-                srv.move([imap_uid], trash)
-                new_uid = _imap_search_by_msgid(srv, trash, message_id)
-                if new_uid:
-                    srv.select_folder(trash)
-                    srv.set_flags([new_uid], [b"\\Seen"])
-                    logger.info("_imap_trash: \\Seen gesetzt auf neuer UID %s in '%s'", new_uid, trash)
-                return
-        srv.set_flags([imap_uid], [b"\\Deleted"])
-        srv.expunge()
-
-
 async def _imap_trash(email: dict) -> None:
     """Verschiebt E-Mail auf dem IMAP-Server in den Papierkorb."""
     account_id = email.get("account")
@@ -2431,8 +2287,9 @@ async def _imap_trash(email: dict) -> None:
     if acc is None:
         return
 
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, _imap_trash_sync, acc, imap_uid, folder, email.get("message_id", ""))
+    await asyncio.to_thread(
+        ImapService(acc).trash, imap_uid, folder, email.get("message_id", ""),
+    )
 
 
 
@@ -2449,8 +2306,6 @@ async def backfill_imap_uids():
     mit PocketBase abgleichen und abweichende imap_uid-Werte updaten.
     Läuft im Hintergrund (fire-and-forget via BackgroundTask ist hier synchron).
     """
-    import concurrent.futures
-
     accounts_data = await pb_client.pb_get("/api/collections/accounts/records", params={"perPage": 50})
     accounts = accounts_data.get("items", [])
 
@@ -2483,29 +2338,10 @@ async def backfill_imap_uids():
                 pb_by_msgid = {e["message_id"]: e for e in pb_emails if e.get("message_id")}
                 total_checked += len(pb_emails)
 
-                # IMAP: alle UIDs + Message-IDs für diesen Ordner holen (blocking, in Batches)
-                def _fetch_imap_uids(acc_dict, folder):
-                    BATCH = 200
-                    with imap_session(acc_dict) as srv:
-                        srv.select_folder(folder, readonly=True)
-                        uids = srv.search(["ALL"])
-                        if not uids:
-                            return {}
-                        uid_to_msgid = {}
-                        for i in range(0, len(uids), BATCH):
-                            batch = uids[i:i + BATCH]
-                            fetch_data = srv.fetch(batch, ["BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]"])
-                            for uid, data in fetch_data.items():
-                                raw = data.get(b"BODY[HEADER.FIELDS (MESSAGE-ID)]", b"")
-                                line = raw.decode("utf-8", errors="replace").strip()
-                                if ":" in line:
-                                    mid = line.split(":", 1)[1].strip()
-                                    uid_to_msgid[uid] = mid
-                        return uid_to_msgid
-
-                loop = asyncio.get_running_loop()
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    uid_to_msgid = await loop.run_in_executor(pool, _fetch_imap_uids, acc, imap_folder)
+                # IMAP: alle UIDs + Message-IDs für diesen Ordner holen (blocking)
+                uid_to_msgid = await asyncio.to_thread(
+                    ImapService(acc).fetch_uids_with_msgids, imap_folder,
+                )
 
                 # Abgleich: für jede IMAP-Mail schauen ob PocketBase-Record UID falsch hat
                 msgid_to_uid = {mid: uid for uid, mid in uid_to_msgid.items()}
@@ -2889,15 +2725,6 @@ async def xano_user_info(email: str):
 
 # ---------------------------------------------------------------------------
 
-def _imap_set_read_sync(acc: dict, imap_uid: int, folder: str, is_read: bool) -> None:
-    with imap_session(acc) as srv:
-        srv.select_folder(resolve_imap_path(srv, folder))
-        if is_read:
-            srv.set_flags([imap_uid], [b"\\Seen"])
-        else:
-            srv.remove_flags([imap_uid], [b"\\Seen"])
-
-
 async def _imap_set_read(email: dict, is_read: bool) -> None:
     """Setzt \\Seen-Flag auf dem IMAP-Server."""
     account_id = email.get("account")
@@ -2910,8 +2737,7 @@ async def _imap_set_read(email: dict, is_read: bool) -> None:
     if acc is None:
         return
 
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, _imap_set_read_sync, acc, imap_uid, folder, is_read)
+    await asyncio.to_thread(ImapService(acc).set_read, imap_uid, folder, is_read)
 
 
 async def _imap_set_answered_safe(email: dict) -> None:
@@ -2934,9 +2760,7 @@ async def _imap_set_answered(email: dict) -> None:
     if acc is None:
         return
 
-    with imap_session(acc) as srv:
-        srv.select_folder(folder)
-        srv.add_flags([imap_uid], [b"\\Answered"])
+    await asyncio.to_thread(ImapService(acc).set_answered, imap_uid, folder)
 
 
 # =========================================================================
