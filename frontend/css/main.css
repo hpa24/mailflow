@@ -617,7 +617,7 @@ margin-top: 3px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-min-width: 1400px;
+min-width: 1700px;
 }
 
 .ki-open #detail-panel {min-width:1700px;}
