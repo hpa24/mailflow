@@ -146,19 +146,42 @@
       const tr = document.createElement('tr');
       tr.dataset.id = m.id;
       tr.dataset.email = m.email;
+      const bounceBadge = m.bounced ? _renderBounceBadge(m) : '';
+      const resetBtn = m.bounced
+        ? `<button class="row-btn" data-action="clear-bounce" title="Bounce-Flag zurücksetzen (Adresse wird wieder beliefert)">↺</button>`
+        : '';
       tr.innerHTML = `
         <td><input type="checkbox" class="group-member-check"></td>
-        <td class="group-member-email">${escapeHtml(m.email)}</td>
+        <td class="group-member-email">${bounceBadge}${escapeHtml(m.email)}</td>
         <td class="group-member-name">${escapeHtml(m.name || '')}</td>
         <td class="group-member-actions">
+          ${resetBtn}
           <button class="row-btn" data-action="remove" title="Aus Gruppe entfernen">✕</button>
         </td>
       `;
       tr.querySelector('[data-action="remove"]').addEventListener('click', () => removeMember(m));
+      const clearBtn = tr.querySelector('[data-action="clear-bounce"]');
+      if (clearBtn) clearBtn.addEventListener('click', () => clearBounce(m));
       tr.querySelector('.group-member-check').addEventListener('change', updateBulkButton);
       tbody.appendChild(tr);
     });
     updateBulkButton();
+  }
+
+  function _renderBounceBadge(m) {
+    const date = m.bounced_at ? new Date(m.bounced_at).toLocaleDateString('de-DE') : '';
+    const title = `Bounce${date ? ' am ' + date : ''}${m.bounced_reason ? ': ' + m.bounced_reason : ''}`;
+    return `<span class="bounce-badge" title="${escapeHtml(title)}">⚠ Bounce</span> `;
+  }
+
+  async function clearBounce(m) {
+    if (!confirm(`Bounce-Flag für „${m.email}" zurücksetzen?\nDie Adresse wird beim nächsten Massenversand wieder beliefert.`)) return;
+    try {
+      await api.contacts.clearBounce(m.id);
+      await loadMembers(_selectedId);
+    } catch (err) {
+      alert('Reset fehlgeschlagen: ' + (err.message || err));
+    }
   }
 
   function updateBulkButton() {

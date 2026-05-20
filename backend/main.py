@@ -1293,6 +1293,43 @@ async def bulk_send_endpoint(data: dict, token: str = Depends(pb_user_auth.get_u
     if not recipients:
         raise HTTPException(status_code=400, detail="Keine gültigen Empfänger")
 
+    # Phase 3b: bouncte + unsubscribed-Kontakte rausfiltern. Manueller Reset im
+    # Kontakt-Edit möglich. Filtered_out kommt in die Response → Frontend zeigt's.
+    filtered_out: list[dict] = []
+    try:
+        flagged_res = await pb_client.pb_get_as(
+            token,
+            "/api/collections/contacts/records",
+            params={
+                "filter": "bounced=true || unsubscribed=true",
+                "perPage": 5000,
+                "fields": "email,bounced,unsubscribed",
+            },
+        )
+        flagged_map = {(c.get("email") or "").strip().lower():
+                       ("bounced" if c.get("bounced") else "unsubscribed")
+                       for c in flagged_res.get("items") or []}
+    except Exception as exc:
+        logger.warning("Filter-Read auf contacts(bounced/unsubscribed) fehlgeschlagen: %s", exc)
+        flagged_map = {}
+    if flagged_map:
+        kept: list[str] = []
+        for raw in recipients:
+            m = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", raw)
+            key = m.group(0).lower() if m else raw.lower()
+            reason = flagged_map.get(key)
+            if reason:
+                filtered_out.append({"email": key, "raw": raw, "reason": reason})
+            else:
+                kept.append(raw)
+        recipients = kept
+        if not recipients:
+            raise HTTPException(
+                status_code=400,
+                detail=(f"Alle {len(filtered_out)} Empfänger sind als bounced/"
+                        "unsubscribed markiert — kein Versand möglich."),
+            )
+
     from_account = (data.get("from_account") or "").strip()
     smtp_server  = (data.get("smtp_server") or "").strip()
     subject      = (data.get("subject") or "").strip()
@@ -1393,6 +1430,7 @@ async def bulk_send_endpoint(data: dict, token: str = Depends(pb_user_auth.get_u
         "bulk_send_id": bulk_send_id,
         "jobs": jobs,
         "delay_seconds": delay_seconds,
+        "filtered_out": filtered_out,
     }
 
 
@@ -1465,6 +1503,187 @@ async def _bulk_record_recipient_result(
     # Außerhalb des Locks: bei is_done den In-Memory-Anhang-Cache freigeben.
     if is_done:
         _bulk_attachments_by_id.pop(bulk_send_id, None)
+
+
+# ── Phase 3b: Bounce-Match ──────────────────────────────────────────────
+# Aufgerufen vom IMAP-Sync, wenn eine DSN-Mail erkannt wurde. Sucht den
+# zugehörigen Empfänger in bulk_sends, patcht status=bounced + bounced_at +
+# bounced_reason, und flaggt bei permanentem Fehler (5.x.x) den Kontakt.
+
+async def _find_bulk_recipient_match(
+    message_id: str | None, failed_recipient: str | None,
+) -> tuple[str, str] | None:
+    """Findet Empfänger in bulk_sends per Message-ID oder Email (Fallback).
+
+    Returns (bulk_send_id, email_lower) oder None. Email-Fallback nur in den
+    letzten 7 Tagen, um zufällige Treffer auf alte Aussendungen zu vermeiden.
+    """
+    if message_id:
+        clean_id = message_id.strip().strip("<>")
+        if clean_id:
+            try:
+                res = await pb_client.pb_get(
+                    "/api/collections/bulk_sends/records",
+                    params={
+                        "filter": f'recipients ~ {pb_client.pb_quote(clean_id)}',
+                        "perPage": 10,
+                        "sort": "-sent_at",
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Bounce-Match (msg_id) Read fehlgeschlagen: %s", exc)
+                res = None
+            if res:
+                for bulk in res.get("items", []) or []:
+                    for r in bulk.get("recipients") or []:
+                        rec_mid = (r.get("message_id") or "").strip().strip("<>")
+                        if rec_mid and rec_mid == clean_id:
+                            return (bulk["id"], (r.get("email") or "").lower())
+
+    if failed_recipient:
+        email_l = failed_recipient.strip().lower()
+        if email_l:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=7))
+            try:
+                res = await pb_client.pb_get(
+                    "/api/collections/bulk_sends/records",
+                    params={
+                        "filter": (
+                            f'recipients ~ {pb_client.pb_quote(email_l)} && '
+                            f'sent_at >= {pb_client.pb_quote(_format_pb_dt(cutoff))}'
+                        ),
+                        "perPage": 10,
+                        "sort": "-sent_at",
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Bounce-Match (email) Read fehlgeschlagen: %s", exc)
+                res = None
+            if res:
+                for bulk in res.get("items", []) or []:
+                    for r in bulk.get("recipients") or []:
+                        rec_email = (r.get("email") or "").strip().lower()
+                        if rec_email == email_l and r.get("status") == "sent":
+                            return (bulk["id"], rec_email)
+
+    return None
+
+
+async def _patch_bulk_recipient_bounced(
+    bulk_id: str, email_lower: str, reason: str,
+) -> None:
+    """Patcht bulk_sends.recipients[i] mit status=bounced + bounced_at + bounced_reason.
+
+    Nutzt denselben Lock wie `_bulk_record_recipient_result` gegen Race mit dem Worker.
+    """
+    lock = _bulk_send_locks.setdefault(bulk_id, asyncio.Lock())
+    async with lock:
+        try:
+            rec = await pb_client.pb_get(
+                f"/api/collections/bulk_sends/records/{bulk_id}"
+            )
+        except Exception as exc:
+            logger.warning("Bounce-Patch: bulk_sends %s nicht lesbar: %s", bulk_id, exc)
+            return
+        recipients = rec.get("recipients") or []
+        found = False
+        for r in recipients:
+            if (r.get("email") or "").strip().lower() == email_lower:
+                r["status"] = "bounced"
+                r["bounced_at"] = _format_pb_dt(datetime.now(timezone.utc))
+                r["bounced_reason"] = (reason or "")[:500]
+                found = True
+                break
+        if not found:
+            return
+        sent = sum(1 for r in recipients if r.get("status") == "sent")
+        err = sum(1 for r in recipients if r.get("status") == "error")
+        bounced = sum(1 for r in recipients if r.get("status") == "bounced")
+        try:
+            await pb_client.pb_patch(
+                f"/api/collections/bulk_sends/records/{bulk_id}",
+                {
+                    "recipients": recipients,
+                    "sent_count": sent,
+                    "error_count": err,
+                    "bounced_count": bounced,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Bounce-Patch: bulk_sends %s update fehlgeschlagen: %s",
+                           bulk_id, exc)
+
+
+async def _flag_contact_bounced(email_lower: str, reason: str) -> None:
+    """Setzt contacts.bounced=true + bounced_at + bounced_reason.
+
+    No-op wenn Kontakt nicht existiert (bouncte Adresse war nie im
+    Kontakt-Stamm — z.B. einmaliger Massenversand an Fremdliste).
+    """
+    try:
+        res = await pb_client.pb_get(
+            "/api/collections/contacts/records",
+            params={
+                "filter": f'email = {pb_client.pb_quote(email_lower)}',
+                "perPage": 1,
+            },
+        )
+    except Exception as exc:
+        logger.warning("Contact-Bounce-Flag Read fehlgeschlagen %s: %s", email_lower, exc)
+        return
+    items = res.get("items") or []
+    if not items:
+        return
+    contact_id = items[0]["id"]
+    try:
+        await pb_client.pb_patch(
+            f"/api/collections/contacts/records/{contact_id}",
+            {
+                "bounced": True,
+                "bounced_at": _format_pb_dt(datetime.now(timezone.utc)),
+                "bounced_reason": (reason or "")[:500],
+            },
+        )
+        logger.info("Kontakt %s als bounced markiert: %s", email_lower, reason[:100] if reason else "")
+    except Exception as exc:
+        logger.warning("Contact-Bounce-Flag Patch fehlgeschlagen %s: %s", email_lower, exc)
+
+
+async def apply_bounce(dsn: dict) -> None:
+    """Public Entry-Point für den IMAP-Sync. Matched DSN gegen bulk_sends und
+    flaggt bei permanentem Fehler (5.x.x) den Kontakt.
+
+    DSN-Schema (siehe bounce_parser.parse_dsn):
+      {message_id, failed_recipient, diagnostic, status}
+    """
+    from bounce_parser import is_permanent_failure
+    message_id = dsn.get("message_id")
+    failed = dsn.get("failed_recipient")
+    status = dsn.get("status")
+    reason = (dsn.get("diagnostic") or status or "DSN")[:500]
+
+    if not message_id and not failed:
+        logger.info("DSN ohne Message-ID und Final-Recipient — kein Match möglich")
+        return
+
+    match = await _find_bulk_recipient_match(message_id, failed)
+    if match:
+        bulk_id, email_lower = match
+        await _patch_bulk_recipient_bounced(bulk_id, email_lower, reason)
+        if is_permanent_failure(status):
+            await _flag_contact_bounced(email_lower, reason)
+        logger.info("Bounce verarbeitet: bulk=%s email=%s status=%s permanent=%s",
+                    bulk_id, email_lower, status, is_permanent_failure(status))
+        return
+
+    # Kein bulk-Match — wenn email + permanent: Kontakt trotzdem flaggen.
+    if failed and is_permanent_failure(status):
+        await _flag_contact_bounced(failed.lower(), reason)
+        logger.info("Bounce ohne bulk-Match, Kontakt geflaggt: %s status=%s",
+                    failed, status)
+    else:
+        logger.info("Bounce ohne Match (msg_id=%s, email=%s, status=%s) — ignoriert",
+                    message_id, failed, status)
 
 
 @app.post("/emails/draft")
@@ -3249,6 +3468,19 @@ async def contact_groups_members(group_id: str, token: str = Depends(pb_user_aut
         params={"filter": f'groups~{pb_client.pb_quote(group_id)}', "perPage": 1000, "sort": "name"},
     )
     return data.get("items", [])
+
+
+@app.post("/contacts/{contact_id}/clear-bounce")
+async def clear_contact_bounce(contact_id: str, token: str = Depends(pb_user_auth.get_user_token)):
+    """Phase 3b: setzt bounced=false, bounced_at='', bounced_reason='' — manuelles
+    Reset nach falsch geflagger Adresse (z.B. temporäres Mailbox-voll wurde fälschlich
+    als permanent geparsed)."""
+    await pb_client.pb_patch_as(
+        token,
+        f"/api/collections/contacts/records/{contact_id}",
+        {"bounced": False, "bounced_at": "", "bounced_reason": ""},
+    )
+    return {"ok": True}
 
 
 # ─── Kontakt-Import ──────────────────────────────────────────────────────

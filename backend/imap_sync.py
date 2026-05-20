@@ -290,6 +290,19 @@ async def _fetch_and_save(server: IMAPClient, account_id: str,
             except Exception as cls_exc:
                 logger.warning(f"spam classify failed for {email_id}: {cls_exc}")
 
+        # Phase 3b — Bounce-Erkennung. DSN-Mails kommen in INBOX an; wir matchen
+        # sie gegen bulk_sends.recipients[*] und flaggen permanent gebouncte
+        # Kontakte. Mail bleibt in INBOX (Stefan soll Bounces sehen).
+        if record.get("folder") == "INBOX":
+            try:
+                from bounce_parser import is_bounce, parse_dsn
+                if is_bounce(parsed, raw_bytes):
+                    from main import apply_bounce  # late import — Zirkular-Schutz
+                    dsn = parse_dsn(raw_bytes)
+                    await apply_bounce(dsn)
+            except Exception as bnc_exc:
+                logger.warning(f"Bounce-Handling fehlgeschlagen für UID {uid}: {bnc_exc}")
+
     except pb_client.DuplicateRecordError:
         pass  # E-Mail bereits vorhanden — ignorieren
     except Exception as e:

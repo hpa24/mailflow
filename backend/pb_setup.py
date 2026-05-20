@@ -159,6 +159,12 @@ async def setup_pocketbase_schema(token: str) -> None:
                        collectionId=contact_groups_id, maxSelect=999, cascadeDelete=False),
                 _field("unsubscribed", "bool"),
             ])
+            # Phase 3b — Bounce-Tracking pro Kontakt.
+            await _add_missing_fields(client, headers, "contacts", existing["contacts"], [
+                _field("bounced", "bool"),
+                _field("bounced_at", "date"),
+                _field("bounced_reason", "text"),
+            ])
         if "emails" in existing:
             await _ensure_indexes(client, headers, "emails", existing["emails"], [
                 "CREATE INDEX IF NOT EXISTS idx_emails_account_folder_date ON emails (account, folder, date_sent DESC)",
@@ -538,6 +544,10 @@ def _contacts_schema() -> dict:
             _field("notes", "text"),
             _field("xano_context", "text", max=MAX_UNLIMITED),
             _field("xano_synced_at", "date"),
+            # Phase 3b — DSN-Match setzt bounced=true; bulk_send_endpoint filtert raus.
+            _field("bounced", "bool"),
+            _field("bounced_at", "date"),
+            _field("bounced_reason", "text"),
         ],
     }
 
@@ -650,9 +660,11 @@ def _bulk_sends_schema(accounts_id: str) -> dict:
             _field("body_text", "text", max=MAX_UNLIMITED),
             _field("sent_at", "date"),
             _field("delay_seconds", "number"),
-            # recipients: [{email, name, raw, status, message_id, error, sent_at, next_attempt_at}]
+            # recipients: [{email, name, raw, status, message_id, error, sent_at,
+            #               next_attempt_at, job_id, bounced_at?, bounced_reason?}]
             # status ∈ queued|sent|error|bounced
             # next_attempt_at: ISO-Datum, ab wann der Worker diesen Empfänger versenden darf (B15).
+            # bounced_at/bounced_reason: gesetzt vom DSN-Match (Phase 3b).
             _field("recipients", "json", maxSize=5_000_000),
             _field("total_count", "number"),
             _field("sent_count", "number"),

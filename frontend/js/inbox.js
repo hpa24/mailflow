@@ -2913,6 +2913,7 @@ async function _bulkStart(recipients, snapshot) {
     _bulkTracking.byJobId.set(j.job_id, j.to);
     _bulkUpsertRow(j.to, { status: 'sending', error: null, jobId: j.job_id });
   });
+  _bulkRenderFilteredBanner(resp.filtered_out || []);
   _bulkUpdateSummary();
 
   // Polling-Fallback gegen SSE-Loss bei Backend-Restart (B15).
@@ -3020,6 +3021,26 @@ function _openBulkStatusModal() {
   document.getElementById('bulk-status-done').style.display = 'none';
   document.getElementById('bulk-status-retry').style.display = 'none';
   document.getElementById('bulk-status-copy-failed').style.display = 'none';
+  const filtered = document.getElementById('bulk-status-filtered');
+  if (filtered) { filtered.style.display = 'none'; filtered.innerHTML = ''; }
+}
+
+function _bulkRenderFilteredBanner(filteredOut) {
+  const el = document.getElementById('bulk-status-filtered');
+  if (!el) return;
+  if (!filteredOut || filteredOut.length === 0) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  const bouncedN = filteredOut.filter(f => f.reason === 'bounced').length;
+  const unsubN   = filteredOut.filter(f => f.reason === 'unsubscribed').length;
+  const parts = [];
+  if (bouncedN) parts.push(`<strong>${bouncedN}</strong> bouncte`);
+  if (unsubN)   parts.push(`<strong>${unsubN}</strong> unsubscribed`);
+  const emails = filteredOut.map(f => f.email).join(', ');
+  el.innerHTML = `⚠ ${parts.join(' + ')} Adresse${filteredOut.length === 1 ? '' : 'n'} rausgefiltert: <span title="${_escHtml(emails)}">${_escHtml(emails.length > 80 ? emails.slice(0, 80) + '…' : emails)}</span>`;
+  el.style.display = 'block';
 }
 
 function _bulkFinalize() {

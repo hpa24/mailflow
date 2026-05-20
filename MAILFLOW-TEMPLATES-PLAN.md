@@ -61,12 +61,20 @@ Gruppen: `dritte_gruppe`, `gross_geschrieben`, `kurs_a`, `kurs_b`, `test_gruppe`
 - ✅ **UI „Aussendungen":** neuer Subnav-Eintrag im Vorlagen-Tab zwischen „Gruppen" und „Kontakte". Liste links (Subject + Datum + Counts inkl. Bounce-Badge), Detail rechts mit Empfänger-Tabelle, Status-Filter (Alle/Erfolgreich/Fehler/Bounce/Ausstehend), Vorschau-Modal (iframe-srcdoc), „Aussendung löschen".
 - ✅ **Re-Send-Workflow:** Button „Auswahl als neuer Versand" sammelt markierte Empfänger (Bouncte sind default markiert), öffnet via `window.mfComposeResend.open(...)` Compose mit Subject + `body_html` + SMTP-Vorauswahl + Empfänger-Liste im Bulk-Modal. SMTP-Wechsel über den vorhandenen `#ci-smtp-server`-Select. Bulk-Send läuft danach durch die normale Pipeline und legt einen neuen `bulk_sends`-Record an.
 
-### Phase 3b — Bounce-Erkennung (geplant)
+### Phase 3b — Bounce-Erkennung ✅ (erledigt 2026-05-20)
 
-- IMAP-Sync erkennt Mailer-Daemon/DSN-Mails (heuristisch: From-Adresse + Content-Type `multipart/report` + Subject-Regex).
-- **Variante B — Message-ID-Match:** Extrahiert die ursprüngliche Message-ID aus dem DSN-Body (`X-Failed-Recipients`, `Original-Message-ID`-Header im `message/rfc822`-Part, Fallback Regex). Lookup über alle `bulk_sends.recipients[*].message_id` → setzt status=`bounced`, schreibt `bounced_reason` + `bounced_at`.
-- Kontakt-Flag: `contacts.bounced` (bool) + `bounced_at` + `bounced_reason`. Bulk-Send-Pipeline filtert `bounced=true` raus, analog zu `unsubscribed`. Manueller Reset-Button im Kontakt-Edit.
-- UI: Bounce-Badge an betroffenen Adressen in Kontakte/Gruppen-Detail. Liste-Header „X bouncte (rausgefiltert)".
+**Umgesetzt:**
+- `bounce_parser.py` (neu) — `is_bounce(parsed, raw)` Heuristik (From-Regex, Subject-Regex, Content-Type `multipart/report`); `parse_dsn(raw)` extrahiert `message_id`, `failed_recipient`, `diagnostic`, `status` (N.N.N) aus `message/delivery-status` + `message/rfc822`-Part mit Fallbacks; `is_permanent_failure(status)` = `status.startswith("5")`.
+- `imap_sync._fetch_and_save` ruft nach `pb_post` (INBOX-Mails) `main.apply_bounce()` via late import.
+- `main.apply_bounce()` (+ `_find_bulk_recipient_match`, `_patch_bulk_recipient_bounced`, `_flag_contact_bounced`) — Match per Message-ID zuerst, Email+`sent_at>=now-7d` als Fallback. Setzt `recipients[i].status=bounced` + `bounced_at` + `bounced_reason`, erhöht `bounced_count`. Bei permanentem Fehler (5.x.x): `contacts.bounced=true`. Nutzt `_bulk_send_locks` gegen Race mit Worker.
+- Schema-Erweiterung in `pb_setup.py`: `contacts.bounced/bounced_at/bounced_reason` + Migration via `_add_missing_fields`.
+- `bulk_send_endpoint` filtert vor dem Anlegen `bounced=true || unsubscribed=true` raus (eine PB-Query, in-Python-Match), liefert `filtered_out: [{email, raw, reason}]` in der Response; 400 wenn nach Filter keine Empfänger mehr übrig sind.
+- UI:
+  - Bulk-Status-Panel zeigt gelben Banner mit den gefilterten Adressen ("⚠ X bouncte + Y unsubscribed rausgefiltert: …").
+  - Gruppen-Mitglieder-Tabelle: rotes Badge "⚠ Bounce" vor der Email + `↺`-Button zum Reset (mit Confirm).
+  - Backend-Endpoint `POST /contacts/{id}/clear-bounce` (User-Token) für den Reset.
+
+**Bounce-Mail selbst:** bleibt in INBOX (User-Wunsch — Stefan will Bounces sehen).
 
 ### Phase 3 (später, ohne Datum)
 

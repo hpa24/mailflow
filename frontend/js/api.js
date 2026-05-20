@@ -176,6 +176,7 @@ window.api = {
 
   contacts: {
     import(lines, mode = 'add') { return apiJson('/contacts/import', 'POST', { lines, mode }); },
+    clearBounce(id)             { return apiJson(`/contacts/${id}/clear-bounce`, 'POST', {}); },
   },
 
   ai: {
