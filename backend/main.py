@@ -3470,6 +3470,22 @@ async def contact_groups_members(group_id: str, token: str = Depends(pb_user_aut
     return data.get("items", [])
 
 
+@app.get("/contacts/bounced")
+async def list_bounced_contacts(token: str = Depends(pb_user_auth.get_user_token)):
+    """Phase 3b: alle Kontakte mit bounced=true, sortiert nach bounced_at desc."""
+    data = await pb_client.pb_get_as(
+        token,
+        "/api/collections/contacts/records",
+        params={
+            "filter": "bounced=true",
+            "perPage": 500,
+            "sort": "-bounced_at",
+            "fields": "id,email,name,bounced,bounced_at,bounced_reason",
+        },
+    )
+    return data.get("items", [])
+
+
 @app.post("/contacts/{contact_id}/clear-bounce")
 async def clear_contact_bounce(contact_id: str, token: str = Depends(pb_user_auth.get_user_token)):
     """Phase 3b: setzt bounced=false, bounced_at='', bounced_reason='' — manuelles

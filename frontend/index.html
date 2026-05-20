@@ -7,7 +7,7 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0a84ff">
-  <link rel="stylesheet" href="css/main.css?v=20260520-3b">
+  <link rel="stylesheet" href="css/main.css?v=20260520-3c">
   <script src="js/auth.js"></script>
   <script>auth.requireAuth();</script>
 </head>
@@ -252,6 +252,7 @@
         <button class="submenu-btn" data-section="templates">Vorlagen</button>
         <button class="submenu-btn" data-section="groups">Gruppen</button>
         <button class="submenu-btn" data-section="bulk_sends">Aussendungen</button>
+        <button class="submenu-btn" data-section="bounced">Bouncte</button>
         <button class="submenu-btn" data-section="contacts" disabled>Kontakte <small>(folgt)</small></button>
       </aside>
       <main id="templates-main">
@@ -447,6 +448,26 @@
               <div class="snippets-preview"><iframe id="snippet-preview-iframe" sandbox="allow-same-origin"></iframe></div>
             </div>
           </div>
+        </section>
+
+        <section id="section-bounced" class="templates-section">
+          <div class="section-header">
+            <h2>Bouncte Kontakte</h2>
+            <p class="section-hint">Kontakte mit permanentem Zustell-Fehler (Status 5.x.x). Werden bei Massenversand automatisch rausgefiltert. <code>↺ Reset</code> macht den Kontakt wieder versandfähig.</p>
+          </div>
+          <table id="bounced-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th style="width: 22%">Name</th>
+                <th style="width: 120px">Bouncte am</th>
+                <th>Grund</th>
+                <th style="width: 80px"></th>
+              </tr>
+            </thead>
+            <tbody id="bounced-tbody"></tbody>
+          </table>
+          <div id="bounced-empty" style="display:none">Keine bouncten Kontakte.</div>
         </section>
       </main>
     </div>
@@ -698,9 +719,9 @@ Body (JSON):
     </div>
   </div>
 
-  <script src="js/api.js?v=20260520-3b"></script>
+  <script src="js/api.js?v=20260520-3c"></script>
   <script src="js/tabs.js?v=20260519-tpl6"></script>
-  <script src="js/template_subnav.js?v=20260519-tpl8"></script>
+  <script src="js/template_subnav.js?v=20260520-3c"></script>
   <script src="js/editor_dropdowns.js?v=20260519-tpl6"></script>
   <script src="js/delete_guard.js?v=20260519-tpl7"></script>
   <script src="js/variables.js?v=20260519-tpl7"></script>
@@ -708,6 +729,7 @@ Body (JSON):
   <script src="js/templates.js?v=20260519-tpl6"></script>
   <script src="js/groups.js?v=20260520-3b"></script>
   <script src="js/bulk_sends.js?v=20260519-tpl8"></script>
+  <script src="js/bounced_contacts.js?v=20260520-3b"></script>
   <script src="js/compose_templates.js?v=20260519-tpl6"></script>
   <script src="js/webhooks.js?v=20260520-c4"></script>
   <script src="js/inbox.js?v=20260520-3b"></script>

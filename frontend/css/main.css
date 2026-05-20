@@ -2355,6 +2355,7 @@ body[data-active-tab="contacts"]  #tab-contacts  { display: flex; align-items: c
 #templates-main[data-active-section="snippets"]  #section-snippets  { display: grid; }
 #templates-main[data-active-section="groups"]    #section-groups    { display: grid; }
 #templates-main[data-active-section="bulk_sends"] #section-bulk_sends { display: grid; }
+#templates-main[data-active-section="bounced"]   #section-bounced   { display: block; }
 /* Variablen-Section behaelt ihren bisherigen Block-Layout-Look */
 #section-variables {
   padding: 24px 32px;
