@@ -76,10 +76,10 @@ async def check_blocklist(account_id: str, from_email: str) -> dict | None:
     if not addr:
         return None
 
-    parts = [f'(match_type="email" && pattern="{addr}")']
+    parts = [f'(match_type="email" && pattern={pb_client.pb_quote(addr)})']
     if domain:
-        parts.append(f'(match_type="domain" && pattern="{domain}")')
-    filter_expr = f'account="{account_id}" && ({" || ".join(parts)})'
+        parts.append(f'(match_type="domain" && pattern={pb_client.pb_quote(domain)})')
+    filter_expr = f'account={pb_client.pb_quote(account_id)} && ({" || ".join(parts)})'
 
     try:
         result = await pb_client.pb_get(

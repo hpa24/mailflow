@@ -116,7 +116,7 @@ async def _backfill_folder(server: IMAPClient, account_id: str,
         resp = await pb_client.pb_get(
             "/api/collections/emails/records",
             params={
-                "filter": f'account="{account_id}" && folder="{folder_name}"',
+                "filter": f'account={pb_client.pb_quote(account_id)} && folder={pb_client.pb_quote(folder_name)}',
                 "perPage": PB_PAGE_SIZE,
                 "page": page,
                 "fields": "id,imap_uid,is_answered,is_flagged",
@@ -191,7 +191,7 @@ async def _html_backfill_account(account: dict, parse_email_fn) -> int:
         resp = await pb_client.pb_get(
             "/api/collections/emails/records",
             params={
-                "filter": f'account="{account["id"]}" && imap_uid > 0',
+                "filter": f'account={pb_client.pb_quote(account["id"])} && imap_uid > 0',
                 "perPage": 500,
                 "page": page,
                 "fields": "id,imap_uid,folder",

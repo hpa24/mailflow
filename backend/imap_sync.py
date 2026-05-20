@@ -333,7 +333,7 @@ async def _count_unread(account_id: str, folder_name: str) -> int:
     """Zählt is_read=false in PocketBase — konsistent mit dem, was das UI anzeigt."""
     try:
         result = await pb_client.pb_get("/api/collections/emails/records", params={
-            "filter": f'account="{account_id}" && folder="{folder_name}" && is_read=false',
+            "filter": f'account={pb_client.pb_quote(account_id)} && folder={pb_client.pb_quote(folder_name)} && is_read=false',
             "perPage": 1,
             "fields": "id",
         })
@@ -361,7 +361,7 @@ async def _get_or_create_folder(account_id: str, imap_path: str,
     async with _folder_create_lock:
         result = await pb_client.pb_get(
             "/api/collections/folders/records",
-            params={"filter": f'account="{account_id}" && imap_path="{imap_path}"', "perPage": 1},
+            params={"filter": f'account={pb_client.pb_quote(account_id)} && imap_path={pb_client.pb_quote(imap_path)}', "perPage": 1},
         )
         items = result.get("items", [])
         if items:
@@ -405,7 +405,7 @@ async def _cleanup_deleted_folders(account_id: str, existing_imap_paths: set[str
     """Entfernt Folder-Records aus PocketBase, die auf dem IMAP-Server nicht mehr existieren."""
     result = await pb_client.pb_get(
         "/api/collections/folders/records",
-        params={"filter": f'account="{account_id}"', "perPage": 200,
+        params={"filter": f'account={pb_client.pb_quote(account_id)}', "perPage": 200,
                 "fields": "id,imap_path"},
     )
     for folder in result.get("items", []):
@@ -420,7 +420,7 @@ async def _cleanup_deleted_folders(account_id: str, existing_imap_paths: set[str
 async def _delete_emails_for_folder(account_id: str, folder_name: str) -> None:
     result = await pb_client.pb_get(
         "/api/collections/emails/records",
-        params={"filter": f'account="{account_id}" && folder="{folder_name}"',
+        params={"filter": f'account={pb_client.pb_quote(account_id)} && folder={pb_client.pb_quote(folder_name)}',
                 "perPage": 500},
     )
     for email in result.get("items", []):
@@ -439,7 +439,7 @@ async def _compute_thread_id(message_id: str, in_reply_to: str) -> str:
     try:
         result = await pb_client.pb_get(
             "/api/collections/emails/records",
-            params={"filter": f'message_id="{in_reply_to}"', "perPage": 1,
+            params={"filter": f'message_id={pb_client.pb_quote(in_reply_to)}', "perPage": 1,
                     "fields": "id,thread_id"}
         )
         items = result.get("items", [])
@@ -460,7 +460,7 @@ async def _webhook_id_for_message(message_id: str) -> str:
         result = await pb_client.pb_get(
             "/api/collections/webhook_logs/records",
             params={
-                "filter": f'message_id="{safe_id}" && status="success"',
+                "filter": f'message_id={pb_client.pb_quote(safe_id)} && status="success"',
                 "perPage": 1,
                 "fields": "id,webhook",
             },
@@ -503,7 +503,7 @@ async def _sync_flags_recent(server: IMAPClient, account_id: str,
     pb_result = await pb_client.pb_get(
         "/api/collections/emails/records",
         params={
-            "filter": (f'account="{account_id}" && folder="{folder_name}" '
+            "filter": (f'account={pb_client.pb_quote(account_id)} && folder={pb_client.pb_quote(folder_name)} '
                        f'&& imap_uid>={from_uid} && imap_uid<={last_uid}'),
             "perPage": FLAG_SYNC_WINDOW,
             "fields": "id,imap_uid,is_read,is_flagged,is_answered",
@@ -558,7 +558,7 @@ async def upsert_contact(email: str, name: str, last_contact: str | None) -> Non
     try:
         result = await pb_client.pb_get(
             "/api/collections/contacts/records",
-            params={"filter": f'email="{email}"', "perPage": 1},
+            params={"filter": f'email={pb_client.pb_quote(email)}', "perPage": 1},
         )
         items = result.get("items", [])
         if items:

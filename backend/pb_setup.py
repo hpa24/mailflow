@@ -34,7 +34,7 @@ async def setup_pocketbase_schema(token: str) -> None:
         await _ensure_collection(client, headers, existing, _folders_schema(accounts_id))
 
         # 6. smtp_servers (no dependencies)
-        await _ensure_collection(client, headers, existing, _smtp_servers_schema())
+        smtp_servers_id = await _ensure_collection(client, headers, existing, _smtp_servers_schema())
 
         # 7. triage_rules (depends on accounts)
         await _ensure_collection(client, headers, existing, _triage_rules_schema(accounts_id))
@@ -59,6 +59,14 @@ async def setup_pocketbase_schema(token: str) -> None:
 
         # 14. bulk_sends (depends on accounts) — Historie der Massenversände + Empfänger-Status
         await _ensure_collection(client, headers, existing, _bulk_sends_schema(accounts_id))
+
+        # 15. webhooks (depends on smtp_servers + accounts) — externe Send-Endpoints
+        webhooks_id = await _ensure_collection(
+            client, headers, existing, _webhooks_schema(smtp_servers_id, accounts_id)
+        )
+
+        # 16. webhook_logs (depends on webhooks) — Audit-Trail pro Webhook-Aufruf
+        await _ensure_collection(client, headers, existing, _webhook_logs_schema(webhooks_id))
 
         # Migrations: add fields to existing collections if missing
         if "accounts" in existing:
@@ -243,6 +251,7 @@ def _accounts_schema() -> dict:
             _field("smtp_user", "text"),
             _field("smtp_pass", "text"),
             _field("signature", "text"),
+            _field("reply_to_email", "text"),
         ],
     }
 
@@ -281,7 +290,20 @@ def _emails_schema(accounts_id: str) -> dict:
             _field("date_sent", "date"),
             _field("is_read", "bool"),
             _field("is_flagged", "bool"),
+            _field("is_answered", "bool"),
+            _field("is_new", "bool"),
             _field("has_attachments", "bool"),
+            _field("reply_to", "text"),
+            {
+                "name": "ai_category",
+                "type": "select",
+                "required": False,
+                "values": ["focus", "quick-reply", "office", "info-trash"],
+                "maxSelect": 1,
+            },
+            _field("spam_score", "number"),
+            _field("spam_suggested", "bool"),
+            _field("spam_rule_match", "text"),
         ],
     }
 
@@ -431,6 +453,8 @@ def _contacts_schema() -> dict:
             _field("email_count", "number"),
             _field("last_contact", "date"),
             _field("notes", "text"),
+            _field("xano_context", "text", max=MAX_UNLIMITED),
+            _field("xano_synced_at", "date"),
         ],
     }
 
@@ -544,5 +568,61 @@ def _bulk_sends_schema(accounts_id: str) -> dict:
             _field("sent_count", "number"),
             _field("error_count", "number"),
             _field("bounced_count", "number"),
+        ],
+    }
+
+
+def _webhooks_schema(smtp_servers_id: str, accounts_id: str) -> dict:
+    return {
+        "name": "webhooks",
+        "type": "base",
+        "listRule": None,
+        "viewRule": None,
+        "createRule": None,
+        "updateRule": None,
+        "deleteRule": None,
+        "indexes": [
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_webhooks_slug ON webhooks (slug)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_webhooks_api_key ON webhooks (api_key)",
+        ],
+        "fields": [
+            _field("name", "text", required=True),
+            _field("slug", "text", required=True),
+            _field("smtp_server", "relation", required=True,
+                   collectionId=smtp_servers_id, maxSelect=1, cascadeDelete=False),
+            _field("from_account", "relation", required=True,
+                   collectionId=accounts_id, maxSelect=1, cascadeDelete=False),
+            _field("default_to", "text"),
+            _field("from_name_override", "text"),
+            _field("allow_to_override", "bool"),
+            _field("allow_reply_to", "bool"),
+            _field("allow_cc", "bool"),
+            _field("is_active", "bool"),
+            _field("api_key", "text", required=True),
+        ],
+    }
+
+
+def _webhook_logs_schema(webhooks_id: str) -> dict:
+    return {
+        "name": "webhook_logs",
+        "type": "base",
+        "listRule": None,
+        "viewRule": None,
+        "createRule": None,
+        "updateRule": None,
+        "deleteRule": None,
+        "indexes": [
+            "CREATE INDEX IF NOT EXISTS idx_webhook_logs_webhook_created ON webhook_logs (webhook, created DESC)",
+        ],
+        "fields": [
+            _field("webhook", "relation", required=True,
+                   collectionId=webhooks_id, maxSelect=1, cascadeDelete=True),
+            _field("ip", "text"),
+            _field("status", "text"),
+            _field("to", "text"),
+            _field("subject", "text"),
+            _field("message_id", "text"),
+            _field("error", "text", max=MAX_UNLIMITED),
         ],
     }

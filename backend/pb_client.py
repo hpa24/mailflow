@@ -11,6 +11,16 @@ _token: str | None = None
 _refresh_task: asyncio.Task | None = None
 
 
+def pb_quote(value: object) -> str:
+    """Quotes + escaped einen String-Wert für einen PocketBase-Filter.
+    Aus jedem Wert wird ein "..."-String, Backslashes und Quotes werden escaped.
+    Für boolesche/numerische Vergleiche NICHT verwenden — die gehören ohne Quotes
+    direkt in den Filter (z.B. is_read=false, imap_uid>0).
+    """
+    s = str(value)
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 async def authenticate() -> str:
     """Authenticate with PocketBase. Retries up to 10x with backoff (handles Docker startup races)."""
     global _token

@@ -44,11 +44,6 @@ _temp_uploads: dict[str, dict] = {}  # {temp_id: {filename, content_type, data: 
 _send_jobs: dict[str, dict] = {}
 
 
-def _pb_safe(q: str) -> str:
-    """Entfernt Sonderzeichen für PocketBase-Filter."""
-    return q.strip().replace('"', '').replace("'", "").replace("\\", "")
-
-
 def _email_filters(account: str | None, folder: str | None,
                    is_read: str | None, webhook: str | None = None) -> list[str]:
     """Baut PocketBase-Filter für E-Mail-Abfragen.
@@ -59,9 +54,9 @@ def _email_filters(account: str | None, folder: str | None,
     """
     filters = []
     if account:
-        filters.append(f'account="{account}"')
+        filters.append(f'account={pb_client.pb_quote(account)}')
     if folder:
-        filters.append(f'folder="{folder}"')
+        filters.append(f'folder={pb_client.pb_quote(folder)}')
     if is_read == "true":
         filters.append("is_read=true")
     elif is_read == "false":
@@ -77,7 +72,7 @@ async def _get_imap_account(account_id: str) -> dict | None:
     """Lädt Account-Daten aus PocketBase. Gibt None zurück wenn nicht gefunden."""
     result = await pb_client.pb_get(
         "/api/collections/accounts/records",
-        params={"filter": f'id="{account_id}"', "perPage": 1},
+        params={"filter": f'id={pb_client.pb_quote(account_id)}', "perPage": 1},
     )
     items = result.get("items", [])
     return items[0] if items else None
@@ -86,13 +81,13 @@ async def _get_imap_account(account_id: str) -> dict | None:
 async def _update_folder_unread_count(account_id: str, folder: str) -> None:
     """Zählt is_read=false E-Mails für den Ordner und schreibt den Wert in folders.unread_count."""
     count_data = await pb_client.pb_get("/api/collections/emails/records", params={
-        "filter": f'account="{account_id}" && folder="{folder}" && is_read=false',
+        "filter": f'account={pb_client.pb_quote(account_id)} && folder={pb_client.pb_quote(folder)} && is_read=false',
         "perPage": 1,
         "fields": "id",
     })
     new_unread = count_data.get("totalItems", 0)
     folder_data = await pb_client.pb_get("/api/collections/folders/records", params={
-        "filter": f'account="{account_id}" && imap_path="{folder}"',
+        "filter": f'account={pb_client.pb_quote(account_id)} && imap_path={pb_client.pb_quote(folder)}',
         "perPage": 1,
         "fields": "id",
     })
@@ -194,13 +189,25 @@ async def _auth_middleware(request: Request, call_next):
     )
 
 
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request: Request, exc: HTTPException):
+    """Bekannte HTTPException mit explizitem Status durchreichen — Detail bleibt erhalten."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={"Access-Control-Allow-Origin": request.headers.get("origin", "*")},
+    )
+
+
 @app.exception_handler(Exception)
 async def _global_exception_handler(request: Request, exc: Exception):
-    """Starlette würde sonst unbehandelte Exceptions ohne CORS-Header zurückgeben."""
-    logger.error("Unhandled exception on %s: %s", request.url.path, exc, exc_info=True)
+    """Unerwartete Fehler: volle Exception + UUID ins Log, an Client nur ref-Hinweis.
+    Verhindert Leaks von Pfaden, PocketBase-Details, Stacktraces."""
+    ref = _uuid_mod.uuid4().hex[:12]
+    logger.error("Unhandled exception on %s (ref=%s): %s", request.url.path, ref, exc, exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"detail": str(exc)},
+        content={"detail": "Interner Fehler", "ref": ref},
         headers={"Access-Control-Allow-Origin": request.headers.get("origin", "*")},
     )
 
@@ -346,7 +353,7 @@ async def accounts_sent_today():
         cnt_data = await pb_client.pb_get(
             "/api/collections/emails/records",
             params={
-                "filter": f'account="{aid}" && folder="Sent" && date_sent>="{cutoff}"',
+                "filter": f'account={pb_client.pb_quote(aid)} && folder="Sent" && date_sent>={pb_client.pb_quote(cutoff)}',
                 "perPage": 1,
                 "fields": "id",
             },
@@ -373,9 +380,9 @@ async def search_contacts(q: str = "", limit: int = 8):
     """Kontaktsuche nach Name oder E-Mail für Autocomplete."""
     if not q or len(q.strip()) < 1:
         return {"items": []}
-    safe = _pb_safe(q)
+    qq = pb_client.pb_quote(q.strip())
     data = await pb_client.pb_get("/api/collections/contacts/records", params={
-        "filter": f'email ~ "{safe}" || name ~ "{safe}"',
+        "filter": f'email ~ {qq} || name ~ {qq}',
         "sort": "-email_count",
         "perPage": limit,
         "fields": "id,email,name,email_count",
@@ -393,7 +400,7 @@ async def get_smtp_servers():
 async def get_folders(account: str | None = None):
     params = {"perPage": 200}
     if account:
-        params["filter"] = f'account="{account}"'
+        params["filter"] = f'account={pb_client.pb_quote(account)}'
     return await pb_client.pb_get("/api/collections/folders/records", params=params)
 
 
@@ -405,7 +412,6 @@ async def search_emails(q: str, account: str | None = None,
         return {"items": [], "totalItems": 0}
 
     raw = q.strip()
-    safe = _pb_safe(raw)
     fts_ids: list[str] = []
     use_fts = False
 
@@ -421,15 +427,16 @@ async def search_emails(q: str, account: str | None = None,
 
     if use_fts:
         top_ids = fts_ids[:100]
-        id_filter = " || ".join(f'id="{i}"' for i in top_ids)
+        id_filter = " || ".join(f'id={pb_client.pb_quote(i)}' for i in top_ids)
         filters = [f"({id_filter})"]
     else:
         # Fallback: PocketBase-LIKE auf Betreff + Absender (kein body_plain → keine Zitatttreffer)
         logger.info(f"FTS5 empty for '{raw}', falling back to PocketBase LIKE search")
-        filters = [f'(subject ~ "{safe}" || from_email ~ "{safe}" || from_name ~ "{safe}")']
+        qq = pb_client.pb_quote(raw)
+        filters = [f'(subject ~ {qq} || from_email ~ {qq} || from_name ~ {qq})']
 
     if account:
-        filters.append(f'account="{account}"')
+        filters.append(f'account={pb_client.pb_quote(account)}')
     if is_read == "true":
         filters.append("is_read=true")
     elif is_read == "false":
@@ -450,9 +457,9 @@ async def search_emails(q: str, account: str | None = None,
 
     # Zusätzlich: im Sent-Ordner auch nach Empfänger (to_emails) suchen,
     # damit "an wen habe ich geschrieben?" funktioniert.
-    sent_filters = [f'folder="Sent"', f'to_emails ~ "{safe}"']
+    sent_filters = ['folder="Sent"', f'to_emails ~ {pb_client.pb_quote(raw)}']
     if account:
-        sent_filters.append(f'account="{account}"')
+        sent_filters.append(f'account={pb_client.pb_quote(account)}')
     if is_read == "true":
         sent_filters.append("is_read=true")
     elif is_read == "false":
@@ -734,7 +741,7 @@ async def _finalize_for_recipient(to_field: str, subject: str,
         try:
             resp = await pb_client.pb_get(
                 "/api/collections/contacts/records",
-                params={"filter": f'email="{email_addr}"', "perPage": 1},
+                params={"filter": f'email={pb_client.pb_quote(email_addr)}', "perPage": 1},
             )
             items = resp.get("items", [])
             if items:
@@ -1296,7 +1303,7 @@ async def update_draft(draft_id: str, data: dict):
 async def get_email_attachments(email_id: str):
     """Listet alle Anhänge einer E-Mail aus PocketBase."""
     return await pb_client.pb_get("/api/collections/attachments/records", params={
-        "filter": f'email="{email_id}"',
+        "filter": f'email={pb_client.pb_quote(email_id)}',
         "perPage": 50,
         "sort": "part_id",
     })
@@ -1662,7 +1669,7 @@ async def list_spam_rules(account: str | None = None):
     """Listet alle Spam-Regeln, optional nach Account gefiltert."""
     params: dict = {"perPage": 500}
     if account:
-        params["filter"] = f'account="{account}"'
+        params["filter"] = f'account={pb_client.pb_quote(account)}'
     result = await pb_client.pb_get("/api/collections/spam_rules/records", params=params)
     return {"items": result.get("items", []), "totalItems": result.get("totalItems", 0)}
 
@@ -1907,7 +1914,7 @@ async def backfill_imap_uids():
         account_id = acc["id"]
         # Alle Ordner dieses Accounts aus PocketBase
         folder_data = await pb_client.pb_get("/api/collections/folders/records", params={
-            "filter": f'account="{account_id}"',
+            "filter": f'account={pb_client.pb_quote(account_id)}',
             "perPage": 200,
             "fields": "id,imap_path",
         })
@@ -1917,7 +1924,7 @@ async def backfill_imap_uids():
             try:
                 # PocketBase-E-Mails für diesen Ordner laden (Message-ID + imap_uid)
                 pb_data = await pb_client.pb_get("/api/collections/emails/records", params={
-                    "filter": f'account="{account_id}" && folder="{imap_folder}"',
+                    "filter": f'account={pb_client.pb_quote(account_id)} && folder={pb_client.pb_quote(imap_folder)}',
                     "perPage": 2000,
                     "fields": "id,message_id,imap_uid",
                 })
@@ -2013,9 +2020,9 @@ async def ai_triage(req: TriageRequest):
     """
     filters = ['is_read=false', '(ai_category="" || ai_category=null)']
     if req.account_id:
-        filters.append(f'account="{req.account_id}"')
+        filters.append(f'account={pb_client.pb_quote(req.account_id)}')
     if req.folder:
-        filters.append(f'folder="{req.folder}"')
+        filters.append(f'folder={pb_client.pb_quote(req.folder)}')
 
     try:
         data = await pb_client.pb_get("/api/collections/emails/records", params={
@@ -2035,7 +2042,7 @@ async def ai_triage(req: TriageRequest):
     # Lernregeln für diesen Account laden
     rules: list[str] = []
     try:
-        rule_filter = f'account="{req.account_id}"' if req.account_id else ""
+        rule_filter = f'account={pb_client.pb_quote(req.account_id)}' if req.account_id else ""
         rule_data = await pb_client.pb_get("/api/collections/triage_rules/records", params={
             "filter": rule_filter,
             "perPage": 100,
@@ -2114,7 +2121,7 @@ async def save_triage_example(data: dict):
     # Konsolidierung prüfen: bei ≥15 Regeln für diesen Account + Kategorie
     try:
         count_data = await pb_client.pb_get("/api/collections/triage_rules/records", params={
-            "filter": f'account="{email["account"]}" && category_slug="{category}"',
+            "filter": f'account={pb_client.pb_quote(email["account"])} && category_slug={pb_client.pb_quote(category)}',
             "perPage": 1,
         })
         total = count_data.get("totalItems", 0)
@@ -2130,7 +2137,7 @@ async def _consolidate_rules(account: str, category_slug: str) -> None:
     """Hintergrundaufgabe: Konsolidiert Lernregeln auf max. 7."""
     try:
         data = await pb_client.pb_get("/api/collections/triage_rules/records", params={
-            "filter": f'account="{account}" && category_slug="{category_slug}"',
+            "filter": f'account={pb_client.pb_quote(account)} && category_slug={pb_client.pb_quote(category_slug)}',
             "perPage": 200,
             "fields": "id,rule_text",
         })
@@ -2218,7 +2225,7 @@ async def ai_suggest(req: SuggestRequest):
             thread_data = await pb_client.pb_get(
                 "/api/collections/emails/records",
                 params={
-                    "filter": f'thread_id="{thread_id}" && id!="{req.email_id}"',
+                    "filter": f'thread_id={pb_client.pb_quote(thread_id)} && id!={pb_client.pb_quote(req.email_id)}',
                     "sort": "date_sent",
                     "perPage": 10,
                     "fields": "id,from_email,subject,body_plain,date_sent",
@@ -2232,9 +2239,9 @@ async def ai_suggest(req: SuggestRequest):
     contact_history: list = []
     from_email = email.get("from_email") or ""
     if from_email:
-        history_filter = f'from_email="{from_email}"'
+        history_filter = f'from_email={pb_client.pb_quote(from_email)}'
         if thread_id:
-            history_filter += f' && thread_id!="{thread_id}"'
+            history_filter += f' && thread_id!={pb_client.pb_quote(thread_id)}'
         try:
             history_data = await pb_client.pb_get(
                 "/api/collections/emails/records",
@@ -2395,7 +2402,7 @@ _WEBHOOK_SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 async def _webhook_by_slug(slug: str) -> dict | None:
     data = await pb_client.pb_get(
         "/api/collections/webhooks/records",
-        params={"filter": f'slug="{slug}"', "perPage": 1},
+        params={"filter": f'slug={pb_client.pb_quote(slug)}', "perPage": 1},
     )
     items = data.get("items") or []
     return items[0] if items else None
@@ -2532,7 +2539,7 @@ async def webhooks_logs(webhook_id: str, limit: int = 100):
     data = await pb_client.pb_get(
         "/api/collections/webhook_logs/records",
         params={
-            "filter": f'webhook="{webhook_id}"',
+            "filter": f'webhook={pb_client.pb_quote(webhook_id)}',
             "perPage": limit,
             "sort": "-created",
         },
@@ -2913,10 +2920,10 @@ _TEMPLATE_PREFIX_RE = re.compile(r"^[a-z0-9_]{0,30}$")
 async def templates_list(prefix: str = "", search: str = ""):
     filters = []
     if prefix:
-        filters.append(f'prefix="{prefix}"')
+        filters.append(f'prefix={pb_client.pb_quote(prefix)}')
     if search:
-        s = search.replace('"', '')
-        filters.append(f'(name~"{s}" || subject~"{s}")')
+        s = pb_client.pb_quote(search)
+        filters.append(f'(name~{s} || subject~{s})')
     params = {"perPage": 500, "sort": "prefix,name"}
     if filters:
         params["filter"] = " && ".join(filters)
@@ -3072,7 +3079,7 @@ async def contact_groups_delete(group_id: str):
 async def contact_groups_members(group_id: str):
     data = await pb_client.pb_get(
         "/api/collections/contacts/records",
-        params={"filter": f'groups~"{group_id}"', "perPage": 1000, "sort": "name"},
+        params={"filter": f'groups~{pb_client.pb_quote(group_id)}', "perPage": 1000, "sort": "name"},
     )
     return data.get("items", [])
 
@@ -3194,7 +3201,7 @@ async def contacts_import(data: dict):
         try:
             resp = await pb_client.pb_get(
                 "/api/collections/contacts/records",
-                params={"filter": f'email="{email}"', "perPage": 1},
+                params={"filter": f'email={pb_client.pb_quote(email)}', "perPage": 1},
             )
             items = resp.get("items", [])
             current = items[0] if items else None
