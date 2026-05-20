@@ -9,6 +9,7 @@ import hashlib
 import time
 
 import httpx
+from fastapi import Header, HTTPException
 
 from config import settings
 
@@ -50,3 +51,15 @@ async def validate(token: str) -> bool:
     except httpx.HTTPError:
         pass
     return False
+
+
+def get_user_token(authorization: str | None = Header(default=None)) -> str:
+    """FastAPI-Dependency: extrahiert den PB-User-Token aus Authorization-Header.
+    Setzt voraus, dass die Auth-Middleware den Token bereits validiert hat —
+    diese Dependency reicht ihn an Endpoints durch, die PocketBase per
+    `pb_*_as(token, …)` im User-Kontext aufrufen (statt mit dem Admin-Token).
+    401, wenn Header fehlt (z.B. Signed-URL-Routen — die taugen nicht für pb_user).
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Bearer token required")
+    return authorization[7:]

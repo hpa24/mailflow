@@ -134,3 +134,49 @@ async def pb_patch(path: str, data: dict) -> dict:
 async def pb_delete(path: str) -> None:
     resp = await _request_with_reauth("delete", path)
     resp.raise_for_status()
+
+
+# ---------------------------------------------------------------------------
+# User-Token-Variante: ruft PocketBase mit dem Token des eingeloggten Users auf,
+# nicht mit dem Admin-Token. Damit greifen PB-Collection-Rules; Backend-Kompromiss
+# öffnet nicht automatisch die ganze DB.
+# 401 bubbelt durch (kein Re-Auth — der User muss sich neu einloggen).
+# Verwendung: Endpoints, die nur „eigene" Daten lesen/schreiben sollen,
+# pullen den Token via FastAPI-Dependency `get_user_token` aus pb_user_auth.
+# ---------------------------------------------------------------------------
+
+async def _request_with_token(token: str, method: str, path: str, **kwargs) -> httpx.Response:
+    headers = kwargs.pop("headers", {}) or {}
+    headers["Authorization"] = f"Bearer {token}"
+    async with httpx.AsyncClient(base_url=settings.PB_URL, timeout=30) as client:
+        return await getattr(client, method)(path, headers=headers, **kwargs)
+
+
+async def pb_get_as(token: str, path: str, params: dict | None = None) -> dict:
+    resp = await _request_with_token(token, "get", path, params=params)
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def pb_post_as(token: str, path: str, data: dict) -> dict:
+    resp = await _request_with_token(token, "post", path, json=data)
+    if not resp.is_success:
+        body = resp.text
+        if "not_unique" in body or "validation_not_unique" in body:
+            raise DuplicateRecordError(body)
+        logger.error(f"pb_post_as {path} → {resp.status_code}: {body[:500]}")
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def pb_patch_as(token: str, path: str, data: dict) -> dict:
+    resp = await _request_with_token(token, "patch", path, json=data)
+    if not resp.is_success:
+        logger.error(f"pb_patch_as {path} → {resp.status_code}: {resp.text[:500]}")
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def pb_delete_as(token: str, path: str) -> None:
+    resp = await _request_with_token(token, "delete", path)
+    resp.raise_for_status()

@@ -11,9 +11,10 @@
 - ✅ C5 — Config-Strategie (mit A1.8-Cleanup)
 - ✅ C1 / C3 / C4 — jeweils Phase 1 (Commit `e2ad2da`): Webhook-Router raus, `imap_session(acc)`-Context-Manager, `webhooks.js` raus aus `inbox.js`
 - ✅ A10 — Admin-Endpoints mit separatem `ADMIN_API_KEY` (Commit `fd816a1`): `X-Admin-Key`-Check in Middleware, PB-Bearer reicht für `/admin/*` nicht mehr
+- ✅ A11 Phase 1 — Foundation für PB-User-Token-Trennung: `pb_*_as(token, …)` in `pb_client.py` + `get_user_token`-Dependency in `pb_user_auth.py`. Endpoints noch nicht migriert.
 
 **Offen — nächster Chat startet hier:**
-- A11 (PB-Superuser-Trennung)
+- A11 Phase 2 (Pilot-Endpoint auf User-Token + PB-Rule) und Phase 3 (volle Migration)
 - B9, B14, B15 (BODYSTRUCTURE / Temp-Upload-TTL / Bulk-Jobs persistent)
 - C1 / C3 / C4 — jeweils Phase 2 (weitere Router, ImapService-Klasse, weitere JS-Module)
 - C2 (Pydantic-Request-Modelle, verteilt)
@@ -61,10 +62,16 @@ Reihenfolge nach Priorität: **Security zuerst, dann Robustheit, dann Architektu
 
 **Problem:** Backend nutzt dauerhaft PB-Admin-Credentials für alle DB-Operationen. Bei Backend-/Server-Kompromiss ist die gesamte DB offen.
 
-**Plan (mittelfristig):**
-- PB-Collection-Rules so eng schneiden, dass User-Calls mit User-PB-Token funktionieren (statt Admin-Bypass)
-- Backend reicht den User-Token durch, wo möglich; Admin-Token nur für echte Backend-Operationen (IMAP-Sync, Bulk-Recipient-Updates)
-- Trennung in zwei `pb_client`-Instanzen: `pb_user(token)` und `pb_admin()`
+**Plan (mittelfristig):** in 3 Phasen geteilt:
+
+**Phase 1 — Foundation ✅ (2026-05-20):**
+- `pb_*_as(token, …)`-API in `pb_client.py` parallel zu admin-`pb_*` (kein Re-Auth, 401 bubbelt durch)
+- FastAPI-Dependency `get_user_token` in `pb_user_auth.py` (zieht Bearer-Token aus Header)
+- **Noch keine Endpoint-Migration, noch keine PB-Rule-Änderung** — nur Boden bereitgestellt
+
+**Phase 2 — Pilot (offen):** 1 kleinen Read-Endpoint (Kandidat: `GET /accounts` oder `GET /contacts`) komplett auf User-Token umstellen + PB-Rule für genau diese Collection so eng schneiden, dass User-Calls statt Admin-Bypass laufen. Validiert den Ansatz end-to-end mit minimalem Blast-Radius.
+
+**Phase 3 — Volle Migration (offen):** Endpoint für Endpoint migrieren; jeweils prüfen, welche Calls User-Kontext brauchen (Standard: alles, was „eigene Daten" liest/schreibt) und welche Admin bleiben (IMAP-Sync, Bulk-Recipient-Updates, Webhook-Sends ohne User-Session). Pro Collection PB-Rules nachschärfen. Am Ende sollte der Admin-Token nur noch für IMAP-Sync, Bulk-Backend und ähnliche reine Backend-Operationen gehalten werden.
 
 ### A13 — Filter-Escape konsistent
 
