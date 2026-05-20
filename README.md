@@ -223,7 +223,7 @@ Statt eines separaten Gruppen-Versand-Workflows kommt eine Gruppen-Auswahl ins b
 - **Sections-UI**: Backend kann Sections strippen (Marker im HTML), Editor-UI und Compose-Section-Checkboxen kommen mit Phase 2b.
 - **Pro-Kontakt-Variablen** (`{{vars.anrede}}` etc.): Stefan nutzt nur globale Werte. Bei Bedarf später nachrüstbar (Feld `vars` JSON auf Kontakt + Resolver-Erweiterung).
 - **Rendered-Preview-Iframe im Compose**: Stefans Feststellung 2026-05-19 — der `contenteditable`-Div rendert das HTML bereits direkt, ein zusätzliches Iframe wäre redundant. Der Test-Versand-Button deckt den End-Empfänger-Check ab.
-- **Phase 3**: Unsubscribe-Token-Link, Bounce-Erkennung, Tagesversand-Counter, rollenbasierte Conditional Sections.
+- **Phase 3**: Unsubscribe-Token-Link, ~~Bounce-Erkennung~~ (✅ 2026-05-20), ~~Tagesversand-Counter~~ (✅), rollenbasierte Conditional Sections.
 
 ## Webhook-Filter im Sent-Ordner 2026-05-19 #webhook #xano
 
@@ -291,8 +291,53 @@ Bulk-Send läuft danach durch die normale `/emails/bulk-send`-Pipeline und legt 
 
 ### Bewusst nicht jetzt
 
-- **Bounce-Erkennung** (Phase 3b, geplant): IMAP-Sync-Heuristik für Mailer-Daemon/DSN-Mails, Message-ID-Match gegen `bulk_sends.recipients[*].message_id`, `contacts.bounced`-Flag, UI-Badges. Vorbereitung dafür ist mit der Message-ID-Persistierung schon getan.
 - **Tagesversand-Counter** ist bereits live (siehe „Tagesversand-Counter" unten / Plan-Eintrag).
+
+## Bounce-Erkennung 2026-05-20 #bouncetracking #aussendung
+
+Phase 3b: DSN-Mails (Mailer-Daemon-Bounces) im INBOX-Sync werden erkannt, gegen `bulk_sends.recipients[*]` gematcht, und bei permanentem Fehler (5.x.x) wird der Kontakt geflaggt. Vor dem Versand filtert `bulk_send_endpoint` bouncte + unsubscribed-Adressen raus. Bounce-Mails selbst bleiben in INBOX (Stefan will sie inhaltlich sehen).
+
+### Detector + Parser
+
+`backend/bounce_parser.py`:
+
+- `is_bounce(parsed, raw_bytes)` — Heuristik (From-Regex `^(mailer-daemon|postmaster|noreply|no-reply|mailerdaemon)@`, Subject-Regex `^(Undelivered|Mail Delivery|Returned|Delivery Status|Failure Notice|Zustell|Unzustellbar|Nicht zustellbar)`, Content-Type `multipart/report`).
+- `parse_dsn(raw_bytes)` — extrahiert `message_id` (aus `message/rfc822`-Part-Header oder `Original-Message-ID`), `failed_recipient` (aus `Final-Recipient` im `message/delivery-status`-Part oder `X-Failed-Recipients`-Header), `diagnostic` (aus `Diagnostic-Code` oder Plaintext-Fallback), `status` (SMTP-Status `N.N.N` z.B. `5.1.1`).
+- `is_permanent_failure(status)` — `True` wenn `status.startswith("5")`. Bei `4.x.x` → nur `recipients[i].status=bounced`, Kontakt bleibt sauber.
+
+### Match + Patch
+
+`backend/main.py`:
+
+- `_find_bulk_recipient_match(message_id, failed)` — Message-ID-Match zuerst (PB-Filter `recipients ~ "{id}"` + Python-Re-Validierung gegen False-Positives). Fallback: Email + `sent_at >= now-7d`.
+- `_patch_bulk_recipient_bounced(bulk_id, email, reason)` — setzt `status=bounced`, `bounced_at`, `bounced_reason`, aktualisiert Counts. Nutzt `_bulk_send_locks` gegen Race mit dem B15-Worker.
+- `_flag_contact_bounced(email, reason)` — `contacts.bounced=true` + `bounced_at` + `bounced_reason`. No-op wenn Kontakt nicht existiert.
+- `apply_bounce(dsn)` — Public Entry-Point, vom IMAP-Sync via `from main import apply_bounce` (late import, Zirkular-Schutz).
+
+`imap_sync._fetch_and_save`: nach `pb_post` (INBOX-Mails) → `is_bounce(parsed, raw_bytes)` → `apply_bounce(dsn)`.
+
+### Schema (`backend/pb_setup.py`)
+
+- `contacts +bounced` (bool) + `+bounced_at` (date) + `+bounced_reason` (text), Migration via `_add_missing_fields`.
+- `bulk_sends.recipients[i]` (JSON) erweitert um `bounced_at`, `bounced_reason` — kein PB-Schema-Change.
+
+### Filter im Massenversand
+
+`bulk_send_endpoint` zieht vor dem Anlegen einen PB-Read auf `contacts.bounced=true || contacts.unsubscribed=true` (perPage=5000, nur Email-Feld), filtert in Python und liefert `filtered_out: [{email, raw, reason}]` in der Response. HTTP 400 wenn alle Empfänger gefiltert würden.
+
+### UI
+
+- **Bulk-Status-Panel**: gelber Banner unter der Zusammenfassung listet gefilterte Adressen mit Begründung.
+- **Gruppen-Mitglieder-Tabelle**: rotes „⚠ Bounce"-Badge vor der Email + `↺`-Reset-Button pro Zeile.
+- **Subview „Bouncte" im Vorlagen-Tab** (`frontend/js/bounced_contacts.js`, Section `#section-bounced`): Tabelle aller Kontakte mit `bounced=true` (Email, Name, Datum, Grund, Reset). Backend: `GET /contacts/bounced`. Reset-Button: `POST /contacts/{id}/clear-bounce`. Tabellen-Style analog `#variables-table`.
+
+### Manueller Test
+
+1. Bulk an eine **akzeptiert-dann-bounced** Adresse senden (z.B. `dasgibtesnicht-9999xyz@gmail.com` — Gmail-MX akzeptiert, finaler Server schickt DSN).
+2. 1–5 Min warten → Mailer-Daemon-Mail in INBOX.
+3. Nach dem nächsten IMAP-Sync: `bulk_sends.recipients[i].status=bounced`, Badge im UI; bei 5.x.x auch `contacts.bounced=true`.
+4. Nächster Bulk an dieselbe Adresse: gelber Banner „⚠ 1 bouncte Adresse rausgefiltert", Adresse fehlt in der Versandliste.
+5. Subview „Bouncte" zeigt den Kontakt. `↺ Reset` macht ihn wieder versandfähig.
 
 ## Upload-Limits & Cleanup 2026-05-20
 
