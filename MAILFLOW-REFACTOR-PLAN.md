@@ -22,10 +22,11 @@
 - ✅ A11 Phase 3e — Audit-/Bulk-Cluster (bulk_sends/webhooks/webhook_logs): 3 PB-Rules + 8 User-Endpoints, Backend-Schreiber dokumentiert. **Damit ist A11 komplett** (Commit `76c1676`).
 - ✅ Backlog A11-Nachzügler (2026-05-20) — `GET /smtp-servers` `fields=id,name,is_default`-Whitelist in `main.py`, FIXME im `_smtp_servers_schema` entfernt. `password` (und übrige Credentials) erreichen das Frontend nicht mehr.
 - ✅ B14 Phase 1 (2026-05-20) — `_temp_uploads` mit TTL (30 min) + Gesamtlimit (200 MB) + Sweep-Coroutine im `lifespan`. Phase 2 (Disk-Spool) zurückgestellt, mit 200-MB-Cap nicht akut.
+- ✅ B15 (2026-05-20) — Bulk-Jobs persistent: `next_attempt_at` + `job_id` pro Empfänger, `_bulk_worker_loop` im `lifespan`, `_bulk_restart_cleanup` für has_attachments-Bulks. `_do_bulk_send` raus.
 
 **Offen — nächster Chat startet hier:**
-- A11 abgeschlossen, smtp-servers-Backlog erledigt, B14 Phase 1 durch. Offen: B9 (BODYSTRUCTURE), B15 (Bulk-Jobs persistent), Refactor-Phase-2 (C1/C3/C4/C2), evtl. B14 Phase 2 (Disk-Spool, nur wenn nötig).
-- B9, B15 (BODYSTRUCTURE / Bulk-Jobs persistent)
+- B9 (BODYSTRUCTURE), Refactor-Phase-2 (C1/C3/C4/C2), evtl. B14 Phase 2 (Disk-Spool, erlaubt Bulk-Resume mit Anhängen).
+- B9 (BODYSTRUCTURE)
 - C1 / C3 / C4 — jeweils Phase 2 (weitere Router, ImapService-Klasse, weitere JS-Module)
 - C2 (Pydantic-Request-Modelle, verteilt)
 
@@ -137,14 +138,18 @@ Am Ende: Admin-Token nur noch für IMAP-Sync, Bulk-Backend, Webhook-Send-Backend
 
 **Plan:** Hintergrund-Task (`asyncio.create_task` beim Startup) räumt Einträge älter als 30 min auf. Globales Größen-Limit (z.B. 200 MB total). Bei sehr großen Uploads: Disk-Spool (`tempfile.NamedTemporaryFile`) statt RAM.
 
-### B15 — Bulk-Jobs persistent statt in-memory
+### B15 — Bulk-Jobs persistent statt in-memory ✅ (erledigt 2026-05-20)
 
-**Problem:** `_send_jobs` und Bulk-Subjobs leben im Prozessspeicher. Bei Backend-Restart mitten im Bulk gehen offene Sub-Jobs verloren.
+**Umgesetzt:**
+- `bulk_sends.recipients[i]` um `next_attempt_at` (ISO-Datum) + `job_id` (UUID) erweitert — keine zweite Collection nötig.
+- `bulk_sends` um `has_attachments` (bool) und `is_done` (bool) erweitert (Schema + Migration via `_add_missing_fields` in `pb_setup.py`).
+- `_bulk_worker_loop()` läuft im `lifespan`, pollt alle 1 s `is_done!=true` und spawnt `_do_send_job` pro fälligem Empfänger (`status=queued && next_attempt_at <= now`). Lease via `next_attempt_at = now + 5 min` schützt vor Doppel-Pick.
+- `_bulk_restart_cleanup()` markiert beim Start `queued`-Empfänger von Aussendungen mit Anhängen als `error: backend_restart_with_attachments` (Anhänge sind in-memory).
+- `bulk_send_endpoint` setzt `next_attempt_at = start + idx*delay` pro Empfänger, `_do_bulk_send` ersatzlos entfernt.
+- `_bulk_record_recipient_result` setzt `is_done=true` und gibt `_bulk_attachments_by_id[bulk_send_id]` frei, sobald alle terminal sind.
+- `_send_jobs`-Hybrid: bleibt in-memory für SSE-Events; persistente Wahrheit ist `recipients[]`.
 
-**Plan:**
-- Job-State in PocketBase persistieren (Collection `send_jobs` mit `status`, `recipient`, `bulk_id`, `next_attempt_at`)
-- Beim Backend-Startup: queued/in-progress-Jobs wieder aufnehmen
-- Worker-Loop statt Sub-Task pro Job (saubereres Resume)
+**Bekannte Restriktion:** Resume mit Anhängen fällt der `_bulk_restart_cleanup` zum Opfer. Lift via B14 Phase 2 (Disk-Spool) möglich.
 
 ---
 

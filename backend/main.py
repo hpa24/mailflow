@@ -19,6 +19,7 @@ from services.imap import imap_session
 import asyncio
 import json
 import time
+from datetime import datetime, timezone, timedelta
 
 import pb_client
 from pb_client import start_token_refresh, stop_token_refresh
@@ -49,12 +50,22 @@ MAX_TOTAL_UPLOAD_SIZE = 200 * 1024 * 1024     # 200 MB über alle aktiven Upload
 UPLOAD_TTL_SECONDS = 30 * 60                  # 30 min — danach wird der Eintrag verworfen
 UPLOAD_CLEANUP_INTERVAL_SECONDS = 5 * 60      # 5 min — Sweep-Intervall
 
+# B15: Bulk-Worker — pollt bulk_sends auf fällige Empfänger.
+BULK_WORKER_INTERVAL_SECONDS = 1.0
+BULK_RECIPIENT_LEASE_SECONDS = 5 * 60         # Schutz vor Doppelpick, falls Sub-Job hängt
+
 # Temporärer Speicher für hochgeladene Anhänge (in-memory)
 # {temp_id: {filename, content_type, data: bytes, size: int, created_at: float}}
 _temp_uploads: dict[str, dict] = {}
 
 # Hintergrund-Sendejobs: {job_id: {status, to, subject}}
 _send_jobs: dict[str, dict] = {}
+
+# B15: Pro bulk_send_id die Anhangsliste, die `_do_send_job` als `attachments`-Arg
+# braucht. Lebt nur im aktuellen Prozess — Resume nach Restart bekommt eine leere
+# Liste; has_attachments-Aussendungen werden vorher per `_bulk_restart_cleanup`
+# abgebrochen.
+_bulk_attachments_by_id: dict[str, list] = {}
 
 
 def _email_filters(account: str | None, folder: str | None,
@@ -139,6 +150,238 @@ async def _cleanup_temp_uploads_loop() -> None:
             logger.exception("Cleanup-Loop für _temp_uploads fehlgeschlagen")
 
 
+# ── B15: Bulk-Worker ────────────────────────────────────────────────────
+# Persistenter Versand-Pfad: bulk_send_endpoint setzt pro Empfänger
+# next_attempt_at + job_id in bulk_sends.recipients[]. Der Worker pollt
+# offene bulk_sends, picked fällige queued-Empfänger und ruft _do_send_job.
+# Resume nach Backend-Restart ist damit automatisch — der Worker holt sich
+# beim nächsten Tick einfach die noch offenen Einträge.
+
+def _parse_pb_dt(s: str | None) -> datetime | None:
+    """Parst PB-Datums-Strings tolerant (mit/ohne Z, mit/ohne Microsekunden).
+
+    Gibt aware-datetime in UTC zurück. None für leere/ungültige Werte.
+    """
+    if not s:
+        return None
+    raw = str(s).strip()
+    if not raw:
+        return None
+    raw = raw.replace("T", " ").rstrip("Z")
+    if "." in raw:
+        raw = raw.split(".", 1)[0]
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _format_pb_dt(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def _bulk_restart_cleanup() -> None:
+    """Räumt nach Backend-Restart Aussendungen mit Anhängen auf.
+
+    Anhänge leben in `_temp_uploads` (in-memory) — nach Restart sind sie weg.
+    Für bulk_sends mit `has_attachments=true` und offenen `queued`-Empfängern
+    setzt diese Funktion die offenen Empfänger auf `status=error` mit Grund
+    `backend_restart_with_attachments`. Aussendungen ohne Anhänge laufen
+    unverändert weiter — der Worker pickt sie regulär.
+    """
+    try:
+        result = await pb_client.pb_get(
+            "/api/collections/bulk_sends/records",
+            params={
+                "filter": 'is_done!=true && has_attachments=true',
+                "sort": "-sent_at",
+                "perPage": 200,
+            },
+        )
+    except Exception as exc:
+        logger.warning("B15-Restart-Cleanup: bulk_sends-Read fehlgeschlagen: %s", exc)
+        return
+
+    items = result.get("items", []) or []
+    for bulk in items:
+        bulk_id = bulk.get("id")
+        if not bulk_id:
+            continue
+        lock = _bulk_send_locks.setdefault(bulk_id, asyncio.Lock())
+        async with lock:
+            try:
+                fresh = await pb_client.pb_get(
+                    f"/api/collections/bulk_sends/records/{bulk_id}"
+                )
+            except Exception as exc:
+                logger.warning("B15-Restart-Cleanup: %s nicht lesbar: %s", bulk_id, exc)
+                continue
+            recipients = fresh.get("recipients") or []
+            changed = 0
+            for r in recipients:
+                if r.get("status") == "queued":
+                    r["status"] = "error"
+                    r["error"] = "backend_restart_with_attachments"
+                    changed += 1
+            if changed == 0:
+                continue
+            sent = sum(1 for r in recipients if r.get("status") == "sent")
+            err = sum(1 for r in recipients if r.get("status") == "error")
+            bounced = sum(1 for r in recipients if r.get("status") == "bounced")
+            total = fresh.get("total_count") or len(recipients)
+            patch = {
+                "recipients": recipients,
+                "sent_count": sent,
+                "error_count": err,
+                "bounced_count": bounced,
+                "is_done": sent + err + bounced >= total,
+            }
+            try:
+                await pb_client.pb_patch(
+                    f"/api/collections/bulk_sends/records/{bulk_id}", patch,
+                )
+                logger.warning(
+                    "B15-Restart-Cleanup: bulk=%s %d Empfänger abgebrochen (Anhänge verloren)",
+                    bulk_id, changed,
+                )
+            except Exception as exc:
+                logger.warning("B15-Restart-Cleanup: patch %s fehlgeschlagen: %s",
+                               bulk_id, exc)
+
+
+def _build_resume_sub_data(bulk: dict, recipient: dict) -> dict:
+    """Rekonstruiert das `data`-Dict für `_do_send_job` aus bulk_sends + Empfänger.
+
+    Nur Felder, die in `bulk_sends` persistiert sind — `quote`, `quote_html`,
+    `in_reply_to_email_id`, `draft_id` waren bulk-irrelevant und werden nicht
+    übernommen. Anhänge sind separat (in-memory beim Erst-Lauf, leer beim Resume).
+    """
+    return {
+        "to": recipient.get("raw") or recipient.get("email") or "",
+        "subject": bulk.get("subject") or "",
+        "cc": "",
+        "from_account": bulk.get("from_account") or "",
+        "smtp_server": bulk.get("smtp_server") or "",
+        "body": bulk.get("body_text") or "",
+        "body_html": bulk.get("body_html") or "",
+        "_bulk_send_id": bulk.get("id"),
+    }
+
+
+async def _bulk_worker_tick(attachments_by_bulk: dict[str, list]) -> None:
+    """Ein Worker-Tick: pickt fällige queued-Empfänger und startet `_do_send_job`.
+
+    `attachments_by_bulk` hält die im aktuellen Prozess geladenen Anhänge pro
+    bulk_send_id. Beim Restart ist das Dict leer; der Worker sendet dann ohne
+    Anhänge — was bei has_attachments-Bulks via `_bulk_restart_cleanup` schon
+    vorab als Fehler abgehandelt wurde.
+    """
+    try:
+        result = await pb_client.pb_get(
+            "/api/collections/bulk_sends/records",
+            params={
+                "filter": 'is_done!=true',
+                "sort": "-sent_at",
+                "perPage": 50,
+            },
+        )
+    except Exception as exc:
+        logger.warning("B15-Worker: bulk_sends-Read fehlgeschlagen: %s", exc)
+        return
+
+    items = result.get("items", []) or []
+    now = datetime.now(timezone.utc)
+    lease_until = now + timedelta(seconds=BULK_RECIPIENT_LEASE_SECONDS)
+    lease_str = _format_pb_dt(lease_until)
+
+    for bulk in items:
+        bulk_id = bulk.get("id")
+        if not bulk_id:
+            continue
+        lock = _bulk_send_locks.setdefault(bulk_id, asyncio.Lock())
+        if lock.locked():
+            continue  # läuft schon — nächster Tick
+        async with lock:
+            try:
+                fresh = await pb_client.pb_get(
+                    f"/api/collections/bulk_sends/records/{bulk_id}"
+                )
+            except Exception as exc:
+                logger.warning("B15-Worker: %s nicht lesbar: %s", bulk_id, exc)
+                continue
+            recipients = fresh.get("recipients") or []
+            total = fresh.get("total_count") or len(recipients)
+            sent = sum(1 for r in recipients if r.get("status") == "sent")
+            err = sum(1 for r in recipients if r.get("status") == "error")
+            bounced = sum(1 for r in recipients if r.get("status") == "bounced")
+            if sent + err + bounced >= total:
+                # Alle terminal — is_done setzen und weiter
+                try:
+                    await pb_client.pb_patch(
+                        f"/api/collections/bulk_sends/records/{bulk_id}",
+                        {"is_done": True},
+                    )
+                except Exception as exc:
+                    logger.warning("B15-Worker: is_done-patch %s fehlgeschlagen: %s",
+                                   bulk_id, exc)
+                continue
+
+            picks: list[dict] = []
+            for r in recipients:
+                if r.get("status") != "queued":
+                    continue
+                due = _parse_pb_dt(r.get("next_attempt_at"))
+                if due is not None and due > now:
+                    continue
+                # Lease setzen, damit der Worker nicht in einem Folgetick neu pickt,
+                # wenn _do_send_job länger braucht.
+                r["next_attempt_at"] = lease_str
+                picks.append(r)
+
+            if not picks:
+                continue
+
+            try:
+                await pb_client.pb_patch(
+                    f"/api/collections/bulk_sends/records/{bulk_id}",
+                    {"recipients": recipients},
+                )
+            except Exception as exc:
+                logger.warning("B15-Worker: lease-patch %s fehlgeschlagen: %s",
+                               bulk_id, exc)
+                continue
+
+        # Sub-Jobs außerhalb des Locks starten (Lock ist nur fürs PB-Patch).
+        attachments = attachments_by_bulk.get(bulk_id) or []
+        for r in picks:
+            sub_data = _build_resume_sub_data(fresh, r)
+            job_id = r.get("job_id") or str(_uuid_mod.uuid4())
+            existing = _send_jobs.get(job_id) or {}
+            existing.update({
+                "status": "sending",
+                "to": sub_data["to"],
+                "subject": sub_data["subject"],
+                "bulk_send_id": bulk_id,
+            })
+            _send_jobs[job_id] = existing
+            asyncio.create_task(_do_send_job(job_id, sub_data, attachments))
+
+
+async def _bulk_worker_loop(attachments_by_bulk: dict[str, list]) -> None:
+    """Läuft endlos: pickt alle BULK_WORKER_INTERVAL_SECONDS fällige Empfänger."""
+    while True:
+        try:
+            await _bulk_worker_tick(attachments_by_bulk)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("B15-Worker-Tick fehlgeschlagen")
+        try:
+            await asyncio.sleep(BULK_WORKER_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            raise
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Mailflow backend...")
@@ -150,6 +393,11 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     await idle_manager.start()
     upload_cleanup_task = asyncio.create_task(_cleanup_temp_uploads_loop())
+
+    # B15: vor Worker-Start einmalig has_attachments-Bulks abräumen, dann
+    # Worker-Loop für offene queued-Empfänger starten.
+    await _bulk_restart_cleanup()
+    bulk_worker_task = asyncio.create_task(_bulk_worker_loop(_bulk_attachments_by_id))
 
     if settings.QDRANT_URL:
         try:
@@ -168,8 +416,11 @@ async def lifespan(app: FastAPI):
     logger.info("Mailflow backend ready")
     yield
     upload_cleanup_task.cancel()
+    bulk_worker_task.cancel()
     with suppress(asyncio.CancelledError):
         await upload_cleanup_task
+    with suppress(asyncio.CancelledError):
+        await bulk_worker_task
     await idle_manager.stop()
     stop_scheduler()
     stop_token_refresh()
@@ -1000,42 +1251,6 @@ async def send_email_endpoint(data: dict, token: str = Depends(pb_user_auth.get_
 _EMAIL_RE = re.compile(r"^[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}$")
 
 
-async def _do_bulk_send(bulk_id: str, jobs: list[dict], base_data: dict,
-                       attachments: list, delay_seconds: float) -> None:
-    """Startet die Einzel-Sendejobs sequentiell mit ``delay_seconds`` Abstand.
-
-    Jeder Sub-Job nutzt ``_do_send_job`` wie ein normaler Versand — d.h. die
-    bestehenden SSE-Events (``send-result``) feuern pro Empfänger.
-    """
-    logger.info("Bulk-Send %s gestartet: %d Empfänger, Abstand %.1fs",
-                bulk_id, len(jobs), delay_seconds)
-    for idx, job in enumerate(jobs):
-        if idx > 0:
-            await asyncio.sleep(delay_seconds)
-        job_id = job["job_id"]
-        recipient = job["to"]
-
-        # Pro-Empfänger-Kopie: nur der erste Sub-Job darf Draft löschen und
-        # das Original als beantwortet markieren. Attachments-IDs werden in
-        # allen Sub-Jobs entfernt, damit der erste nicht die Datei-Refs
-        # für die nachfolgenden killt — Bulk-Cleanup übernehmen wir am Ende.
-        sub_data = dict(base_data)
-        sub_data["to"] = recipient
-        sub_data["attachment_ids"] = []
-        if idx > 0:
-            sub_data.pop("draft_id", None)
-            sub_data.pop("in_reply_to_email_id", None)
-
-        _send_jobs[job_id]["status"] = "sending"
-        # bewusst nicht awaiten: nächste Mail soll nach delay_seconds starten,
-        # unabhängig davon ob der vorherige Sub-Job schon fertig ist.
-        asyncio.create_task(_do_send_job(job_id, sub_data, attachments))
-
-    # Attachments einmalig am Ende aus den Temp-Uploads entfernen
-    for aid in base_data.get("_bulk_attachment_ids") or []:
-        _temp_uploads.pop(aid, None)
-
-
 @app.post("/emails/bulk-send")
 async def bulk_send_endpoint(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     """Versendet dieselbe E-Mail einzeln an viele Empfänger mit Zeitversatz.
@@ -1044,9 +1259,10 @@ async def bulk_send_endpoint(data: dict, token: str = Depends(pb_user_auth.get_u
       - ``recipients``: list[str] — eine E-Mail-Adresse pro Eintrag
       - ``delay_seconds``: float (default 5.0) — Abstand zwischen den Mails
 
-    accounts-Read läuft im User-Kontext; der bulk_sends-Audit-Record und der
-    Background-Versand (`_do_bulk_send` → `_do_send_job`) nutzen weiterhin
-    Admin-Token (bulk_sends-Collection wird in Phase 3e migriert).
+    B15: Versand-Zustand lebt in ``bulk_sends.recipients[i]`` mit ``next_attempt_at``
+    pro Empfänger. Der ``_bulk_worker_loop`` (lifespan) pollt diese Einträge und
+    spawned ``_do_send_job``. accounts-Read läuft im User-Kontext; der
+    bulk_sends-Audit-Record und der Worker-Versand nutzen Admin-Token.
     """
     recipients_raw = data.get("recipients") or []
     if not isinstance(recipients_raw, list) or not recipients_raw:
@@ -1093,15 +1309,21 @@ async def bulk_send_endpoint(data: dict, token: str = Depends(pb_user_auth.get_u
 
     attachment_ids = data.get("attachment_ids") or []
     attachments = [_temp_uploads[aid] for aid in attachment_ids if aid in _temp_uploads]
+    has_attachments = bool(attachments)
 
-    # Aussendung als persistenten Audit-Record anlegen (für Historie + Re-Send + Bounce-Match)
-    from datetime import datetime, timezone
+    # Pro Empfänger: job_id, next_attempt_at = jetzt + idx*delay.
+    # Persistiert in bulk_sends.recipients[]; Worker pickt darüber.
+    bulk_id = str(_uuid_mod.uuid4())
+    start_at = datetime.now(timezone.utc)
     pb_recipients: list[dict] = []
-    for raw in recipients:
+    jobs: list[dict] = []
+    for idx, raw in enumerate(recipients):
         m = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", raw)
         email_l = m.group(0).lower() if m else raw.lower()
         name_m = re.match(r'^(.+?)\s*<', raw.strip())
         rec_name = name_m.group(1).strip().strip('"') if name_m else ""
+        job_id = str(_uuid_mod.uuid4())
+        next_at = start_at + timedelta(seconds=idx * delay_seconds)
         pb_recipients.append({
             "email": email_l,
             "name": rec_name,
@@ -1110,14 +1332,17 @@ async def bulk_send_endpoint(data: dict, token: str = Depends(pb_user_auth.get_u
             "message_id": None,
             "error": None,
             "sent_at": None,
+            "next_attempt_at": _format_pb_dt(next_at),
+            "job_id": job_id,
         })
+        jobs.append({"job_id": job_id, "to": raw})
 
-    bulk_send_id = None
     try:
         acc = await pb_client.pb_get_as(token, f"/api/collections/accounts/records/{from_account}")
         from_email = acc.get("from_email") or ""
     except Exception:
         from_email = ""
+
     try:
         bulk_send_rec = await pb_client.pb_post(
             "/api/collections/bulk_sends/records",
@@ -1128,46 +1353,40 @@ async def bulk_send_endpoint(data: dict, token: str = Depends(pb_user_auth.get_u
                 "smtp_server": smtp_server,
                 "body_html": data.get("body_html") or "",
                 "body_text": data.get("body") or "",
-                "sent_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                "sent_at": _format_pb_dt(start_at),
                 "delay_seconds": delay_seconds,
                 "recipients": pb_recipients,
                 "total_count": len(pb_recipients),
                 "sent_count": 0,
                 "error_count": 0,
                 "bounced_count": 0,
+                "has_attachments": has_attachments,
+                "is_done": False,
             },
         )
         bulk_send_id = bulk_send_rec.get("id")
     except Exception as exc:
-        logger.warning("bulk_sends-Record konnte nicht angelegt werden: %s", exc)
+        # B15: ohne Audit-Record kann der Worker den Versand nicht treiben.
+        logger.error("bulk_sends-Record konnte nicht angelegt werden: %s", exc)
+        raise HTTPException(status_code=500,
+                            detail="Aussendung konnte nicht angelegt werden")
 
-    bulk_id = str(_uuid_mod.uuid4())
-    jobs: list[dict] = []
-    for recipient in recipients:
-        job_id = str(_uuid_mod.uuid4())
-        _send_jobs[job_id] = {
+    # Anhänge in den Prozess-State legen, damit der Worker sie pro Sub-Job mitgibt.
+    if attachments:
+        _bulk_attachments_by_id[bulk_send_id] = attachments
+
+    # SSE-Status pro Empfänger (Frontend hört auf job_id).
+    for job in jobs:
+        _send_jobs[job["job_id"]] = {
             "status": "queued",
-            "to": recipient,
+            "to": job["to"],
             "subject": subject,
             "bulk_id": bulk_id,
             "bulk_send_id": bulk_send_id,
         }
-        jobs.append({"job_id": job_id, "to": recipient})
-
-    base_data = dict(data)
-    base_data["from_account"] = from_account
-    base_data["smtp_server"]  = smtp_server
-    base_data["subject"]      = subject
-    base_data["cc"]           = ""  # CC ergibt bei N Einzel-Mails keinen Sinn
-    base_data.pop("to", None)
-    base_data["_bulk_attachment_ids"] = list(attachment_ids)
-    base_data["_bulk_send_id"] = bulk_send_id
 
     logger.info("Bulk-Send angelegt: bulk=%s, audit=%s, n=%d, delay=%.1fs, subject=%s",
                 bulk_id, bulk_send_id, len(jobs), delay_seconds, subject)
-
-    asyncio.create_task(_do_bulk_send(bulk_id, jobs, base_data,
-                                      attachments, delay_seconds))
 
     return {
         "bulk_id": bulk_id,
@@ -1211,7 +1430,6 @@ async def _bulk_record_recipient_result(
             return
         recipients = rec.get("recipients") or []
         found = False
-        from datetime import datetime as _dt, timezone as _tz
         for r in recipients:
             if (r.get("email") or "").strip().lower() == email_l:
                 r["status"] = status
@@ -1220,7 +1438,7 @@ async def _bulk_record_recipient_result(
                 if error is not None:
                     r["error"] = error
                 if status == "sent":
-                    r["sent_at"] = _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")
+                    r["sent_at"] = _format_pb_dt(datetime.now(timezone.utc))
                 found = True
                 break
         if not found:
@@ -1228,6 +1446,8 @@ async def _bulk_record_recipient_result(
         sent = sum(1 for r in recipients if r.get("status") == "sent")
         err = sum(1 for r in recipients if r.get("status") == "error")
         bounced = sum(1 for r in recipients if r.get("status") == "bounced")
+        total = rec.get("total_count") or len(recipients)
+        is_done = sent + err + bounced >= total
         try:
             await pb_client.pb_patch(
                 f"/api/collections/bulk_sends/records/{bulk_send_id}",
@@ -1236,10 +1456,15 @@ async def _bulk_record_recipient_result(
                     "sent_count": sent,
                     "error_count": err,
                     "bounced_count": bounced,
+                    "is_done": is_done,
                 },
             )
         except Exception as exc:
             logger.warning("bulk_sends %s update fehlgeschlagen: %s", bulk_send_id, exc)
+            return
+    # Außerhalb des Locks: bei is_done den In-Memory-Anhang-Cache freigeben.
+    if is_done:
+        _bulk_attachments_by_id.pop(bulk_send_id, None)
 
 
 @app.post("/emails/draft")

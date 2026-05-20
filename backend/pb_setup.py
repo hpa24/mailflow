@@ -165,6 +165,13 @@ async def setup_pocketbase_schema(token: str) -> None:
                 "CREATE INDEX IF NOT EXISTS idx_emails_account_folder_read_date ON emails (account, folder, is_read, date_sent DESC)",
             ])
 
+        # B15: has_attachments + is_done für Worker (Resume-Logik + Poll-Filter).
+        if "bulk_sends" in existing:
+            await _add_missing_fields(client, headers, "bulk_sends", existing["bulk_sends"], [
+                _field("has_attachments", "bool"),
+                _field("is_done", "bool"),
+            ])
+
     logger.info("PocketBase schema setup complete")
 
 
@@ -643,13 +650,20 @@ def _bulk_sends_schema(accounts_id: str) -> dict:
             _field("body_text", "text", max=MAX_UNLIMITED),
             _field("sent_at", "date"),
             _field("delay_seconds", "number"),
-            # recipients: [{email, name, status, message_id, error, sent_at}]
+            # recipients: [{email, name, raw, status, message_id, error, sent_at, next_attempt_at}]
             # status ∈ queued|sent|error|bounced
+            # next_attempt_at: ISO-Datum, ab wann der Worker diesen Empfänger versenden darf (B15).
             _field("recipients", "json", maxSize=5_000_000),
             _field("total_count", "number"),
             _field("sent_count", "number"),
             _field("error_count", "number"),
             _field("bounced_count", "number"),
+            # B15: True, wenn der Versand Anhänge hatte. Bei Backend-Restart räumt der
+            # Worker offene Empfänger solcher Aussendungen auf (Anhänge sind in-memory).
+            _field("has_attachments", "bool"),
+            # B15: True, wenn alle Empfänger terminal (sent/error/bounced) sind.
+            # Worker filtert is_done!=true und überspringt fertige Aussendungen.
+            _field("is_done", "bool"),
         ],
     }
 
