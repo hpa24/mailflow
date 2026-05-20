@@ -10,9 +10,10 @@
 - ✅ A7, A13, B8, B12 — Hardening-Quartett (Commit `e2e7cff`)
 - ✅ C5 — Config-Strategie (mit A1.8-Cleanup)
 - ✅ C1 / C3 / C4 — jeweils Phase 1 (Commit `e2ad2da`): Webhook-Router raus, `imap_session(acc)`-Context-Manager, `webhooks.js` raus aus `inbox.js`
+- ✅ A10 — Admin-Endpoints mit separatem `ADMIN_API_KEY` (Commit `fd816a1`): `X-Admin-Key`-Check in Middleware, PB-Bearer reicht für `/admin/*` nicht mehr
 
 **Offen — nächster Chat startet hier:**
-- A10, A11 (Admin-Endpoints + PB-Superuser-Trennung)
+- A11 (PB-Superuser-Trennung)
 - B9, B14, B15 (BODYSTRUCTURE / Temp-Upload-TTL / Bulk-Jobs persistent)
 - C1 / C3 / C4 — jeweils Phase 2 (weitere Router, ImapService-Klasse, weitere JS-Module)
 - C2 (Pydantic-Request-Modelle, verteilt)
@@ -48,11 +49,13 @@ Reihenfolge nach Priorität: **Security zuerst, dann Robustheit, dann Architektu
 
 **Plan:** Globaler Handler liefert generisch `{"detail": "Interner Fehler", "ref": "<uuid>"}`. Volle Exception + UUID nur ins Backend-Log. Bekannte `HTTPException` mit explizitem Status bleiben durchgereicht.
 
-### A10 — Admin-Endpoints abgrenzen
+### A10 — Admin-Endpoints abgrenzen ✅ (2026-05-20, live + smoke-getestet)
 
-**Problem:** `/admin/backfill-imap-uids`, `/admin/embed-backfill`, `/admin/embed-search` hängen am gleichen API-Key wie die normalen User-Calls. Frontend-Key-Kompromittierung öffnet Admin-Funktionen mit.
+**Problem:** `/admin/backfill-imap-uids`, `/admin/embed-backfill`, `/admin/embed-search`, `/admin/embed-status` hingen am gleichen PB-Bearer wie die normalen User-Calls. Frontend-Token-Kompromittierung hätte Admin-Funktionen mit geöffnet.
 
-**Plan:** Separater `ADMIN_API_KEY` (eigene env-Var) **oder** PB-Rollen-Check (`role == "admin"`) auf `/admin/*`. Bei Wahl B braucht es das Rollen-Konzept aus A11.
+**Umsetzung:** Separater `ADMIN_API_KEY` (env, im Coolify gesetzt). Auth-Middleware kurz-schliesst `/admin/*` mit timing-safem `X-Admin-Key`-Check (`_secrets.compare_digest`) **vor** der PB-Bearer-Prüfung. PB-Bearer reicht für `/admin/*` nicht mehr. Leere Env → 503 statt stiller Durchlass. PB-Rollen-Variante zurückgestellt — käme mit A11 (PB-Superuser-Trennung), bleibt für später als zweite Schicht denkbar.
+
+**Smoke-Test:** kein Header → 401, falscher Key → 401, korrekter Key → 200, Bearer-only auf `/admin/*` → 401, `/health` unverändert 200.
 
 ### A11 — PB-Superuser-Token als Single Point of Failure
 
