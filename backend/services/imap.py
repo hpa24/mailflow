@@ -12,7 +12,9 @@ Jeder Methodenaufruf öffnet eine eigene IMAP-Verbindung (kein Connection-Pool).
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
+import quopri
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Iterator
@@ -53,6 +55,112 @@ async def run_blocking(fn, *args, **kwargs):
     kapselt das einheitlich.
     """
     return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+# ----------------------------------------------------------------------
+# BODYSTRUCTURE-Parser (B9: gezielte Anhang-Fetches statt komplettem BODY[])
+# ----------------------------------------------------------------------
+
+def _bs_str(v) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, bytes):
+        return v.decode("utf-8", errors="replace")
+    return str(v)
+
+
+def _bs_params(params) -> dict:
+    """IMAPClient liefert Content-Type-Parameter als flache Tuple-Liste
+    `(b'NAME', b'foo.pdf', b'CHARSET', b'utf-8')`. In ein dict umwandeln."""
+    if not params:
+        return {}
+    items = list(params)
+    d: dict = {}
+    for i in range(0, len(items) - 1, 2):
+        k = _bs_str(items[i]).lower()
+        v = _bs_str(items[i + 1])
+        if k:
+            d[k] = v
+    return d
+
+
+def _walk_bodystructure(bs, prefix: str = ""):
+    """Yield (part_id, info) für jedes Leaf einer IMAPClient-BODYSTRUCTURE,
+    Depth-First, kompatibel zur Reihenfolge von email.message.Message.walk().
+
+    `info` enthält: maintype, subtype, params, content_id, encoding, size,
+    disposition, disposition_params.
+    """
+    # Multipart: erstes Element ist selbst ein Tupel (Subpart-BodyData)
+    if len(bs) > 0 and isinstance(bs[0], tuple):
+        idx = 1
+        for elem in bs:
+            if isinstance(elem, tuple):
+                sub_id = f"{prefix}.{idx}" if prefix else str(idx)
+                yield from _walk_bodystructure(elem, sub_id)
+                idx += 1
+            else:
+                break
+        return
+
+    part_id = prefix or "1"
+    maintype = _bs_str(bs[0]).lower() if len(bs) > 0 else ""
+    subtype = _bs_str(bs[1]).lower() if len(bs) > 1 else ""
+    params = _bs_params(bs[2]) if len(bs) > 2 else {}
+    content_id = _bs_str(bs[3]).strip("<>") if len(bs) > 3 and bs[3] else ""
+    encoding = _bs_str(bs[5]).lower() if len(bs) > 5 and bs[5] else "7bit"
+    size = bs[6] if len(bs) > 6 and isinstance(bs[6], int) else 0
+
+    # Disposition-Tupel `(b'attachment', (b'FILENAME', b'foo.pdf'))` liegt in
+    # den Extension-Feldern hinter octets/text_lines. Position variiert je
+    # Server — daher von vorn durchsuchen, alles annehmen das wie ein
+    # 2-Tupel mit bekannter Disposition aussieht.
+    disposition = ""
+    disposition_params: dict = {}
+    for elem in list(bs)[7:]:
+        if isinstance(elem, tuple) and len(elem) == 2:
+            disp = _bs_str(elem[0]).lower()
+            if disp in ("attachment", "inline"):
+                disposition = disp
+                disposition_params = _bs_params(elem[1])
+                break
+
+    yield part_id, {
+        "maintype": maintype,
+        "subtype": subtype,
+        "params": params,
+        "content_id": content_id,
+        "encoding": encoding,
+        "size": size,
+        "disposition": disposition,
+        "disposition_params": disposition_params,
+    }
+
+
+def _decode_part_body(raw: bytes, encoding: str) -> bytes:
+    """Dekodiert die rohen Bytes eines IMAP-`BODY[<part-id>]`-Fetches anhand
+    des Content-Transfer-Encoding aus der BODYSTRUCTURE."""
+    enc = (encoding or "7bit").lower()
+    if enc == "base64":
+        try:
+            return base64.b64decode(raw, validate=False)
+        except Exception:
+            return raw
+    if enc in ("quoted-printable", "qp"):
+        try:
+            return quopri.decodestring(raw)
+        except Exception:
+            return raw
+    return raw
+
+
+def _is_attachment_leaf(info: dict) -> bool:
+    """Spiegelt mime_parser.extract_attachment_meta: Disposition=attachment
+    ODER Filename irgendwo vorhanden."""
+    if info["disposition"] == "attachment":
+        return True
+    fn = info["disposition_params"].get("filename") or info["params"].get("name")
+    return bool(fn)
 
 
 class ImapService:
@@ -105,25 +213,92 @@ class ImapService:
             logger.info("Draft in IMAP-Ordner '%s' gespeichert.", drafts_folder)
 
     # ------------------------------------------------------------------
-    # Attachments / Inline
+    # Attachments / Inline (B9: gezielt per BODYSTRUCTURE + BODY[<part-id>])
     # ------------------------------------------------------------------
     def fetch_attachment(self, folder: str, imap_uid: int, part_index: int) -> bytes:
-        """Lädt einen Anhang per IMAP. Aktuell BODY[] — wird in B9 auf BODYSTRUCTURE umgestellt."""
+        """Lädt einen Anhang. Holt zuerst BODYSTRUCTURE (~1 KB), bestimmt
+        die MIME-Part-ID des Nten Anhangs, fetcht dann nur diese Part. Fällt
+        auf `BODY[]` zurück, wenn BODYSTRUCTURE fehlt/unbrauchbar ist oder
+        der Index außerhalb liegt."""
         with imap_session(self.acc) as srv:
             srv.select_folder(folder, readonly=True)
-            data = srv.fetch([imap_uid], [b"BODY[]"])
-            raw = data.get(imap_uid, {}).get(b"BODY[]") or b""
+            meta = srv.fetch([imap_uid], [b"BODYSTRUCTURE"])
+            bs = meta.get(imap_uid, {}).get(b"BODYSTRUCTURE")
+            if not bs:
+                logger.warning("fetch_attachment: keine BODYSTRUCTURE für UID %s — Fallback BODY[]", imap_uid)
+                return self._fetch_attachment_full(srv, imap_uid, part_index)
 
+            attachments = [
+                (pid, info) for pid, info in _walk_bodystructure(bs)
+                if _is_attachment_leaf(info)
+            ]
+            if part_index < 0 or part_index >= len(attachments):
+                logger.warning(
+                    "fetch_attachment: part_index %s außerhalb (%d Anhänge laut BODYSTRUCTURE) — Fallback BODY[]",
+                    part_index, len(attachments),
+                )
+                return self._fetch_attachment_full(srv, imap_uid, part_index)
+
+            part_id, info = attachments[part_index]
+            body_key = f"BODY[{part_id}]".encode()
+            data = srv.fetch([imap_uid], [body_key])
+            raw = data.get(imap_uid, {}).get(body_key) or b""
+            logger.info(
+                "fetch_attachment: UID %s part %s (%d B raw, encoding=%s)",
+                imap_uid, part_id, len(raw), info["encoding"],
+            )
+            return _decode_part_body(raw, info["encoding"])
+
+    def fetch_inline(self, folder: str, imap_uid: int, cid: str) -> tuple[bytes, str]:
+        """Lädt ein Inline-Bild per Content-ID gezielt: BODYSTRUCTURE → Part
+        mit passender CID finden → nur diese Part fetchen. Fallback auf
+        `BODY[]` falls BODYSTRUCTURE keine passende CID liefert."""
+        cid_clean = cid.strip("<>")
+        with imap_session(self.acc) as srv:
+            srv.select_folder(folder, readonly=True)
+            meta = srv.fetch([imap_uid], [b"BODYSTRUCTURE"])
+            bs = meta.get(imap_uid, {}).get(b"BODYSTRUCTURE")
+            if not bs:
+                logger.warning("fetch_inline: keine BODYSTRUCTURE für UID %s — Fallback BODY[]", imap_uid)
+                return self._fetch_inline_full(srv, imap_uid, cid)
+
+            match = None
+            for part_id, info in _walk_bodystructure(bs):
+                if info["content_id"] and info["content_id"] == cid_clean:
+                    match = (part_id, info)
+                    break
+            if not match:
+                logger.warning("fetch_inline: CID %s nicht in BODYSTRUCTURE — Fallback BODY[]", cid_clean)
+                return self._fetch_inline_full(srv, imap_uid, cid)
+
+            part_id, info = match
+            body_key = f"BODY[{part_id}]".encode()
+            data = srv.fetch([imap_uid], [body_key])
+            raw = data.get(imap_uid, {}).get(body_key) or b""
+            payload = _decode_part_body(raw, info["encoding"])
+            mime_type = (
+                f"{info['maintype']}/{info['subtype']}"
+                if info["maintype"] else "application/octet-stream"
+            )
+            logger.info(
+                "fetch_inline: UID %s CID %s part %s (%d B raw, %s)",
+                imap_uid, cid_clean, part_id, len(raw), mime_type,
+            )
+            return payload, mime_type
+
+    # Fallback-Helfer (alter BODY[]-Pfad) für die Fälle, in denen
+    # BODYSTRUCTURE nicht funktioniert.
+    @staticmethod
+    def _fetch_attachment_full(srv, imap_uid: int, part_index: int) -> bytes:
+        data = srv.fetch([imap_uid], [b"BODY[]"])
+        raw = data.get(imap_uid, {}).get(b"BODY[]") or b""
         payload, _, _ = get_attachment_payload(raw, part_index)
         return payload
 
-    def fetch_inline(self, folder: str, imap_uid: int, cid: str) -> tuple[bytes, str]:
-        """Lädt ein Inline-Bild per Content-ID. Aktuell BODY[] — wird in B9 auf BODYSTRUCTURE umgestellt."""
-        with imap_session(self.acc) as srv:
-            srv.select_folder(folder, readonly=True)
-            data = srv.fetch([imap_uid], [b"BODY[]"])
-            raw = data.get(imap_uid, {}).get(b"BODY[]") or b""
-
+    @staticmethod
+    def _fetch_inline_full(srv, imap_uid: int, cid: str) -> tuple[bytes, str]:
+        data = srv.fetch([imap_uid], [b"BODY[]"])
+        raw = data.get(imap_uid, {}).get(b"BODY[]") or b""
         return get_inline_part_by_cid(raw, cid)
 
     # ------------------------------------------------------------------
