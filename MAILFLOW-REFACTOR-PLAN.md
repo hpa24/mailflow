@@ -17,9 +17,10 @@
 - ✅ A11 Phase 3b — Kontakte-Cluster (contacts/contact_groups): 7 User-Endpoints migriert, admin-Pfade (Import, IMAP-Upsert) dokumentiert (Commit `9494d00`).
 - ✅ A11 Phase 3c — Kleinkram-Cluster (5 Collections): 5 User-Endpoints migriert, Backend-Schreiber dokumentiert (Commit `dabf66c`).
 - ✅ A11 Phase 3d.1 — emails+attachments PB-Rules + 8 Read-Endpoints auf User-Token (Commit `6933cbe`). Signed-URL-Endpoints bleiben Admin.
+- ✅ A11 Phase 3d.2 — 9 emails-State-Writes migriert, `_update_folder_unread_count(token, …)` durchgereicht (Commit `f45fbca`).
 
 **Offen — nächster Chat startet hier:**
-- A11 Phase 3d.2 (State-Writes) → 3d.3 (Drafts+AI+Send) → 3e (Audit/Bulk)
+- A11 Phase 3d.3 (Drafts+AI+Send) → 3e (Audit/Bulk)
 - B9, B14, B15 (BODYSTRUCTURE / Temp-Upload-TTL / Bulk-Jobs persistent)
 - C1 / C3 / C4 — jeweils Phase 2 (weitere Router, ImapService-Klasse, weitere JS-Module)
 - C2 (Pydantic-Request-Modelle, verteilt)
@@ -87,7 +88,7 @@ Reihenfolge nach Priorität: **Security zuerst, dann Robustheit, dann Architektu
 - **3c — Kleinkram-Cluster ✅ (2026-05-20):** `folders`, `smtp_servers`, `triage_rules`, `spam_rules`, `response_patterns`. Alle 5 Rules je Collection auf `@request.auth.id != ""`. 5 User-Endpoints migriert (`GET /smtp-servers`, `GET /folders`, `GET /spam-rules`, `DELETE /spam-rules/{id}`, `POST /response-patterns`). Backend-Schreiber dokumentiert (`imap_sync._get_or_create_folder`, `spam_filter`, `smtp_sender`, `cleanup_folders`). Cross-emails-Endpoints (`/folders/counts`, `/ai/triage`, `/triage/example`, `_update_folder_unread_count`) verschoben auf 3d. FIXME im `smtp_servers`-Schema: GET-Endpoint reicht aktuell das `password`-Feld ohne `fields`-Filter durch — bestehende Lücke, separat zu adressieren.
 - **3d — Mails (laufend, in 3 Sub-Brocken):** `emails`, `attachments`. PB-Rules in 3d.1 vorgeschaltet (all-5 auf `@request.auth.id != ""`).
   - **3d.1 — Reads ✅ (2026-05-20):** 8 Read-Endpoints (`/search`, `/emails`, `/emails/threaded`, `/emails/by-sender`, `/emails/{id}`, `/emails/{id}/attachments`, `/folders/counts`, `/accounts/sent-today`) auf `pb_get_as`. Signed-URL-Endpoints (`/emails/{id}/inline`, `/attachments/{id}/download`) bleiben Admin (kein Bearer im URL). Commit `6933cbe`.
-  - **3d.2 — State-Writes (offen):** Mark-Read/-Unread, Move, Delete, Spam-Workflow (4), Category, Bulk-Read.
+  - **3d.2 — State-Writes ✅ (2026-05-20):** 9 Endpoints (`category`, `bulk/read`, `read`, `spam`/`unspam`, `spam-suggestion/{confirm,dismiss}`, `move`, `DELETE /emails/{id}`) auf `pb_*_as`. Helper `_update_folder_unread_count(token, …)` durchgereicht (8 Call-Sites). `delete_email` nutzt jetzt `pb_delete_as` statt direkten httpx-Call. Commit `f45fbca`.
   - **3d.3 — Drafts + AI + Send (offen):** Drafts (3), `/ai/triage`, `/ai/analyze`, `/ai/suggest`, `/triage/example`, `/emails/send`, `/emails/bulk-send`, Helper `_update_folder_unread_count` und `_do_send_job` hybrid behandeln.
 - **3e — Audit-/Bulk-Collections (offen):** `bulk_sends`, `webhook_logs`, `webhooks`. Backend schreibt (Bulk-Send-Status, Webhook-Log), User liest. Webhook-CRUD aus UI → user-token.
 
