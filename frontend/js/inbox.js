@@ -1227,6 +1227,10 @@ function buildEmailItem(email) {
     ? '<span class="attachment-clip" title="Anhang"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.99 8.83l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>'
     : '';
 
+  const inSpam = email.folder === 'Spam';
+  const spamQuickActions = inSpam ? '' : `
+      <button class="email-qa-btn qa-spam-vec" title="Spam – nur Vektor-Ähnlichkeit lernen">V</button>
+      <button class="email-qa-btn qa-spam-block" title="Spam – Vektor lernen + Absender blocken">B</button>`;
   item.innerHTML = `
     <div class="email-flags">
       <span class="flag-answered${email.is_answered ? ' active' : ''}" title="Beantwortet">↩</span>
@@ -1239,9 +1243,7 @@ function buildEmailItem(email) {
       <span class="email-subject" style="${indent}">${attachmentClip}<span class="email-subject-text">${escHtml(email.subject || '(kein Betreff)')}</span>${folderBadge}${aiBadge}</span>
     </div>
     <div class="email-quick-actions">
-      <button class="email-qa-btn qa-delete" title="Löschen">×</button>
-      <button class="email-qa-btn qa-spam-vec" title="Spam – nur Vektor-Ähnlichkeit lernen">V</button>
-      <button class="email-qa-btn qa-spam-block" title="Spam – Vektor lernen + Absender blocken">B</button>
+      <button class="email-qa-btn qa-delete" title="Löschen">×</button>${spamQuickActions}
     </div>
   `;
 
@@ -1249,14 +1251,20 @@ function buildEmailItem(email) {
     e.stopPropagation();
     deleteEmail(email, item);
   });
-  item.querySelector('.qa-spam-vec').addEventListener('click', e => {
-    e.stopPropagation();
-    spamEmail(email, item);
-  });
-  item.querySelector('.qa-spam-block').addEventListener('click', e => {
-    e.stopPropagation();
-    spamEmail(email, item, { blockSender: true });
-  });
+  const qaSpamVec = item.querySelector('.qa-spam-vec');
+  if (qaSpamVec) {
+    qaSpamVec.addEventListener('click', e => {
+      e.stopPropagation();
+      spamEmail(email, item);
+    });
+  }
+  const qaSpamBlock = item.querySelector('.qa-spam-block');
+  if (qaSpamBlock) {
+    qaSpamBlock.addEventListener('click', e => {
+      e.stopPropagation();
+      spamEmail(email, item, { blockSender: true });
+    });
+  }
 
   const ssbConfirm = item.querySelector('.ssb-confirm');
   if (ssbConfirm) {
@@ -1538,8 +1546,9 @@ async function openEmail(email, itemEl) {
   document.getElementById('btn-reply').style.display       = isDraft ? 'none' : '';
   document.getElementById('btn-forward').style.display     = isDraft ? 'none' : '';
   document.getElementById('btn-toggle-read').style.display = isDraft ? 'none' : '';
-  document.getElementById('btn-spam').style.display        = isDraft ? 'none' : '';
-  document.getElementById('btn-spam-block').style.display  = isDraft ? 'none' : '';
+  const _inSpam = email.folder === 'Spam';
+  document.getElementById('btn-spam').style.display        = (isDraft || _inSpam) ? 'none' : '';
+  document.getElementById('btn-spam-block').style.display  = (isDraft || _inSpam) ? 'none' : '';
 
   // KI-Suggest-Button: nur anzeigen wenn KI-Modus aktiv und kein Draft
   const kiSuggestBtn = document.getElementById('btn-ki-suggest');
@@ -3284,11 +3293,14 @@ document.addEventListener('contextmenu', e => {
   const email = state.emails.find(em => em.id === emailId);
   if (!email) return;
 
+  const spamItem = email.folder === 'Spam'
+    ? ''
+    : '<div class="ctx-item ctx-danger" data-action="spam">Als Spam markieren</div>';
   ctxMenu.innerHTML = `
     <div class="ctx-item ${email.is_read ? 'ctx-inactive' : ''}" data-action="mark-read">Als gelesen markieren</div>
     <div class="ctx-item ${!email.is_read ? 'ctx-inactive' : ''}" data-action="mark-unread">Als ungelesen markieren</div>
     <div class="ctx-item ctx-danger" data-action="delete">In Papierkorb</div>
-    <div class="ctx-item ctx-danger" data-action="spam">Als Spam markieren</div>
+    ${spamItem}
   `;
   ctxMenu.style.display = 'block';
   ctxMenu.style.left = posLeft;
@@ -3316,10 +3328,13 @@ document.addEventListener('contextmenu', e => {
     ctxMenu.style.display = 'none';
     deleteEmail(email, item);
   };
-  ctxMenu.querySelector('[data-action="spam"]').onclick = () => {
-    ctxMenu.style.display = 'none';
-    spamEmail(email, item);
-  };
+  const ctxSpam = ctxMenu.querySelector('[data-action="spam"]');
+  if (ctxSpam) {
+    ctxSpam.onclick = () => {
+      ctxMenu.style.display = 'none';
+      spamEmail(email, item);
+    };
+  }
 });
 
 // ── Detail-Tabs ──────────────────────────────────────────────
