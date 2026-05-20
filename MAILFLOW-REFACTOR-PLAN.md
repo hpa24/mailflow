@@ -2,6 +2,23 @@
 
 **Quelle:** GPT-Codereview vom 2026-05-20 (zusammen mit Stefan). Ergänzend zu den vier sofortigen Security-Fixes (Commits `e137884`, `e4659bf`, `940b24b`, `182241d` am 2026-05-20).
 
+## Status (Stand 2026-05-20 abend)
+
+**Erledigt, live, smoke-getestet:**
+- ✅ A1 — Auth-Modell-Umbau (Commits `9b64ee3` + `77592ea`)
+- ✅ A6 — Rate-Limits (Commit `edd4eb3`)
+- ✅ A7, A13, B8, B12 — Hardening-Quartett (Commit `e2e7cff`)
+- ✅ C5 — Config-Strategie (mit A1.8-Cleanup)
+- ✅ C1 / C3 / C4 — jeweils Phase 1 (Commit `e2ad2da`): Webhook-Router raus, `imap_session(acc)`-Context-Manager, `webhooks.js` raus aus `inbox.js`
+
+**Offen — nächster Chat startet hier:**
+- A10, A11 (Admin-Endpoints + PB-Superuser-Trennung)
+- B9, B14, B15 (BODYSTRUCTURE / Temp-Upload-TTL / Bulk-Jobs persistent)
+- C1 / C3 / C4 — jeweils Phase 2 (weitere Router, ImapService-Klasse, weitere JS-Module)
+- C2 (Pydantic-Request-Modelle, verteilt)
+
+Lessons aus den erledigten Schritten stehen als Checkliste für neue Web-Apps in `Wissen/20_Apps/_shared/sicherheit.md` (Abschnitt `#backend-patterns`).
+
 Reihenfolge nach Priorität: **Security zuerst, dann Robustheit, dann Architektur/Cleanup**. Jeder Punkt = ein abschließbarer Block. Bei größeren Punkten Teil-Schritte einplanen.
 
 ---
