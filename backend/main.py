@@ -10,9 +10,11 @@ from fastapi import FastAPI, BackgroundTasks, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
+
+from rate_limit import limiter
+from routers import webhooks as webhooks_router
+from services.imap import imap_session
 
 import asyncio
 import json
@@ -146,10 +148,8 @@ def _parse_cors_origins(raw: str) -> list[str]:
 
 app = FastAPI(title="Mailflow API", lifespan=lifespan)
 
-# Rate-Limiter: In-Memory (Single-Worker-Setup), Key = Client-IP.
-# Schützt Webhook-Send + Kontakt-Import gegen Spam/Brute-Force.
-limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
+app.include_router(webhooks_router.router)
 
 
 @app.exception_handler(RateLimitExceeded)
@@ -1249,19 +1249,12 @@ async def sync_draft_to_imap(draft_id: str):
 def _imap_append_draft(acc: dict, msg_bytes: bytes, message_id: str = None) -> None:
     """Blockierender IMAP APPEND in den Drafts-Ordner.
     Löscht vorher eine alte Version mit gleicher Message-ID (verhindert Duplikate)."""
-    from imapclient import IMAPClient
     from datetime import datetime, timezone
 
-    host     = acc.get("imap_host")
-    port     = int(acc.get("imap_port") or 993)
-    user     = acc.get("imap_user")
-    password = acc.get("imap_pass")
-
-    if not all([host, user, password]):
+    if not all([acc.get("imap_host"), acc.get("imap_user"), acc.get("imap_pass")]):
         raise ValueError("Unvollständige IMAP-Zugangsdaten")
 
-    with IMAPClient(host, port=port, ssl=True) as srv:
-        srv.login(user, password)
+    with imap_session(acc) as srv:
         drafts_folder = find_imap_folder(srv, [b"\\Drafts", b"\\Draft"], ["Drafts", "Draft", "Entwürfe", "INBOX.Drafts"])
         if not drafts_folder:
             raise ValueError("Kein Drafts-Ordner auf dem IMAP-Server gefunden")
@@ -1371,16 +1364,9 @@ async def download_attachment(attachment_id: str):
 
 def _imap_fetch_attachment(acc: dict, folder: str, imap_uid: int, part_index: int) -> bytes:
     """Blockierende IMAP-Verbindung zum Download eines Anhangs."""
-    from imapclient import IMAPClient
     from mime_parser import get_attachment_payload
 
-    host = acc.get("imap_host")
-    port = int(acc.get("imap_port") or 993)
-    user = acc.get("imap_user")
-    password = acc.get("imap_pass")
-
-    with IMAPClient(host, port=port, ssl=True) as srv:
-        srv.login(user, password)
+    with imap_session(acc) as srv:
         srv.select_folder(folder, readonly=True)
         data = srv.fetch([imap_uid], [b"BODY[]"])
         raw = data.get(imap_uid, {}).get(b"BODY[]") or b""
@@ -1391,16 +1377,9 @@ def _imap_fetch_attachment(acc: dict, folder: str, imap_uid: int, part_index: in
 
 def _imap_fetch_inline_cid(acc: dict, folder: str, imap_uid: int, cid: str) -> tuple[bytes, str]:
     """Blockierende IMAP-Verbindung zum Abruf eines Inline-Bildes per Content-ID."""
-    from imapclient import IMAPClient
     from mime_parser import get_inline_part_by_cid
 
-    host = acc.get("imap_host")
-    port = int(acc.get("imap_port") or 993)
-    user = acc.get("imap_user")
-    password = acc.get("imap_pass")
-
-    with IMAPClient(host, port=port, ssl=True) as srv:
-        srv.login(user, password)
+    with imap_session(acc) as srv:
         srv.select_folder(folder, readonly=True)
         data = srv.fetch([imap_uid], [b"BODY[]"])
         raw = data.get(imap_uid, {}).get(b"BODY[]") or b""
@@ -1517,7 +1496,6 @@ async def bulk_mark_read(req: BulkReadRequest):
         return {"updated": 0}
 
     from collections import defaultdict
-    from imapclient import IMAPClient
     import concurrent.futures
 
     emails = [e.model_dump() for e in req.emails]
@@ -1553,8 +1531,7 @@ async def bulk_mark_read(req: BulkReadRequest):
     # 5. IMAP: eine Verbindung pro (Account, Ordner), blocking im Thread-Pool
     def _imap_bulk_set(acc: dict, folder: str, uids: list, is_read: bool) -> None:
         logger.info("IMAP bulk_set: folder='%s' uids=%s is_read=%s", folder, uids, is_read)
-        with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
-            srv.login(acc["imap_user"], acc["imap_pass"])
+        with imap_session(acc) as srv:
             try:
                 srv.select_folder(folder)
             except Exception as ex:
@@ -1716,9 +1693,7 @@ def _imap_search_by_msgid(srv, folder: str, message_id: str) -> int | None:
 def _imap_move_to_spam_sync(acc: dict, imap_uid: int, folder: str, message_id: str) -> tuple[str, int | None]:
     """Verschiebt im IMAP nach Junk/Spam-Folder; gibt immer den normierten UI-Namen 'Spam' zurück
     (analog zum Mapping in imap_sync._IMAP_FLAG_TO_STANDARD)."""
-    from imapclient import IMAPClient
-    with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
-        srv.login(acc["imap_user"], acc["imap_pass"])
+    with imap_session(acc) as srv:
         real_source = resolve_imap_path(srv, folder)
         srv.select_folder(real_source)
         spam = find_imap_folder(srv, [b"\\Junk", b"\\Spam"], ["Spam", "Junk", "Junk E-Mail", "INBOX.Spam", "INBOX.Junk"])
@@ -1803,9 +1778,7 @@ async def move_email(email_id: str, data: dict):
 
 
 def _imap_move_sync(acc: dict, imap_uid: int, source_folder: str, target_folder: str, message_id: str) -> int | None:
-    from imapclient import IMAPClient
-    with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
-        srv.login(acc["imap_user"], acc["imap_pass"])
+    with imap_session(acc) as srv:
         real_source = resolve_imap_path(srv, source_folder)
         real_target = resolve_imap_path(srv, target_folder)
         srv.select_folder(real_source)
@@ -1868,9 +1841,7 @@ async def delete_email(email_id: str):
 
 
 def _imap_trash_sync(acc: dict, imap_uid: int, folder: str, message_id: str) -> None:
-    from imapclient import IMAPClient
-    with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
-        srv.login(acc["imap_user"], acc["imap_pass"])
+    with imap_session(acc) as srv:
         real_source = resolve_imap_path(srv, folder)
         srv.select_folder(real_source)
         caps = srv.capabilities()
@@ -1918,7 +1889,6 @@ async def backfill_imap_uids():
     mit PocketBase abgleichen und abweichende imap_uid-Werte updaten.
     Läuft im Hintergrund (fire-and-forget via BackgroundTask ist hier synchron).
     """
-    from imapclient import IMAPClient
     import concurrent.futures
 
     accounts_data = await pb_client.pb_get("/api/collections/accounts/records", params={"perPage": 50})
@@ -1956,8 +1926,7 @@ async def backfill_imap_uids():
                 # IMAP: alle UIDs + Message-IDs für diesen Ordner holen (blocking, in Batches)
                 def _fetch_imap_uids(acc_dict, folder):
                     BATCH = 200
-                    with IMAPClient(acc_dict["imap_host"], port=int(acc_dict.get("imap_port") or 993), ssl=True) as srv:
-                        srv.login(acc_dict["imap_user"], acc_dict["imap_pass"])
+                    with imap_session(acc_dict) as srv:
                         srv.select_folder(folder, readonly=True)
                         uids = srv.search(["ALL"])
                         if not uids:
@@ -2357,9 +2326,7 @@ async def xano_user_info(email: str):
 # ---------------------------------------------------------------------------
 
 def _imap_set_read_sync(acc: dict, imap_uid: int, folder: str, is_read: bool) -> None:
-    from imapclient import IMAPClient
-    with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
-        srv.login(acc["imap_user"], acc["imap_pass"])
+    with imap_session(acc) as srv:
         srv.select_folder(resolve_imap_path(srv, folder))
         if is_read:
             srv.set_flags([imap_uid], [b"\\Seen"])
@@ -2393,7 +2360,6 @@ async def _imap_set_answered_safe(email: dict) -> None:
 
 async def _imap_set_answered(email: dict) -> None:
     """Setzt \\Answered-Flag auf dem IMAP-Server."""
-    from imapclient import IMAPClient
     account_id = email.get("account")
     imap_uid = email.get("imap_uid")
     folder = email.get("folder", "INBOX")
@@ -2404,190 +2370,14 @@ async def _imap_set_answered(email: dict) -> None:
     if acc is None:
         return
 
-    with IMAPClient(acc["imap_host"], port=int(acc.get("imap_port") or 993), ssl=True) as srv:
-        srv.login(acc["imap_user"], acc["imap_pass"])
+    with imap_session(acc) as srv:
         srv.select_folder(folder)
         srv.add_flags([imap_uid], [b"\\Answered"])
 
 
 # =========================================================================
-# Webhooks: externer Versand (Xano etc.) + Verwaltung
+# Webhooks: ausgelagert nach routers/webhooks.py
 # =========================================================================
-
-_WEBHOOK_SLUG_RE = re.compile(r"^[a-z0-9-]+$")
-
-
-async def _webhook_by_slug(slug: str) -> dict | None:
-    data = await pb_client.pb_get(
-        "/api/collections/webhooks/records",
-        params={"filter": f'slug={pb_client.pb_quote(slug)}', "perPage": 1},
-    )
-    items = data.get("items") or []
-    return items[0] if items else None
-
-
-async def _webhook_log(webhook_id: str, ip: str, status: str,
-                       to: str, subject: str,
-                       message_id: str = "", error: str = "") -> None:
-    try:
-        await pb_client.pb_post(
-            "/api/collections/webhook_logs/records",
-            {
-                "webhook": webhook_id,
-                "ip": ip[:64],
-                "status": status,
-                "to": to[:500],
-                "subject": subject[:500],
-                "message_id": message_id[:200],
-                "error": error[:2000],
-            },
-        )
-    except Exception as exc:
-        logger.error("webhook_log konnte nicht geschrieben werden: %s", exc)
-
-
-@app.post("/webhooks/{slug}/send")
-@limiter.limit("30/minute")
-async def webhook_send(slug: str, request: Request, data: dict):
-    """Externer Mail-Versand via Webhook.
-
-    Auth: Header ``X-Webhook-Key`` mit dem in der Webhook-Konfig gespeicherten
-    ``api_key``. Diese Route ist von der globalen Frontend-API-Key-Middleware
-    ausgenommen — jeder Webhook hat seinen eigenen Schlüssel.
-    """
-    if not _WEBHOOK_SLUG_RE.match(slug or ""):
-        raise HTTPException(status_code=400, detail="Ungültiger Slug")
-
-    wh = await _webhook_by_slug(slug)
-    if wh is None or not wh.get("is_active"):
-        # Bewusst gleicher Fehler wie 401 — verrät nicht ob Slug existiert
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    provided_key = request.headers.get("X-Webhook-Key", "")
-    if not provided_key or not _secrets.compare_digest(provided_key, wh.get("api_key") or ""):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    ip = request.client.host if request.client else ""
-
-    # To: payload überschreibt nur wenn erlaubt
-    payload_to = (data.get("to") or "").strip()
-    to = payload_to if (wh.get("allow_to_override") and payload_to) else (wh.get("default_to") or "").strip()
-    if not to:
-        await _webhook_log(wh["id"], ip, "error", "", "", error="Empfänger fehlt")
-        raise HTTPException(status_code=400, detail="Empfänger fehlt")
-
-    reply_to = (data.get("reply_to") or "").strip() if wh.get("allow_reply_to") else ""
-    cc = (data.get("cc") or "").strip() if wh.get("allow_cc") else ""
-
-    subject = (data.get("subject") or "").strip()
-    body = data.get("body") or ""
-    body_html = data.get("body_html") or ""
-
-    if not subject:
-        await _webhook_log(wh["id"], ip, "error", to, "", error="Betreff fehlt")
-        raise HTTPException(status_code=400, detail="Betreff fehlt")
-    if not body and not body_html:
-        await _webhook_log(wh["id"], ip, "error", to, subject, error="Body fehlt")
-        raise HTTPException(status_code=400, detail="Body fehlt")
-
-    try:
-        message_id = await smtp_send_email(
-            smtp_server_id=wh["smtp_server"],
-            from_account_id=wh["from_account"],
-            to=to,
-            cc=cc,
-            subject=subject,
-            body=body,
-            body_html=body_html,
-            reply_to=reply_to,
-            from_name_override=(wh.get("from_name_override") or "").strip(),
-        )
-    except Exception as exc:
-        logger.error("Webhook-Versand fehlgeschlagen (slug=%s): %s", slug, exc)
-        await _webhook_log(wh["id"], ip, "error", to, subject, error=str(exc))
-        raise HTTPException(status_code=502, detail=f"SMTP-Fehler: {exc}")
-
-    await _webhook_log(wh["id"], ip, "success", to, subject, message_id=message_id)
-    logger.info("Webhook-Versand OK: slug=%s to=%s message_id=%s", slug, to, message_id)
-    return {"status": "sent", "message_id": message_id}
-
-
-# ---- Verwaltung (hinter Frontend-API-Key-Middleware) ---------------------
-
-@app.get("/webhooks")
-async def webhooks_list():
-    data = await pb_client.pb_get(
-        "/api/collections/webhooks/records",
-        params={"perPage": 200, "sort": "-created"},
-    )
-    return data.get("items", [])
-
-
-@app.post("/webhooks")
-async def webhooks_create(data: dict):
-    name = (data.get("name") or "").strip()
-    slug = (data.get("slug") or "").strip().lower()
-    smtp_server = (data.get("smtp_server") or "").strip()
-    from_account = (data.get("from_account") or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="name fehlt")
-    if not _WEBHOOK_SLUG_RE.match(slug):
-        raise HTTPException(status_code=400, detail="slug ungültig (nur a-z, 0-9, -)")
-    if not smtp_server or not from_account:
-        raise HTTPException(status_code=400, detail="smtp_server und from_account erforderlich")
-
-    record = {
-        "name": name,
-        "slug": slug,
-        "smtp_server": smtp_server,
-        "from_account": from_account,
-        "default_to": (data.get("default_to") or "").strip(),
-        "from_name_override": (data.get("from_name_override") or "").strip(),
-        "allow_to_override": bool(data.get("allow_to_override", True)),
-        "allow_reply_to": bool(data.get("allow_reply_to", True)),
-        "allow_cc": bool(data.get("allow_cc", False)),
-        "is_active": bool(data.get("is_active", True)),
-        "api_key": "whk_" + _secrets.token_urlsafe(32),
-    }
-    return await pb_client.pb_post("/api/collections/webhooks/records", record)
-
-
-@app.get("/webhooks/{webhook_id}/logs")
-async def webhooks_logs(webhook_id: str, limit: int = 100):
-    limit = max(1, min(int(limit), 500))
-    data = await pb_client.pb_get(
-        "/api/collections/webhook_logs/records",
-        params={
-            "filter": f'webhook={pb_client.pb_quote(webhook_id)}',
-            "perPage": limit,
-            "sort": "-created",
-        },
-    )
-    return data.get("items", [])
-
-
-@app.patch("/webhooks/{webhook_id}")
-async def webhooks_update(webhook_id: str, data: dict):
-    allowed = {
-        "name", "slug", "smtp_server", "from_account", "default_to",
-        "from_name_override",
-        "allow_to_override", "allow_reply_to", "allow_cc", "is_active",
-    }
-    patch = {k: v for k, v in data.items() if k in allowed}
-    if "slug" in patch:
-        s = (patch["slug"] or "").strip().lower()
-        if not _WEBHOOK_SLUG_RE.match(s):
-            raise HTTPException(status_code=400, detail="slug ungültig")
-        patch["slug"] = s
-    if data.get("rotate_api_key"):
-        patch["api_key"] = "whk_" + _secrets.token_urlsafe(32)
-    return await pb_client.pb_patch(f"/api/collections/webhooks/records/{webhook_id}", patch)
-
-
-@app.delete("/webhooks/{webhook_id}")
-async def webhooks_delete(webhook_id: str):
-    await pb_client.pb_delete(f"/api/collections/webhooks/records/{webhook_id}")
-    return {"status": "deleted"}
 
 
 # ---------------------------------------------------------------------------

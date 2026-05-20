@@ -8,6 +8,7 @@ import pb_client
 from config import settings
 from fts import fts_insert
 from mime_parser import parse_email, extract_attachment_meta
+from services.imap import imap_session
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +74,7 @@ async def sync_account(account: dict, full_import: bool = False) -> None:
 
     logger.info(f"Syncing account {account_id} ({imap_user}) full={full_import}")
 
-    with IMAPClient(imap_host, port=imap_port, ssl=True) as server:
-        server.login(imap_user, imap_pass)
+    with imap_session(account) as server:
         folders = server.list_folders()
         folder_names = [f[2] for f in folders]
 

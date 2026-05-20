@@ -12,6 +12,7 @@ from imapclient import IMAPClient
 import pb_client
 from config import settings
 from fts import fts_rebuild
+from services.imap import imap_session
 
 logger = logging.getLogger(__name__)
 
@@ -74,12 +75,7 @@ async def _run_backfill() -> None:
 
 
 async def _backfill_account(account: dict) -> None:
-    with IMAPClient(
-        account["imap_host"],
-        port=int(account.get("imap_port") or 993),
-        ssl=True,
-    ) as server:
-        server.login(account["imap_user"], account["imap_pass"])
+    with imap_session(account) as server:
         folder_names = [f[2] for f in server.list_folders()]
         if "INBOX" not in folder_names:
             folder_names.insert(0, "INBOX")
@@ -215,13 +211,7 @@ async def _html_backfill_account(account: dict, parse_email_fn) -> int:
         by_folder.setdefault(e.get("folder") or "INBOX", []).append(e)
 
     updated = 0
-    with IMAPClient(
-        account["imap_host"],
-        port=int(account.get("imap_port") or 993),
-        ssl=True,
-    ) as server:
-        server.login(account["imap_user"], account["imap_pass"])
-
+    with imap_session(account) as server:
         for folder, emails in by_folder.items():
             try:
                 server.select_folder(folder, readonly=True)

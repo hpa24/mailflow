@@ -173,18 +173,12 @@ def _send_smtp(
 
 def _imap_append_sent(acc: dict, msg_bytes: bytes) -> None:
     """Hängt die gesendete E-Mail per IMAP APPEND in den Sent-Ordner."""
-    from imapclient import IMAPClient
+    from services.imap import imap_session
 
-    host = acc.get("imap_host")
-    port = int(acc.get("imap_port") or 993)
-    user = acc.get("imap_user")
-    password = acc.get("imap_pass")
-
-    if not all([host, user, password]):
+    if not all([acc.get("imap_host"), acc.get("imap_user"), acc.get("imap_pass")]):
         return
 
-    with IMAPClient(host, port=port, ssl=True) as srv:
-        srv.login(user, password)
+    with imap_session(acc) as srv:
         sent = find_imap_folder(srv, [b"\\Sent"], ["Sent", "Sent Items", "Sent Messages", "INBOX.Sent"])
         if sent:
             srv.append(
