@@ -240,10 +240,16 @@ function startAutoRefresh() {
 }
 
 function startEventSource() {
-  const url = apiEventSourceUrl();
   let es = null;
 
-  function connect() {
+  async function connect() {
+    let url;
+    try {
+      url = await apiEventSourceUrl();
+    } catch (_) {
+      setTimeout(connect, 10_000);
+      return;
+    }
     es = new EventSource(url);
 
     es.onmessage = async (e) => {
@@ -1643,10 +1649,17 @@ async function openEmail(email, itemEl) {
       });
       cleanup.observe(document.body, { childList: true, subtree: true });
 
-      // cid:-Referenzen durch Backend-Proxy ersetzen
-      htmlToRender = htmlToRender.replace(/src=["']cid:([^"']+)["']/gi, (_, cid) =>
-        `src="${api.inlineImageUrl(full.id, cid)}"`
-      );
+      // cid:-Referenzen durch Backend-Proxy ersetzen — URLs vorher signieren (parallel)
+      const cids = [...new Set([...htmlToRender.matchAll(/src=["']cid:([^"']+)["']/gi)].map(m => m[1]))];
+      if (cids.length) {
+        const signedByCid = {};
+        await Promise.all(cids.map(async (cid) => {
+          try { signedByCid[cid] = await api.inlineImageUrl(full.id, cid); } catch (_) {}
+        }));
+        htmlToRender = htmlToRender.replace(/src=["']cid:([^"']+)["']/gi, (m, cid) =>
+          signedByCid[cid] ? `src="${signedByCid[cid]}"` : m
+        );
+      }
       _activeIframe = iframe;
       _activeIframeBaseHtml = htmlToRender;
       iframe.srcdoc = _withZoom(htmlToRender);
@@ -2244,11 +2257,11 @@ async function loadAttachments(email) {
     const data = await api.getAttachments(email.id);
     const items = data.items || [];
     if (!items.length) return;
+    // Chips ohne href bauen, URL on-click frisch signieren (Token-TTL nur 5min — nicht beim Listen-Render verbrennen)
     items.forEach(att => {
-      const url = api.attachmentDownloadUrl(att.id);
       const chip = document.createElement('a');
       chip.className = 'attachment-chip';
-      chip.href = url;
+      chip.href = '#';
       chip.target = '_blank';
       chip.rel = 'noopener noreferrer';
       chip.innerHTML = `
@@ -2256,6 +2269,15 @@ async function loadAttachments(email) {
         <span class="attachment-name" title="${escHtml(att.filename)}">${escHtml(att.filename)}</span>
         <span class="attachment-size">${formatBytes(att.size_bytes || 0)}</span>
       `;
+      chip.addEventListener('click', async (ev) => {
+        ev.preventDefault();
+        try {
+          const url = await api.attachmentDownloadUrl(att.id);
+          window.open(url, '_blank', 'noopener,noreferrer');
+        } catch (e) {
+          console.warn('attachment sign failed:', e);
+        }
+      });
       el.appendChild(chip);
     });
     el.style.display = 'flex';

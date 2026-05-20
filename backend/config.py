@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # Optionaler separater Key für externen Kontakt-Import (FileMaker, Xano etc.).
     # Wird per X-Import-Key-Header geprüft. Leer = nur globaler API_KEY akzeptiert.
     IMPORT_API_KEY: str = ""
+    # HMAC-Secret für kurzlebige signierte URLs (SSE, Attachments, Inline-Bilder).
+    # Im Coolify zufällig generieren — bei Rotation invalidieren alte Links sofort.
+    SIGN_SECRET: str = ""
     # Kommagetrennte Liste erlaubter CORS-Origins, z.B. "https://mailflow.barres.de"
     CORS_ORIGINS: str = "https://mailflow.barres.de"
     XANO_API_KEY: str = ""

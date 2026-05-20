@@ -1,0 +1,52 @@
+"""Validiert User-PB-Tokens gegen PocketBase mit In-Memory-Cache.
+
+Separat von pb_client.py, das den **Admin-Token** für Backend-Operationen verwaltet.
+Hier geht es um Tokens, die der Browser im Authorization-Header mitschickt.
+"""
+from __future__ import annotations
+
+import hashlib
+import time
+
+import httpx
+
+from config import settings
+
+
+_CACHE_TTL = 60  # Sekunden — kurz halten, PB-Logout soll spürbar werden
+_cache: dict[str, int] = {}  # token_hash -> cache_exp_epoch
+
+
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _gc(now: int) -> None:
+    if len(_cache) <= 500:
+        return
+    for k in [k for k, exp in _cache.items() if exp <= now]:
+        _cache.pop(k, None)
+
+
+async def validate(token: str) -> bool:
+    """True wenn PB den Token als gültig akzeptiert (mit 60s-Cache)."""
+    if not token:
+        return False
+    now = int(time.time())
+    h = _hash(token)
+    exp = _cache.get(h)
+    if exp and exp > now:
+        return True
+    try:
+        async with httpx.AsyncClient(base_url=settings.PB_URL, timeout=5) as client:
+            resp = await client.post(
+                "/api/collections/users/auth-refresh",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if resp.status_code == 200:
+            _cache[h] = now + _CACHE_TTL
+            _gc(now)
+            return True
+    except httpx.HTTPError:
+        pass
+    return False

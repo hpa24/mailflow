@@ -1,37 +1,14 @@
 const API = 'https://mailflow-api.barres.de';
 
-let API_KEY = '';
-let _apiKeyPromise = null;
-
-async function _loadApiKey() {
-  const authData = (typeof auth !== 'undefined') ? auth.getAuth() : null;
-  const pbToken = authData?.token;
-  if (!pbToken) return;
-  try {
-    const res = await fetch(`${API}/config.js`, {
-      headers: { 'Authorization': `Bearer ${pbToken}` },
-    });
-    if (res.status === 401 || res.status === 403) {
-      auth.logout();
-      return;
-    }
-    if (res.ok) {
-      const text = await res.text();
-      const m = text.match(/MAILFLOW_API_KEY='([^']*)'/);
-      if (m && m[1]) API_KEY = m[1];
-    }
-  } catch (_) {}
-}
-
-function _ensureApiKey() {
-  if (!_apiKeyPromise) _apiKeyPromise = _loadApiKey();
-  return _apiKeyPromise;
+function _bearer() {
+  const a = (typeof auth !== 'undefined') ? auth.getAuth() : null;
+  return a?.token ? `Bearer ${a.token}` : '';
 }
 
 async function apiFetch(path, options = {}) {
-  await _ensureApiKey();
-  if (API_KEY) {
-    options.headers = { 'X-API-Key': API_KEY, ...(options.headers || {}) };
+  const bearer = _bearer();
+  if (bearer) {
+    options.headers = { 'Authorization': bearer, ...(options.headers || {}) };
   }
   const res = await fetch(API + path, options);
   if (res.status === 401 || res.status === 403) {
@@ -52,10 +29,27 @@ function apiGet(path, params = {}) {
   return apiFetch(q ? `${path}?${q}` : path);
 }
 
-// EventSource-URL mit Key als Query-Parameter (Browser-API erlaubt keine Custom-Header)
+// Holt einen kurzlebigen signierten URL-Token vom Backend.
+// Für Stellen, die keine Authorization-Header senden können (EventSource, <img src>, <a href>).
+async function _signUrl(path, ttl = 300) {
+  const bearer = _bearer();
+  const res = await fetch(`${API}/sign`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(bearer ? { 'Authorization': bearer } : {}) },
+    body: JSON.stringify({ path, ttl }),
+  });
+  if (res.status === 401 || res.status === 403) {
+    auth.logout();
+    throw new Error('Nicht autorisiert');
+  }
+  if (!res.ok) throw new Error(`sign failed: ${res.status}`);
+  const data = await res.json();
+  return `${API}${path}?token=${encodeURIComponent(data.token)}`;
+}
+
+// EventSource-URL (signed). Browser-API erlaubt keine Custom-Header.
 function apiEventSourceUrl() {
-  const base = `${API}/events`;
-  return API_KEY ? `${base}?key=${encodeURIComponent(API_KEY)}` : base;
+  return _signUrl('/events', 600);
 }
 
 // POST/PATCH mit JSON-Body
@@ -118,8 +112,8 @@ window.api = {
   },
 
   getAttachments(emailId)        { return apiGet(`/emails/${emailId}/attachments`); },
-  attachmentDownloadUrl(id)      { return `${API}/attachments/${id}/download?key=${API_KEY}`; },
-  inlineImageUrl(emailId, cid)   { return `${API}/emails/${emailId}/inline?cid=${encodeURIComponent(cid)}&key=${API_KEY}`; },
+  attachmentDownloadUrl(id)      { return _signUrl(`/attachments/${id}/download`); },
+  inlineImageUrl(emailId, cid)   { return _signUrl(`/emails/${emailId}/inline?cid=${encodeURIComponent(cid)}`); },
   uploadAttachment(formData)     { return apiFetch('/attachments/upload', { method: 'POST', body: formData }); },
   deleteUpload(tempId)           { return apiFetch(`/attachments/upload/${tempId}`, { method: 'DELETE' }); },
 

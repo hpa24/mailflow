@@ -17,6 +17,8 @@ import json
 import pb_client
 from pb_client import start_token_refresh, stop_token_refresh
 import pb_setup
+import pb_user_auth
+import signed_url
 import rendering
 from backfill import run_once_if_needed, rebuild_fts_if_needed, backfill_html_once, run_embed_backfill, get_embed_state
 from config import settings
@@ -155,34 +157,52 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def _api_key_middleware(request: Request, call_next):
-    """Erzwingt API-Key-Auth auf allen Routen außer /health.
-    Wenn API_KEY in .env leer ist, ist Auth deaktiviert (lokale Entwicklung)."""
-    if request.url.path in ("/health", "/config.js") or request.method == "OPTIONS":
+async def _auth_middleware(request: Request, call_next):
+    """Auth-Reihenfolge:
+    1. Public/Exempt-Routen (health, config.js, OPTIONS, externe Webhook-Sends, X-Import-Key)
+    2. PB-User-Token (Authorization: Bearer <pb_token>) — validiert gegen PB
+    3. Signierte URL (?token=...) für SSE/Inline/Attachments (keine Header möglich)
+    4. Legacy: globaler API_KEY (X-API-Key oder ?key=) — wird mit A1.8 entfernt
+
+    Wenn API_KEY in .env leer UND kein anderer Mechanismus greift, ist Auth offen (lokale Entwicklung).
+    """
+    path = request.url.path
+    if path in ("/health", "/config.js") or request.method == "OPTIONS":
         return await call_next(request)
     # Externer Webhook-Send: eigener API-Key pro Webhook im Endpoint selbst
-    if request.url.path.startswith("/webhooks/") and request.url.path.endswith("/send"):
+    if path.startswith("/webhooks/") and path.endswith("/send"):
         return await call_next(request)
     # Kontakt-Import: akzeptiert zusätzlich X-Import-Key (für externe Quellen wie FileMaker)
-    if request.url.path == "/contacts/import" and settings.IMPORT_API_KEY:
+    if path == "/contacts/import" and settings.IMPORT_API_KEY:
         import_key = request.headers.get("X-Import-Key", "")
         if import_key == settings.IMPORT_API_KEY:
             return await call_next(request)
+
+    # PB-User-Token via Authorization-Header
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        pb_token = auth_header[7:]
+        if await pb_user_auth.validate(pb_token):
+            return await call_next(request)
+
+    # Signierte URL für Endpoints ohne Header-Möglichkeit (SSE/Inline/Attachments)
+    sig_token = request.query_params.get("token") or ""
+    if sig_token and signed_url.verify(sig_token, path):
+        return await call_next(request)
+
+    # Legacy: globaler API_KEY — Übergangsphase, entfällt mit A1.8
     expected = settings.API_KEY
     if not expected:
         return await call_next(request)
-    provided = (
-        request.headers.get("X-API-Key")
-        or request.query_params.get("key")
-        or ""
+    provided = request.headers.get("X-API-Key") or request.query_params.get("key") or ""
+    if provided == expected:
+        return await call_next(request)
+
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Unauthorized"},
+        headers={"Access-Control-Allow-Origin": request.headers.get("origin", "*")},
     )
-    if provided != expected:
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "Unauthorized"},
-            headers={"Access-Control-Allow-Origin": request.headers.get("origin", "*")},
-        )
-    return await call_next(request)
 
 
 @app.exception_handler(Exception)
@@ -227,6 +247,26 @@ async def embed_search(q: str, limit: int = 5):
     from vector_store import search_similar
     results = await search_similar(q, limit=limit)
     return {"query": q, "results": results}
+
+
+class SignRequest(BaseModel):
+    path: str
+    ttl: int = 300
+
+
+@app.post("/sign")
+async def sign_url(payload: SignRequest):
+    """Gibt einen kurzlebigen signierten URL-Token für genau diesen path zurück.
+    Frontend nutzt das für SSE-EventSource, Inline-Bilder und Attachment-Downloads —
+    Stellen, an denen keine Authorization-Header möglich sind.
+    Die Route selbst hängt an der Auth-Middleware (PB-Bearer oder Legacy-Key).
+    """
+    if not settings.SIGN_SECRET:
+        raise HTTPException(status_code=503, detail="SIGN_SECRET nicht konfiguriert")
+    if not payload.path.startswith("/"):
+        raise HTTPException(status_code=400, detail="path muss mit / beginnen")
+    token, exp = signed_url.sign(payload.path, payload.ttl)
+    return {"token": token, "exp": exp}
 
 
 @app.get("/config.js", include_in_schema=False)
