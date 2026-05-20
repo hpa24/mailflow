@@ -855,7 +855,9 @@ async function loadEmails(reset = false) {
       state.totalItems    = cached.totalItems;
       state.threadCount   = cached.threadCount;
       state.threadFirstSeen = cached.threadFirstSeen;
-      state.allLoaded     = true;
+      // allLoaded NICHT pauschal auf true setzen — sonst blockt Infinite-Scroll
+      // nach einem Cache-Hit, obwohl im Ordner noch mehr Mails liegen.
+      state.allLoaded     = cached.totalItems > 0 && cached.emails.length >= cached.totalItems;
       state.loadingMore   = false;
       state.page          = Math.ceil(cached.emails.length / PAGE_SIZE) + 1;
       state.activeEmailId = null;
@@ -911,6 +913,21 @@ async function loadEmails(reset = false) {
       state.totalItems = data.totalItems || 0;
       state.allLoaded = true;
       _addEmailBatch(data.items || [], reset);
+      updateListHeader();
+    } else if (!reset) {
+      // Infinite-Scroll: nächste Seite anhängen, NICHT die Stage-1/2/3-Logik
+      // durchlaufen (die ersetzt sonst die Liste via _addEmailBatch(..., true)
+      // und springt im Scroll nach oben).
+      const fetchFn = isFlatFolder()
+        ? fetchFlatEmails
+        : (state.groupMode === 'sender'
+            ? api.getEmailsBySender.bind(api)
+            : api.getThreadedEmails.bind(api));
+      const data = await fetchFn({ ...baseParams, page: state.page, limit: PAGE_SIZE });
+      if (myGen !== _loadGen) return;
+      _addEmailBatch(data.items || [], false);
+      state.page += 1;
+      if (!data.hasMore) state.allLoaded = true;
       updateListHeader();
     } else {
       const fetchFn = isFlatFolder()
