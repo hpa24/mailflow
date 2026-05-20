@@ -2891,7 +2891,8 @@ async function _sendBulk() {
   _editingDraftItemEl = null;
   closeCompose();
 
-  _bulkTracking = { byJobId: new Map(), byAddr: new Map(), compose: composeSnapshot };
+  _bulkTracking = { byJobId: new Map(), byAddr: new Map(), compose: composeSnapshot,
+                    bulkSendId: null, pollTimer: null };
   _openBulkStatusModal();
   await _bulkStart(recipients, composeSnapshot);
 }
@@ -2913,6 +2914,44 @@ async function _bulkStart(recipients, snapshot) {
     _bulkUpsertRow(j.to, { status: 'sending', error: null, jobId: j.job_id });
   });
   _bulkUpdateSummary();
+
+  // Polling-Fallback gegen SSE-Loss bei Backend-Restart (B15).
+  // SSE bleibt der primäre Realtime-Pfad; Polling holt nur verpasste
+  // Endstatus-Übergänge aus bulk_sends.recipients[] nach.
+  if (resp.bulk_send_id) {
+    _bulkTracking.bulkSendId = resp.bulk_send_id;
+    _bulkTracking.pollTimer = setInterval(_bulkPollOnce, 5_000);
+  }
+}
+
+async function _bulkPollOnce() {
+  if (!_bulkTracking || !_bulkTracking.bulkSendId) return;
+  let rec;
+  try {
+    rec = await api.bulkSends.get(_bulkTracking.bulkSendId);
+  } catch (_) {
+    return;  // Netzwerk wackelig — beim nächsten Tick erneut.
+  }
+  if (!_bulkTracking) return;  // Modal in der Zwischenzeit geschlossen
+  const recipients = rec.recipients || [];
+  for (const r of recipients) {
+    const addr = r.raw || r.email;
+    if (!addr) continue;
+    const cur = _bulkTracking.byAddr.get(addr);
+    const pbStatus = r.status;
+    let uiStatus = null;
+    let err = null;
+    if (pbStatus === 'sent')         uiStatus = 'success';
+    else if (pbStatus === 'bounced') { uiStatus = 'error'; err = r.error || 'Bounce'; }
+    else if (pbStatus === 'error')   { uiStatus = 'error'; err = r.error || 'Fehler'; }
+    if (uiStatus && (!cur || cur.status !== uiStatus)) {
+      _bulkUpsertRow(addr, { status: uiStatus, error: err });
+    }
+  }
+  _bulkUpdateSummary();
+  const allDone = Array.from(_bulkTracking.byAddr.values())
+    .every(r => r.status === 'success' || r.status === 'error');
+  if (allDone) _bulkFinalize();
 }
 
 function _bulkApplyResult(data) {
@@ -2985,6 +3024,10 @@ function _openBulkStatusModal() {
 
 function _bulkFinalize() {
   const hasErrors = Array.from(_bulkTracking.byAddr.values()).some(r => r.status === 'error');
+  if (_bulkTracking.pollTimer) {
+    clearInterval(_bulkTracking.pollTimer);
+    _bulkTracking.pollTimer = null;
+  }
   document.getElementById('bulk-status-close').style.display = '';
   document.getElementById('bulk-status-done').style.display = '';
   document.getElementById('bulk-status-retry').style.display = hasErrors ? '' : 'none';
@@ -2995,6 +3038,9 @@ function _closeBulkStatus() {
   const panel = document.getElementById('bulk-status-panel');
   panel.style.display = 'none';
   panel.classList.remove('minimized');
+  if (_bulkTracking && _bulkTracking.pollTimer) {
+    clearInterval(_bulkTracking.pollTimer);
+  }
   _bulkTracking = null;
 }
 
