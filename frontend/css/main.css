@@ -2355,7 +2355,62 @@ body[data-active-tab="contacts"]  #tab-contacts  { display: flex; align-items: c
 #templates-main[data-active-section="snippets"]  #section-snippets  { display: grid; }
 #templates-main[data-active-section="groups"]    #section-groups    { display: grid; }
 #templates-main[data-active-section="bulk_sends"] #section-bulk_sends { display: grid; }
-#templates-main[data-active-section="bounced"]   #section-bounced   { display: block; }
+#templates-main[data-active-section="bounced"]   #section-bounced   { display: flex; flex-direction: column; }
+
+/* Bouncte-Kontakte-Tabelle — Stil analog zu #variables-table */
+#section-bounced { padding: 16px 24px; gap: 12px; overflow-y: auto; }
+#bounced-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+#bounced-table thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text2);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+}
+#bounced-table tbody td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+#bounced-table tbody tr:hover { background: rgba(0,0,0,0.02); }
+#bounced-table .bounced-reason {
+  color: var(--text2);
+  font-size: 13px;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#bounced-table td:last-child { text-align: right; white-space: nowrap; }
+#bounced-table .row-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  padding: 5px 12px;
+  border-radius: 5px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  font-weight: 500;
+}
+#bounced-table .row-btn:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+#bounced-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text2);
+  font-size: 14px;
+}
 /* Variablen-Section behaelt ihren bisherigen Block-Layout-Look */
 #section-variables {
   padding: 24px 32px;
