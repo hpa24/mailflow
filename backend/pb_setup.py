@@ -98,11 +98,15 @@ async def setup_pocketbase_schema(token: str) -> None:
         }
         # A11 Phase 3d — emails + attachments. IMAP-Sync, spam_filter, scheduler usw.
         # schreiben weiterhin als Admin; Frontend nutzt User-Token für Reads/Marks/Moves.
+        # A11 Phase 3e — Audit/Bulk-Cluster: bulk_sends, webhooks, webhook_logs.
+        # User-CRUD via UI; Backend-Schreiber (webhook_send mit X-Webhook-Key,
+        # _do_send_job, _bulk_record_recipient_result) nutzen Admin.
         for _name in (
             "email_variables", "email_snippets", "email_templates",
             "contacts", "contact_groups",
             "folders", "smtp_servers", "triage_rules", "spam_rules", "response_patterns",
             "emails", "attachments",
+            "bulk_sends", "webhooks", "webhook_logs",
         ):
             if _name in existing:
                 await _ensure_rules(client, headers, _name, existing[_name], _cluster_rules)
@@ -619,11 +623,13 @@ def _bulk_sends_schema(accounts_id: str) -> dict:
     return {
         "name": "bulk_sends",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3e — Audit-Collection. User darf lesen/löschen; Backend (bulk_send_endpoint,
+        # _do_send_job, _bulk_record_recipient_result) schreibt als Admin.
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "indexes": [
             "CREATE INDEX IF NOT EXISTS idx_bulk_sends_sent_at ON bulk_sends (sent_at DESC)",
         ],
@@ -652,11 +658,13 @@ def _webhooks_schema(smtp_servers_id: str, accounts_id: str) -> dict:
     return {
         "name": "webhooks",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3e — User-CRUD via UI. _webhook_by_slug nutzt Admin
+        # (externer /webhooks/{slug}/send-Pfad mit X-Webhook-Key, kein User-Token).
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "indexes": [
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_webhooks_slug ON webhooks (slug)",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_webhooks_api_key ON webhooks (api_key)",
@@ -683,11 +691,12 @@ def _webhook_logs_schema(webhooks_id: str) -> dict:
     return {
         "name": "webhook_logs",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3e — Audit-Collection. User darf lesen; webhook_send schreibt als Admin.
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "indexes": [
             "CREATE INDEX IF NOT EXISTS idx_webhook_logs_webhook_created ON webhook_logs (webhook, created DESC)",
         ],

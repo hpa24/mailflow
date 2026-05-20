@@ -8,9 +8,10 @@ import logging
 import re
 import secrets as _secrets
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 import pb_client
+import pb_user_auth
 from rate_limit import limiter
 from smtp_sender import send_email as smtp_send_email
 
@@ -22,6 +23,8 @@ _WEBHOOK_SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 
 
 async def _webhook_by_slug(slug: str) -> dict | None:
+    # A11: bewusste Admin-Nutzung — webhook_send wird per X-Webhook-Key authentifiziert,
+    # ohne PB-User-Token. Slug-Lookup muss daher den Admin-Token verwenden.
     data = await pb_client.pb_get(
         "/api/collections/webhooks/records",
         params={"filter": f'slug={pb_client.pb_quote(slug)}', "perPage": 1},
@@ -33,6 +36,7 @@ async def _webhook_by_slug(slug: str) -> dict | None:
 async def _webhook_log(webhook_id: str, ip: str, status: str,
                        to: str, subject: str,
                        message_id: str = "", error: str = "") -> None:
+    # A11: bewusste Admin-Nutzung — Audit-Eintrag nach extern getriggertem webhook_send.
     try:
         await pb_client.pb_post(
             "/api/collections/webhook_logs/records",
@@ -116,8 +120,9 @@ async def webhook_send(slug: str, request: Request, data: dict):
 
 
 @router.get("/webhooks")
-async def webhooks_list():
-    data = await pb_client.pb_get(
+async def webhooks_list(token: str = Depends(pb_user_auth.get_user_token)):
+    data = await pb_client.pb_get_as(
+        token,
         "/api/collections/webhooks/records",
         params={"perPage": 200, "sort": "-created"},
     )
@@ -125,7 +130,7 @@ async def webhooks_list():
 
 
 @router.post("/webhooks")
-async def webhooks_create(data: dict):
+async def webhooks_create(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     name = (data.get("name") or "").strip()
     slug = (data.get("slug") or "").strip().lower()
     smtp_server = (data.get("smtp_server") or "").strip()
@@ -150,13 +155,15 @@ async def webhooks_create(data: dict):
         "is_active": bool(data.get("is_active", True)),
         "api_key": "whk_" + _secrets.token_urlsafe(32),
     }
-    return await pb_client.pb_post("/api/collections/webhooks/records", record)
+    return await pb_client.pb_post_as(token, "/api/collections/webhooks/records", record)
 
 
 @router.get("/webhooks/{webhook_id}/logs")
-async def webhooks_logs(webhook_id: str, limit: int = 100):
+async def webhooks_logs(webhook_id: str, limit: int = 100,
+                        token: str = Depends(pb_user_auth.get_user_token)):
     limit = max(1, min(int(limit), 500))
-    data = await pb_client.pb_get(
+    data = await pb_client.pb_get_as(
+        token,
         "/api/collections/webhook_logs/records",
         params={
             "filter": f'webhook={pb_client.pb_quote(webhook_id)}',
@@ -168,7 +175,8 @@ async def webhooks_logs(webhook_id: str, limit: int = 100):
 
 
 @router.patch("/webhooks/{webhook_id}")
-async def webhooks_update(webhook_id: str, data: dict):
+async def webhooks_update(webhook_id: str, data: dict,
+                          token: str = Depends(pb_user_auth.get_user_token)):
     allowed = {
         "name", "slug", "smtp_server", "from_account", "default_to",
         "from_name_override",
@@ -182,10 +190,10 @@ async def webhooks_update(webhook_id: str, data: dict):
         patch["slug"] = s
     if data.get("rotate_api_key"):
         patch["api_key"] = "whk_" + _secrets.token_urlsafe(32)
-    return await pb_client.pb_patch(f"/api/collections/webhooks/records/{webhook_id}", patch)
+    return await pb_client.pb_patch_as(token, f"/api/collections/webhooks/records/{webhook_id}", patch)
 
 
 @router.delete("/webhooks/{webhook_id}")
-async def webhooks_delete(webhook_id: str):
-    await pb_client.pb_delete(f"/api/collections/webhooks/records/{webhook_id}")
+async def webhooks_delete(webhook_id: str, token: str = Depends(pb_user_auth.get_user_token)):
+    await pb_client.pb_delete_as(token, f"/api/collections/webhooks/records/{webhook_id}")
     return {"status": "deleted"}

@@ -2870,10 +2870,11 @@ async def templates_delete(template_id: str, token: str = Depends(pb_user_auth.g
 
 
 @app.get("/bulk-sends")
-async def bulk_sends_list(limit: int = 200):
+async def bulk_sends_list(limit: int = 200, token: str = Depends(pb_user_auth.get_user_token)):
     """Liste der Aussendungen, neueste zuerst. Liefert Metadaten ohne
     `recipients`-Array (Performance) — Detail via GET /bulk-sends/{id}."""
-    data = await pb_client.pb_get(
+    data = await pb_client.pb_get_as(
+        token,
         "/api/collections/bulk_sends/records",
         params={
             "perPage": max(1, min(500, limit)),
@@ -2885,14 +2886,14 @@ async def bulk_sends_list(limit: int = 200):
 
 
 @app.get("/bulk-sends/{bulk_id}")
-async def bulk_sends_get(bulk_id: str):
+async def bulk_sends_get(bulk_id: str, token: str = Depends(pb_user_auth.get_user_token)):
     """Detail einer Aussendung inkl. recipients-Array."""
-    return await pb_client.pb_get(f"/api/collections/bulk_sends/records/{bulk_id}")
+    return await pb_client.pb_get_as(token, f"/api/collections/bulk_sends/records/{bulk_id}")
 
 
 @app.delete("/bulk-sends/{bulk_id}")
-async def bulk_sends_delete(bulk_id: str):
-    await pb_client.pb_delete(f"/api/collections/bulk_sends/records/{bulk_id}")
+async def bulk_sends_delete(bulk_id: str, token: str = Depends(pb_user_auth.get_user_token)):
+    await pb_client.pb_delete_as(token, f"/api/collections/bulk_sends/records/{bulk_id}")
     return {"status": "deleted"}
 
 

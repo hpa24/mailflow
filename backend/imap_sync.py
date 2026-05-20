@@ -455,7 +455,10 @@ async def _compute_thread_id(message_id: str, in_reply_to: str) -> str:
 async def _webhook_id_for_message(message_id: str) -> str:
     """Sucht in webhook_logs nach einem erfolgreichen Versand mit dieser
     message_id und gibt die Webhook-Record-ID zurück. Leerer String bei
-    keinem Treffer — Mail wurde dann normal via Mailflow-Compose gesendet."""
+    keinem Treffer — Mail wurde dann normal via Mailflow-Compose gesendet.
+
+    A11: bewusste Admin-Nutzung — IMAP-Sync ist ein Backend-Job ohne User-Token.
+    """
     try:
         # PocketBase-Filter: doppelte Anführungszeichen escapen
         safe_id = message_id.replace('"', '')
