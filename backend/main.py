@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import quote as _url_quote
 
 import httpx
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Request, UploadFile, File
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -159,15 +159,12 @@ app.add_middleware(
 @app.middleware("http")
 async def _auth_middleware(request: Request, call_next):
     """Auth-Reihenfolge:
-    1. Public/Exempt-Routen (health, config.js, OPTIONS, externe Webhook-Sends, X-Import-Key)
+    1. Public/Exempt-Routen (health, OPTIONS, externe Webhook-Sends, X-Import-Key)
     2. PB-User-Token (Authorization: Bearer <pb_token>) — validiert gegen PB
     3. Signierte URL (?token=...) für SSE/Inline/Attachments (keine Header möglich)
-    4. Legacy: globaler API_KEY (X-API-Key oder ?key=) — wird mit A1.8 entfernt
-
-    Wenn API_KEY in .env leer UND kein anderer Mechanismus greift, ist Auth offen (lokale Entwicklung).
     """
     path = request.url.path
-    if path in ("/health", "/config.js") or request.method == "OPTIONS":
+    if path == "/health" or request.method == "OPTIONS":
         return await call_next(request)
     # Externer Webhook-Send: eigener API-Key pro Webhook im Endpoint selbst
     if path.startswith("/webhooks/") and path.endswith("/send"):
@@ -188,14 +185,6 @@ async def _auth_middleware(request: Request, call_next):
     # Signierte URL für Endpoints ohne Header-Möglichkeit (SSE/Inline/Attachments)
     sig_token = request.query_params.get("token") or ""
     if sig_token and signed_url.verify(sig_token, path):
-        return await call_next(request)
-
-    # Legacy: globaler API_KEY — Übergangsphase, entfällt mit A1.8
-    expected = settings.API_KEY
-    if not expected:
-        return await call_next(request)
-    provided = request.headers.get("X-API-Key") or request.query_params.get("key") or ""
-    if provided == expected:
         return await call_next(request)
 
     return JSONResponse(
@@ -267,31 +256,6 @@ async def sign_url(payload: SignRequest):
         raise HTTPException(status_code=400, detail="path muss mit / beginnen")
     token, exp = signed_url.sign(payload.path, payload.ttl)
     return {"token": token, "exp": exp}
-
-
-@app.get("/config.js", include_in_schema=False)
-async def frontend_config(authorization: str = Header(None, alias="Authorization")):
-    from fastapi.responses import PlainTextResponse
-    empty = PlainTextResponse("window.MAILFLOW_API_KEY='';", media_type="application/javascript")
-    if not settings.API_KEY:
-        return empty
-    pb_token = authorization[7:] if authorization and authorization.startswith("Bearer ") else None
-    if not pb_token:
-        return empty
-    try:
-        async with httpx.AsyncClient(base_url=settings.PB_URL, timeout=5) as client:
-            resp = await client.post(
-                "/api/collections/users/auth-refresh",
-                headers={"Authorization": f"Bearer {pb_token}"},
-            )
-            if resp.status_code == 200:
-                return PlainTextResponse(
-                    f"window.MAILFLOW_API_KEY='{settings.API_KEY}';",
-                    media_type="application/javascript",
-                )
-    except Exception:
-        pass
-    return empty
 
 
 @app.post("/sync/run")

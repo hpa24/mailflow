@@ -12,11 +12,8 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str = ""
     SPAM_SIMILARITY_THRESHOLD: float = 0.82
     SPAM_AUTO_CLASSIFY: bool = False
-    # Wenn gesetzt, müssen alle API-Anfragen diesen Key mitsenden.
-    # Leer lassen für lokale Entwicklung ohne Auth.
-    API_KEY: str = ""
     # Optionaler separater Key für externen Kontakt-Import (FileMaker, Xano etc.).
-    # Wird per X-Import-Key-Header geprüft. Leer = nur globaler API_KEY akzeptiert.
+    # Wird per X-Import-Key-Header geprüft. Leer = Endpoint nur per PB-Login erreichbar.
     IMPORT_API_KEY: str = ""
     # HMAC-Secret für kurzlebige signierte URLs (SSE, Attachments, Inline-Bilder).
     # Im Coolify zufällig generieren — bei Rotation invalidieren alte Links sofort.
