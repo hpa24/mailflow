@@ -293,3 +293,22 @@ Bulk-Send läuft danach durch die normale `/emails/bulk-send`-Pipeline und legt 
 
 - **Bounce-Erkennung** (Phase 3b, geplant): IMAP-Sync-Heuristik für Mailer-Daemon/DSN-Mails, Message-ID-Match gegen `bulk_sends.recipients[*].message_id`, `contacts.bounced`-Flag, UI-Badges. Vorbereitung dafür ist mit der Message-ID-Persistierung schon getan.
 - **Tagesversand-Counter** ist bereits live (siehe „Tagesversand-Counter" unten / Plan-Eintrag).
+
+## Upload-Limits & Cleanup 2026-05-20
+
+Temporäre Anhänge (`_temp_uploads`) liegen weiterhin in-memory, sind aber jetzt gegen RAM-Leaks bei Browser-Crash oder Compose-Abbruch abgesichert (Refactor-Plan B14 Phase 1).
+
+Konstanten in `backend/main.py`:
+
+- `MAX_UPLOAD_SIZE = 25 MB` — pro Datei, HTTP 413 bei Überschreitung.
+- `MAX_TOTAL_UPLOAD_SIZE = 200 MB` — über alle aktiven Uploads. Wird vor dem Hinzufügen eines neuen Eintrags geprüft, HTTP 413 mit „Upload-Speicher voll" bei Überlauf.
+- `UPLOAD_TTL_SECONDS = 30 min` — danach wird der Eintrag verworfen.
+- `UPLOAD_CLEANUP_INTERVAL_SECONDS = 5 min` — Sweep-Intervall.
+
+Pro Eintrag werden `size` und `created_at` (monotonic) mitgeführt. Die Coroutine `_cleanup_temp_uploads_loop()` läuft als Background-Task im `lifespan` und loggt verworfene Einträge mit `logger.warning("Temporärer Upload abgelaufen: ...")`. Beim Shutdown wird der Task sauber gecancelt.
+
+Phase 2 (Disk-Spool via `tempfile.NamedTemporaryFile` für sehr große Files) ist absichtlich nicht gebaut — mit dem 200-MB-Gesamtlimit ist der RAM-Druck verkraftbar.
+
+## SMTP-Server Response-Whitelist 2026-05-20
+
+`GET /smtp-servers` liefert ans Frontend nur noch `id`, `name`, `is_default` (PB-`fields`-Param). `password`, `host`, `port`, `user`, `use_tls`, `use_starttls` werden serverseitig herausgefiltert. Backend-Versand (`smtp_sender.py`) ist nicht betroffen — der liest als Admin direkt aus PB.
