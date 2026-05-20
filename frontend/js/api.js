@@ -31,7 +31,9 @@ function apiGet(path, params = {}) {
 
 // Holt einen kurzlebigen signierten URL-Token vom Backend.
 // Für Stellen, die keine Authorization-Header senden können (EventSource, <img src>, <a href>).
-async function _signUrl(path, ttl = 300) {
+// `path` MUSS ohne Query-String übergeben werden — zusätzliche Query-Parameter
+// gehen in `extraParams`, damit die finale URL nicht zwei `?` enthält.
+async function _signUrl(path, ttl = 300, extraParams = null) {
   const bearer = _bearer();
   const res = await fetch(`${API}/sign`, {
     method: 'POST',
@@ -44,7 +46,11 @@ async function _signUrl(path, ttl = 300) {
   }
   if (!res.ok) throw new Error(`sign failed: ${res.status}`);
   const data = await res.json();
-  return `${API}${path}?token=${encodeURIComponent(data.token)}`;
+  const params = new URLSearchParams({ token: data.token });
+  if (extraParams) {
+    for (const [k, v] of Object.entries(extraParams)) params.set(k, v);
+  }
+  return `${API}${path}?${params.toString()}`;
 }
 
 // EventSource-URL (signed). Browser-API erlaubt keine Custom-Header.
@@ -113,7 +119,7 @@ window.api = {
 
   getAttachments(emailId)        { return apiGet(`/emails/${emailId}/attachments`); },
   attachmentDownloadUrl(id)      { return _signUrl(`/attachments/${id}/download`); },
-  inlineImageUrl(emailId, cid)   { return _signUrl(`/emails/${emailId}/inline?cid=${encodeURIComponent(cid)}`); },
+  inlineImageUrl(emailId, cid)   { return _signUrl(`/emails/${emailId}/inline`, 300, { cid }); },
   uploadAttachment(formData)     { return apiFetch('/attachments/upload', { method: 'POST', body: formData }); },
   deleteUpload(tempId)           { return apiFetch(`/attachments/upload/${tempId}`, { method: 'DELETE' }); },
 
