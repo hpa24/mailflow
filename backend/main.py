@@ -433,8 +433,12 @@ async def search_contacts(q: str = "", limit: int = 8, token: str = Depends(pb_u
 
 @app.get("/smtp-servers")
 async def get_smtp_servers(token: str = Depends(pb_user_auth.get_user_token)):
+    # `fields`-Whitelist verhindert, dass `password` (und andere Credentials)
+    # ans Frontend durchgereicht werden. Backend-Versand (smtp_sender) liest
+    # als Admin direkt aus PB und braucht diesen Endpoint nicht.
     return await pb_client.pb_get_as(token, "/api/collections/smtp_servers/records",
-                                     params={"perPage": 50, "sort": "name"})
+                                     params={"perPage": 50, "sort": "name",
+                                             "fields": "id,name,is_default"})
 
 
 @app.get("/folders")

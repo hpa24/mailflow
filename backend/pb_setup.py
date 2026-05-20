@@ -423,8 +423,8 @@ def _smtp_servers_schema() -> dict:
         "name": "smtp_servers",
         "type": "base",
         # A11 Phase 3c — Kleinkram-Cluster. smtp_sender liest als Admin (Backend-Versand).
-        # FIXME: password-Feld kommt aktuell ohne fields-Filter durch GET /smtp-servers
-        # zum Frontend — bestehende Lücke, separat zu adressieren (nicht im Scope von 3c).
+        # GET /smtp-servers reicht nur id/name/is_default ans Frontend durch (fields-Whitelist
+        # in main.py), damit `password` nicht leakt.
         "listRule": '@request.auth.id != ""',
         "viewRule": '@request.auth.id != ""',
         "createRule": '@request.auth.id != ""',
