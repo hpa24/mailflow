@@ -414,12 +414,12 @@ async def update_account(account_id: str, data: dict):
 
 
 @app.get("/contacts/search")
-async def search_contacts(q: str = "", limit: int = 8):
+async def search_contacts(q: str = "", limit: int = 8, token: str = Depends(pb_user_auth.get_user_token)):
     """Kontaktsuche nach Name oder E-Mail für Autocomplete."""
     if not q or len(q.strip()) < 1:
         return {"items": []}
     qq = pb_client.pb_quote(q.strip())
-    data = await pb_client.pb_get("/api/collections/contacts/records", params={
+    data = await pb_client.pb_get_as(token, "/api/collections/contacts/records", params={
         "filter": f'email ~ {qq} || name ~ {qq}',
         "sort": "-email_count",
         "perPage": limit,
@@ -2862,8 +2862,9 @@ _GROUP_NAME_RE = re.compile(r"^[a-z0-9_\-]{1,60}$")
 
 
 @app.get("/contact-groups")
-async def contact_groups_list():
-    data = await pb_client.pb_get(
+async def contact_groups_list(token: str = Depends(pb_user_auth.get_user_token)):
+    data = await pb_client.pb_get_as(
+        token,
         "/api/collections/contact_groups/records",
         params={"perPage": 500, "sort": "name"},
     )
@@ -2871,7 +2872,7 @@ async def contact_groups_list():
 
 
 @app.post("/contact-groups")
-async def contact_groups_create(data: dict):
+async def contact_groups_create(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     name = (data.get("name") or "").strip().lower()
     if not _GROUP_NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="name ungültig (1–60 Zeichen, nur a-z, 0-9, _, -)")
@@ -2880,7 +2881,7 @@ async def contact_groups_create(data: dict):
         "description": (data.get("description") or "").strip(),
     }
     try:
-        return await pb_client.pb_post("/api/collections/contact_groups/records", record)
+        return await pb_client.pb_post_as(token, "/api/collections/contact_groups/records", record)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 400 and "name" in exc.response.text:
             raise HTTPException(status_code=409, detail=f"Gruppe '{name}' existiert bereits")
@@ -2888,7 +2889,7 @@ async def contact_groups_create(data: dict):
 
 
 @app.patch("/contact-groups/{group_id}")
-async def contact_groups_update(group_id: str, data: dict):
+async def contact_groups_update(group_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     patch: dict = {}
     if "name" in data:
         n = (data["name"] or "").strip().lower()
@@ -2900,7 +2901,7 @@ async def contact_groups_update(group_id: str, data: dict):
     if not patch:
         raise HTTPException(status_code=400, detail="nichts zu ändern")
     try:
-        return await pb_client.pb_patch(f"/api/collections/contact_groups/records/{group_id}", patch)
+        return await pb_client.pb_patch_as(token, f"/api/collections/contact_groups/records/{group_id}", patch)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 400 and "name" in exc.response.text:
             raise HTTPException(status_code=409, detail="Gruppe mit diesem Namen existiert bereits")
@@ -2908,15 +2909,16 @@ async def contact_groups_update(group_id: str, data: dict):
 
 
 @app.delete("/contact-groups/{group_id}")
-async def contact_groups_delete(group_id: str):
+async def contact_groups_delete(group_id: str, token: str = Depends(pb_user_auth.get_user_token)):
     # PocketBase: cascadeDelete=False auf contacts.groups → Kontakte bleiben, Relation wird gelöscht
-    await pb_client.pb_delete(f"/api/collections/contact_groups/records/{group_id}")
+    await pb_client.pb_delete_as(token, f"/api/collections/contact_groups/records/{group_id}")
     return {"status": "deleted"}
 
 
 @app.get("/contact-groups/{group_id}/members")
-async def contact_groups_members(group_id: str):
-    data = await pb_client.pb_get(
+async def contact_groups_members(group_id: str, token: str = Depends(pb_user_auth.get_user_token)):
+    data = await pb_client.pb_get_as(
+        token,
         "/api/collections/contacts/records",
         params={"filter": f'groups~{pb_client.pb_quote(group_id)}', "perPage": 1000, "sort": "name"},
     )
@@ -2978,7 +2980,12 @@ def _parse_import_line(line: str, lineno: int) -> tuple | None:
 @app.post("/contacts/import")
 @limiter.limit("30/minute")
 async def contacts_import(request: Request, data: dict):
-    """Importiert Kontakte + Gruppen-Zuordnungen aus einer Multiline-Liste."""
+    """Importiert Kontakte + Gruppen-Zuordnungen aus einer Multiline-Liste.
+
+    Auth: X-Import-Key (extern, FileMaker/Xano) ODER PB-User-Bearer.
+    Nutzt absichtlich den Admin-Token (`pb_client.pb_*`), weil der externe
+    Import-Pfad keinen User-Token mitbringt. Bewusste A11-Ausnahme.
+    """
     lines_raw = data.get("lines") or ""
     mode = (data.get("mode") or "add").lower()
     if mode not in ("add", "remove"):
@@ -3114,7 +3121,7 @@ async def contacts_import(request: Request, data: dict):
 
 
 @app.post("/templates/render")
-async def templates_render(data: dict):
+async def templates_render(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     """Rendert html + subject mit Snippets, globalen Variablen und optional
     einem Kontakt. Wird vom Frontend fuer Live-Preview genutzt und spaeter
     von Compose/Bulk-Send.
@@ -3130,13 +3137,17 @@ async def templates_render(data: dict):
     active_sections = data.get("active_sections")
     contact_id = data.get("contact_id")
 
+    # Snippets/Variables: rendering.load_* nutzt absichtlich den Admin-Token,
+    # weil dieselben Helper auch aus dem Mail-Versand-Backend (ohne User-Session)
+    # aufgerufen werden. PB-Rules sind in 3a auf "any authenticated" gesetzt;
+    # der Admin-Bypass ist davon nicht betroffen.
     snippets = await rendering.load_snippets_map()
     variables = await rendering.load_variables_map()
 
     contact = None
     if contact_id:
         try:
-            contact = await pb_client.pb_get(f"/api/collections/contacts/records/{contact_id}")
+            contact = await pb_client.pb_get_as(token, f"/api/collections/contacts/records/{contact_id}")
         except Exception:
             contact = None
 

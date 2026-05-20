@@ -83,6 +83,9 @@ async def setup_pocketbase_schema(token: str) -> None:
 
         # A11 Phase 3a — Vorlagen-Cluster: full User-CRUD auf email_variables,
         # email_snippets, email_templates. Reine User-Daten, kein Backend-Job schreibt rein.
+        # A11 Phase 3b — Kontakte-Cluster: contacts und contact_groups dito. Admin-Pfade
+        # (Import via X-Import-Key, IMAP-Sync-Upsert) nutzen Admin-Token und sind von
+        # Rules nicht betroffen (Superuser-Bypass).
         _cluster_rules = {
             "listRule": '@request.auth.id != ""',
             "viewRule": '@request.auth.id != ""',
@@ -90,7 +93,10 @@ async def setup_pocketbase_schema(token: str) -> None:
             "updateRule": '@request.auth.id != ""',
             "deleteRule": '@request.auth.id != ""',
         }
-        for _name in ("email_variables", "email_snippets", "email_templates"):
+        for _name in (
+            "email_variables", "email_snippets", "email_templates",
+            "contacts", "contact_groups",
+        ):
             if _name in existing:
                 await _ensure_rules(client, headers, _name, existing[_name], _cluster_rules)
         if "emails" in existing:
@@ -483,11 +489,14 @@ def _contacts_schema() -> dict:
     return {
         "name": "contacts",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3b — Kontakte-Cluster: full User-CRUD via PB-Rules.
+        # /contacts/import nutzt weiterhin Admin-Token (X-Import-Key-Pfad, kein User).
+        # IMAP-Sync upsertet ebenfalls als Admin (Backend-Job, kein User-Kontext).
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "indexes": [
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_email ON contacts (email)",
         ],
@@ -571,11 +580,12 @@ def _contact_groups_schema() -> dict:
     return {
         "name": "contact_groups",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3b — Kontakte-Cluster: full User-CRUD via PB-Rules.
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "indexes": [
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_groups_name ON contact_groups (name)",
         ],

@@ -553,6 +553,7 @@ async def _sync_flags_recent(server: IMAPClient, account_id: str,
 
 
 async def upsert_contact(email: str, name: str, last_contact: str | None) -> None:
+    # A11: bewusste Admin-Nutzung — IMAP-Sync ist ein Backend-Job ohne User-Token.
     if not email:
         return
     try:
