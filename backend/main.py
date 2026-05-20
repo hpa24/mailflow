@@ -2495,11 +2495,22 @@ async def ai_triage(req: TriageRequest, token: str = Depends(pb_user_auth.get_us
     return {"categorized": categorized, "skipped": 0, "errors": errors}
 
 
+class TriageExampleRequest(BaseModel):
+    email_id: str = Field(..., min_length=1)
+    category: str = Field(..., min_length=1)
+
+    @field_validator("email_id", "category")
+    @classmethod
+    def strip_value(cls, v: str) -> str:
+        return (v or "").strip()
+
+
 @app.post("/triage/example")
-async def save_triage_example(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
+async def save_triage_example(req: TriageExampleRequest, token: str = Depends(pb_user_auth.get_user_token)):
     """Speichert eine manuelle Korrektur als Lernregel für die KI-Triage."""
-    email_id = data.get("email_id", "").strip()
-    category = data.get("category", "").strip()
+    email_id = req.email_id
+    category = req.category
+    # Category-Slug-Liste ist dynamisch (vom ai_helper) — kann nicht als Literal ins Modell
     valid_slugs = set(ai_helper.get_category_slugs())
     if not email_id or category not in valid_slugs:
         raise HTTPException(status_code=400, detail="email_id und gültige category erforderlich")
@@ -2841,18 +2852,28 @@ async def variables_create(req: VariableCreateRequest, token: str = Depends(pb_u
         raise
 
 
+class VariableUpdateRequest(BaseModel):
+    name: str | None = None
+    value: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().lower()
+        if not _VAR_NAME_RE.match(v):
+            raise ValueError("name ungültig (nur a-z, 0-9, _; Start mit Buchstabe oder _)")
+        if v in _VAR_RESERVED_NAMES:
+            raise ValueError(f"name '{v}' ist reserviert für Kontakt-Felder")
+        return v
+
+
 @app.patch("/variables/{var_id}")
-async def variables_update(var_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
-    patch: dict = {}
-    if "value" in data:
-        patch["value"] = data["value"] or ""
-    if "name" in data:
-        new_name = (data["name"] or "").strip().lower()
-        if not _VAR_NAME_RE.match(new_name):
-            raise HTTPException(status_code=400, detail="name ungültig")
-        if new_name in _VAR_RESERVED_NAMES:
-            raise HTTPException(status_code=400, detail=f"name '{new_name}' ist reserviert")
-        patch["name"] = new_name
+async def variables_update(var_id: str, req: VariableUpdateRequest, token: str = Depends(pb_user_auth.get_user_token)):
+    patch = req.model_dump(exclude_unset=True)
+    if "value" in patch and patch["value"] is None:
+        patch["value"] = ""
     if not patch:
         raise HTTPException(status_code=400, detail="nichts zu ändern")
     try:
@@ -2879,20 +2900,30 @@ async def variables_delete(var_id: str, token: str = Depends(pb_user_auth.get_us
     return {"status": "deleted"}
 
 
+class VariableRenameRequest(BaseModel):
+    new_name: str
+    replace_in_usage: bool = False
+
+    @field_validator("new_name")
+    @classmethod
+    def normalize_new_name(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if not _VAR_NAME_RE.match(v):
+            raise ValueError("name ungültig (nur a-z, 0-9, _; Start mit Buchstabe oder _)")
+        if v in _VAR_RESERVED_NAMES:
+            raise ValueError(f"name '{v}' ist reserviert für Kontakt-Felder")
+        return v
+
+
 @app.post("/variables/{var_id}/rename")
-async def variables_rename(var_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
+async def variables_rename(var_id: str, req: VariableRenameRequest, token: str = Depends(pb_user_auth.get_user_token)):
     """Benennt eine Variable um und ersetzt optional alle `{{old}}`-Vorkommen
     in Templates+Snippets durch `{{new}}`.
 
-    Body: ``{new_name: str, replace_in_usage: bool}``.
     Response: ``{old_name, new_name, replaced_templates, replaced_snippets}``.
     """
-    new_name = (data.get("new_name") or "").strip().lower()
-    replace = bool(data.get("replace_in_usage", False))
-    if not _VAR_NAME_RE.match(new_name):
-        raise HTTPException(status_code=400, detail="name ungültig")
-    if new_name in _VAR_RESERVED_NAMES:
-        raise HTTPException(status_code=400, detail=f"name '{new_name}' ist reserviert")
+    new_name = req.new_name
+    replace = req.replace_in_usage
 
     cur = await pb_client.pb_get_as(token, f"/api/collections/email_variables/records/{var_id}")
     old_name = (cur.get("name") or "").strip().lower()
@@ -3062,33 +3093,51 @@ async def snippets_list(token: str = Depends(pb_user_auth.get_user_token)):
     return data.get("items", [])
 
 
+def _normalize_snippet_name(v: str | None) -> str | None:
+    if v is None:
+        return None
+    v = v.strip().lower()
+    if not _SNIPPET_NAME_RE.match(v):
+        raise ValueError("name ungültig (1–50 Zeichen, nur a-z, 0-9, _; Start mit Buchstabe oder _)")
+    return v
+
+
+class SnippetCreateRequest(BaseModel):
+    name: str
+    html: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, v: str) -> str:
+        return _normalize_snippet_name(v)
+
+
+class SnippetUpdateRequest(BaseModel):
+    name: str | None = None
+    html: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, v: str | None) -> str | None:
+        return _normalize_snippet_name(v)
+
+
 @app.post("/snippets")
-async def snippets_create(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
-    name = (data.get("name") or "").strip().lower()
-    if not _SNIPPET_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail="name ungültig (1–50 Zeichen, nur a-z, 0-9, _; Start mit Buchstabe oder _)")
-    record = {
-        "name": name,
-        "html": data.get("html") or "",
-    }
+async def snippets_create(req: SnippetCreateRequest, token: str = Depends(pb_user_auth.get_user_token)):
+    record = {"name": req.name, "html": req.html}
     try:
         return await pb_client.pb_post_as(token, "/api/collections/email_snippets/records", record)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 400 and "name" in exc.response.text:
-            raise HTTPException(status_code=409, detail=f"Snippet '{name}' existiert bereits")
+            raise HTTPException(status_code=409, detail=f"Snippet '{req.name}' existiert bereits")
         raise
 
 
 @app.patch("/snippets/{snippet_id}")
-async def snippets_update(snippet_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
-    patch: dict = {}
-    if "html" in data:
-        patch["html"] = data["html"] or ""
-    if "name" in data:
-        new_name = (data["name"] or "").strip().lower()
-        if not _SNIPPET_NAME_RE.match(new_name):
-            raise HTTPException(status_code=400, detail="name ungültig")
-        patch["name"] = new_name
+async def snippets_update(snippet_id: str, req: SnippetUpdateRequest, token: str = Depends(pb_user_auth.get_user_token)):
+    patch = req.model_dump(exclude_unset=True)
+    if "html" in patch and patch["html"] is None:
+        patch["html"] = ""
     if not patch:
         raise HTTPException(status_code=400, detail="nichts zu ändern")
     try:
@@ -3117,18 +3166,28 @@ async def snippets_delete(snippet_id: str, token: str = Depends(pb_user_auth.get
     return {"status": "deleted"}
 
 
+class SnippetRenameRequest(BaseModel):
+    new_name: str
+    replace_in_usage: bool = False
+
+    @field_validator("new_name")
+    @classmethod
+    def normalize_new_name(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if not _SNIPPET_NAME_RE.match(v):
+            raise ValueError("name ungültig (1–50 Zeichen, nur a-z, 0-9, _; Start mit Buchstabe oder _)")
+        return v
+
+
 @app.post("/snippets/{snippet_id}/rename")
-async def snippets_rename(snippet_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
+async def snippets_rename(snippet_id: str, req: SnippetRenameRequest, token: str = Depends(pb_user_auth.get_user_token)):
     """Benennt ein Snippet um und ersetzt optional alle `{{> old}}`-Refs
     in Templates durch `{{> new}}`.
 
-    Body: ``{new_name: str, replace_in_usage: bool}``.
     Response: ``{old_name, new_name, replaced_templates}``.
     """
-    new_name = (data.get("new_name") or "").strip().lower()
-    replace = bool(data.get("replace_in_usage", False))
-    if not _SNIPPET_NAME_RE.match(new_name):
-        raise HTTPException(status_code=400, detail="name ungültig")
+    new_name = req.new_name
+    replace = req.replace_in_usage
 
     cur = await pb_client.pb_get_as(token, f"/api/collections/email_snippets/records/{snippet_id}")
     old_name = (cur.get("name") or "").strip().lower()
@@ -3177,45 +3236,90 @@ async def templates_list(prefix: str = "", search: str = "", token: str = Depend
     return data.get("items", [])
 
 
+def _normalize_template_prefix(v: str | None) -> str | None:
+    if v is None:
+        return None
+    v = v.strip().lower()
+    if not _TEMPLATE_PREFIX_RE.match(v):
+        raise ValueError("prefix ungültig (max 30 Zeichen, nur a-z, 0-9, _)")
+    return v
+
+
+def _normalize_template_name(v: str | None) -> str | None:
+    if v is None:
+        return None
+    v = v.strip()
+    if not v or len(v) > 100:
+        raise ValueError("name muss 1–100 Zeichen lang sein")
+    return v
+
+
+class TemplateCreateRequest(BaseModel):
+    prefix: str = ""
+    name: str
+    subject: str = ""
+    html_body: str = ""
+    text_body: str = ""
+
+    @field_validator("prefix")
+    @classmethod
+    def normalize_prefix(cls, v: str) -> str:
+        return _normalize_template_prefix(v) or ""
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, v: str) -> str:
+        return _normalize_template_name(v) or ""
+
+    @field_validator("subject")
+    @classmethod
+    def strip_subject(cls, v: str) -> str:
+        return (v or "").strip()
+
+
+class TemplateUpdateRequest(BaseModel):
+    prefix: str | None = None
+    name: str | None = None
+    subject: str | None = None
+    html_body: str | None = None
+    text_body: str | None = None
+
+    @field_validator("prefix")
+    @classmethod
+    def normalize_prefix(cls, v: str | None) -> str | None:
+        return _normalize_template_prefix(v)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, v: str | None) -> str | None:
+        return _normalize_template_name(v)
+
+
 @app.post("/templates")
-async def templates_create(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
-    prefix = (data.get("prefix") or "").strip().lower()
-    name = (data.get("name") or "").strip()
-    if not _TEMPLATE_PREFIX_RE.match(prefix):
-        raise HTTPException(status_code=400, detail="prefix ungültig (max 30 Zeichen, nur a-z, 0-9, _)")
-    if not name or len(name) > 100:
-        raise HTTPException(status_code=400, detail="name muss 1–100 Zeichen lang sein")
+async def templates_create(req: TemplateCreateRequest, token: str = Depends(pb_user_auth.get_user_token)):
     record = {
-        "prefix": prefix,
-        "name": name,
-        "subject": (data.get("subject") or "").strip(),
-        "html_body": data.get("html_body") or "",
-        "text_body": data.get("text_body") or "",
+        "prefix": req.prefix,
+        "name": req.name,
+        "subject": req.subject,
+        "html_body": req.html_body,
+        "text_body": req.text_body,
     }
     try:
         return await pb_client.pb_post_as(token, "/api/collections/email_templates/records", record)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 400 and ("prefix" in exc.response.text or "name" in exc.response.text):
-            raise HTTPException(status_code=409, detail=f"Vorlage '{prefix}/{name}' existiert bereits")
+            raise HTTPException(status_code=409, detail=f"Vorlage '{req.prefix}/{req.name}' existiert bereits")
         raise
 
 
 @app.patch("/templates/{template_id}")
-async def templates_update(template_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
-    patch: dict = {}
-    if "prefix" in data:
-        p = (data["prefix"] or "").strip().lower()
-        if not _TEMPLATE_PREFIX_RE.match(p):
-            raise HTTPException(status_code=400, detail="prefix ungültig")
-        patch["prefix"] = p
-    if "name" in data:
-        n = (data["name"] or "").strip()
-        if not n or len(n) > 100:
-            raise HTTPException(status_code=400, detail="name muss 1–100 Zeichen lang sein")
-        patch["name"] = n
-    for key in ("subject", "html_body", "text_body"):
-        if key in data:
-            patch[key] = data[key] or ""
+async def templates_update(template_id: str, req: TemplateUpdateRequest, token: str = Depends(pb_user_auth.get_user_token)):
+    patch = req.model_dump(exclude_unset=True)
+    if "subject" in patch:
+        patch["subject"] = (patch["subject"] or "").strip()
+    for key in ("html_body", "text_body"):
+        if key in patch and patch[key] is None:
+            patch[key] = ""
     if not patch:
         raise HTTPException(status_code=400, detail="nichts zu ändern")
     try:
@@ -3276,33 +3380,56 @@ async def contact_groups_list(token: str = Depends(pb_user_auth.get_user_token))
     return data.get("items", [])
 
 
+def _normalize_group_name(v: str | None) -> str | None:
+    if v is None:
+        return None
+    v = v.strip().lower()
+    if not _GROUP_NAME_RE.match(v):
+        raise ValueError("name ungültig (1–60 Zeichen, nur a-z, 0-9, _, -)")
+    return v
+
+
+class ContactGroupCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, v: str) -> str:
+        return _normalize_group_name(v) or ""
+
+    @field_validator("description")
+    @classmethod
+    def strip_description(cls, v: str) -> str:
+        return (v or "").strip()
+
+
+class ContactGroupUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, v: str | None) -> str | None:
+        return _normalize_group_name(v)
+
+
 @app.post("/contact-groups")
-async def contact_groups_create(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
-    name = (data.get("name") or "").strip().lower()
-    if not _GROUP_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail="name ungültig (1–60 Zeichen, nur a-z, 0-9, _, -)")
-    record = {
-        "name": name,
-        "description": (data.get("description") or "").strip(),
-    }
+async def contact_groups_create(req: ContactGroupCreateRequest, token: str = Depends(pb_user_auth.get_user_token)):
+    record = {"name": req.name, "description": req.description}
     try:
         return await pb_client.pb_post_as(token, "/api/collections/contact_groups/records", record)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 400 and "name" in exc.response.text:
-            raise HTTPException(status_code=409, detail=f"Gruppe '{name}' existiert bereits")
+            raise HTTPException(status_code=409, detail=f"Gruppe '{req.name}' existiert bereits")
         raise
 
 
 @app.patch("/contact-groups/{group_id}")
-async def contact_groups_update(group_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
-    patch: dict = {}
-    if "name" in data:
-        n = (data["name"] or "").strip().lower()
-        if not _GROUP_NAME_RE.match(n):
-            raise HTTPException(status_code=400, detail="name ungültig")
-        patch["name"] = n
-    if "description" in data:
-        patch["description"] = (data["description"] or "").strip()
+async def contact_groups_update(group_id: str, req: ContactGroupUpdateRequest, token: str = Depends(pb_user_auth.get_user_token)):
+    patch = req.model_dump(exclude_unset=True)
+    if "description" in patch:
+        patch["description"] = (patch["description"] or "").strip()
     if not patch:
         raise HTTPException(status_code=400, detail="nichts zu ändern")
     try:
