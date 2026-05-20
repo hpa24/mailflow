@@ -14,9 +14,10 @@
 - ✅ A11 Phase 1 — Foundation für PB-User-Token-Trennung: `pb_*_as(token, …)` in `pb_client.py` + `get_user_token`-Dependency in `pb_user_auth.py`. Endpoints noch nicht migriert.
 - ✅ A11 Phase 2 — Pilot `GET /accounts` auf User-Token + PB-Rule auf `accounts.list/viewRule` (Commit `174a757`). `_ensure_rules`-Helper patcht PB-Rules idempotent.
 - ✅ A11 Phase 3a — Vorlagen-Cluster (variables/snippets/templates): full User-CRUD via PB-Rules, 16 Endpoints + 2 Helper migriert (Commit `8543fb7`).
+- ✅ A11 Phase 3b — Kontakte-Cluster (contacts/contact_groups): 7 User-Endpoints migriert, admin-Pfade (Import, IMAP-Upsert) dokumentiert (Commit `9494d00`).
 
 **Offen — nächster Chat startet hier:**
-- A11 Phase 3b (contacts/contact_groups) → 3c (Kleinkram) → 3d (emails/attachments) → 3e (Audit/Bulk)
+- A11 Phase 3c (Kleinkram: folders/smtp_servers/triage_rules/spam_rules/response_patterns) → 3d (emails/attachments) → 3e (Audit/Bulk)
 - B9, B14, B15 (BODYSTRUCTURE / Temp-Upload-TTL / Bulk-Jobs persistent)
 - C1 / C3 / C4 — jeweils Phase 2 (weitere Router, ImapService-Klasse, weitere JS-Module)
 - C2 (Pydantic-Request-Modelle, verteilt)
@@ -80,7 +81,7 @@ Reihenfolge nach Priorität: **Security zuerst, dann Robustheit, dann Architektu
 **Phase 3 — Volle Migration (laufend, per Collection-Cluster):**
 
 - **3a — Vorlagen ✅ (2026-05-20):** `email_variables`, `email_snippets`, `email_templates`. Alle 5 Rules je Collection auf `@request.auth.id != ""`. 16 Endpoints + 2 Helper migriert. Pattern: reine User-CRUD-Collection ohne Backend-Schreiber.
-- **3b — Kontakte (offen):** `contacts`, `contact_groups`. Sonderfall: X-Import-Key-Pfad bleibt admin (externer Import). Bounce-Detection (Phase 3b vom Templates-Plan) wird später ins contacts schreiben — als Backend-Operation, daher dort `pb_admin()`.
+- **3b — Kontakte ✅ (2026-05-20):** `contacts`, `contact_groups`. 7 User-Endpoints migriert (`/contacts/search`, `/contact-groups` list/create/update/delete/members, `/templates/render` contacts-Lookup). Admin-Pfade explizit dokumentiert: `/contacts/import` (X-Import-Key), `imap_sync.upsert_contact` (Backend-Job). `/emails/by-sender` verschoben auf 3d (cross mit emails).
 - **3c — Kleinkram-Cluster (offen):** `folders`, `smtp_servers`, `triage_rules`, `spam_rules`, `response_patterns`. Prüfen, wer schreibt: IMAP-Sync entdeckt folders, also Backend-Schreiber → user nur read.
 - **3d — Mails (offen, größter Brocken):** `emails`, `attachments`. IMAP-Sync schreibt → admin. User-Aktionen (read/move/delete/star/draft) → user-token. Verlangt sorgfältige Rule-Gestaltung.
 - **3e — Audit-/Bulk-Collections (offen):** `bulk_sends`, `webhook_logs`, `webhooks`. Backend schreibt (Bulk-Send-Status, Webhook-Log), User liest. Webhook-CRUD aus UI → user-token.
