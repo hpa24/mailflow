@@ -366,7 +366,7 @@ _SEND_DAILY_LIMIT = 10000
 
 
 @app.get("/accounts/sent-today")
-async def accounts_sent_today():
+async def accounts_sent_today(token: str = Depends(pb_user_auth.get_user_token)):
     """Anzahl heute gesendete Mails pro Account aus dem Sent-Ordner.
 
     Cutoff ist Mitternacht Europa/Berlin → UTC. PocketBase speichert
@@ -381,14 +381,16 @@ async def accounts_sent_today():
     midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
     cutoff = midnight_local.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-    accounts_data = await pb_client.pb_get(
+    accounts_data = await pb_client.pb_get_as(
+        token,
         "/api/collections/accounts/records",
         params={"perPage": 100, "fields": "id"},
     )
     counts: dict[str, int] = {}
     for acc in accounts_data.get("items", []):
         aid = acc["id"]
-        cnt_data = await pb_client.pb_get(
+        cnt_data = await pb_client.pb_get_as(
+            token,
             "/api/collections/emails/records",
             params={
                 "filter": f'account={pb_client.pb_quote(aid)} && folder="Sent" && date_sent>={pb_client.pb_quote(cutoff)}',
@@ -444,7 +446,8 @@ async def get_folders(account: str | None = None, token: str = Depends(pb_user_a
 
 @app.get("/search")
 async def search_emails(q: str, account: str | None = None,
-                        folder: str | None = None, is_read: str | None = None):
+                        folder: str | None = None, is_read: str | None = None,
+                        token: str = Depends(pb_user_auth.get_user_token)):
     """Volltextsuche via FTS5-Index mit PocketBase-Fallback."""
     if not q or not q.strip():
         return {"items": [], "totalItems": 0}
@@ -485,7 +488,7 @@ async def search_emails(q: str, account: str | None = None,
               "is_answered,ai_category,has_attachments,imap_uid,"
               "spam_suggested,spam_score,spam_rule_match")
 
-    data = await pb_client.pb_get("/api/collections/emails/records", params={
+    data = await pb_client.pb_get_as(token, "/api/collections/emails/records", params={
         "filter": " && ".join(filters),
         "perPage": 100,
         "sort": "-date_sent",
@@ -502,7 +505,7 @@ async def search_emails(q: str, account: str | None = None,
         sent_filters.append("is_read=true")
     elif is_read == "false":
         sent_filters.append("is_read=false")
-    sent_data = await pb_client.pb_get("/api/collections/emails/records", params={
+    sent_data = await pb_client.pb_get_as(token, "/api/collections/emails/records", params={
         "filter": " && ".join(sent_filters),
         "perPage": 100,
         "sort": "-date_sent",
@@ -523,7 +526,8 @@ async def search_emails(q: str, account: str | None = None,
 @app.get("/emails")
 async def get_emails(account: str | None = None, folder: str | None = None,
                      page: int = 1, limit: int = 50, is_read: str | None = None,
-                     webhook: str | None = None):
+                     webhook: str | None = None,
+                     token: str = Depends(pb_user_auth.get_user_token)):
     filters = _email_filters(account, folder, is_read, webhook)
 
     params = {
@@ -534,7 +538,7 @@ async def get_emails(account: str | None = None, folder: str | None = None,
     if filters:
         params["filter"] = " && ".join(filters)
 
-    return await pb_client.pb_get("/api/collections/emails/records", params=params)
+    return await pb_client.pb_get_as(token, "/api/collections/emails/records", params=params)
 
 
 _SUBJECT_PREFIX_RE = re.compile(
@@ -592,13 +596,15 @@ def _can_merge(existing: list, members: list) -> bool:
 
 
 @app.get("/folders/counts")
-async def get_folder_counts():
+async def get_folder_counts(token: str = Depends(pb_user_auth.get_user_token)):
     """Ungelesen-Zähler aller Ordner + Gesamt-Neu-Zähler (is_new=true)."""
-    folders = await pb_client.pb_get(
+    folders = await pb_client.pb_get_as(
+        token,
         "/api/collections/folders/records",
         params={"perPage": 200, "fields": "id,account,imap_path,email_folder,unread_count"}
     )
-    new_data = await pb_client.pb_get(
+    new_data = await pb_client.pb_get_as(
+        token,
         "/api/collections/emails/records",
         params={"filter": "is_new=true", "perPage": 1, "fields": "id"}
     )
@@ -610,7 +616,8 @@ async def get_folder_counts():
 async def get_emails_threaded(account: str | None = None, folder: str | None = None,
                               page: int = 1, limit: int = 100,
                               is_read: str | None = None,
-                              webhook: str | None = None):
+                              webhook: str | None = None,
+                              token: str = Depends(pb_user_auth.get_user_token)):
     """
     Returns emails sorted by thread: newest thread first, within thread oldest-first.
     Threads split by Fwd: are merged when normalized subject + participants overlap.
@@ -631,7 +638,7 @@ async def get_emails_threaded(account: str | None = None, folder: str | None = N
     if filters:
         params["filter"] = " && ".join(filters)
 
-    data = await pb_client.pb_get("/api/collections/emails/records", params=params)
+    data = await pb_client.pb_get_as(token, "/api/collections/emails/records", params=params)
     emails = data.get("items", [])
     total_items = data.get("totalItems", 0)
     total_pages = data.get("totalPages", 1)
@@ -697,7 +704,8 @@ async def get_emails_threaded(account: str | None = None, folder: str | None = N
 async def get_emails_by_sender(account: str | None = None, folder: str | None = None,
                                page: int = 1, limit: int = 100,
                                is_read: str | None = None,
-                               webhook: str | None = None):
+                               webhook: str | None = None,
+                               token: str = Depends(pb_user_auth.get_user_token)):
     """
     Returns emails grouped by sender: most-recent-contact first,
     within each sender group newest email first.
@@ -718,7 +726,7 @@ async def get_emails_by_sender(account: str | None = None, folder: str | None = 
     if filters:
         params["filter"] = " && ".join(filters)
 
-    data = await pb_client.pb_get("/api/collections/emails/records", params=params)
+    data = await pb_client.pb_get_as(token, "/api/collections/emails/records", params=params)
     emails = data.get("items", [])
     total_items = data.get("totalItems", 0)
     total_pages = data.get("totalPages", 1)
@@ -1331,9 +1339,9 @@ async def update_draft(draft_id: str, data: dict):
 
 
 @app.get("/emails/{email_id}/attachments")
-async def get_email_attachments(email_id: str):
+async def get_email_attachments(email_id: str, token: str = Depends(pb_user_auth.get_user_token)):
     """Listet alle Anhänge einer E-Mail aus PocketBase."""
-    return await pb_client.pb_get("/api/collections/attachments/records", params={
+    return await pb_client.pb_get_as(token, "/api/collections/attachments/records", params={
         "filter": f'email={pb_client.pb_quote(email_id)}',
         "perPage": 50,
         "sort": "part_id",
@@ -1342,7 +1350,11 @@ async def get_email_attachments(email_id: str):
 
 @app.get("/attachments/{attachment_id}/download")
 async def download_attachment(attachment_id: str):
-    """Lädt einen Anhang von IMAP herunter und streamt ihn."""
+    """Lädt einen Anhang von IMAP herunter und streamt ihn.
+
+    A11: bewusste Admin-Nutzung — der Endpoint wird per signiertem URL aufgerufen
+    (`<a href>`-Download), also ohne Bearer-Header. PB-Rules greifen für Admin nicht.
+    """
     att = await pb_client.pb_get(f"/api/collections/attachments/records/{attachment_id}")
     email_id = att.get("email")
     part_index = int(att.get("part_id") or 0)
@@ -1409,7 +1421,11 @@ def _imap_fetch_inline_cid(acc: dict, folder: str, imap_uid: int, cid: str) -> t
 
 @app.get("/emails/{email_id}/inline")
 async def get_inline_image(email_id: str, cid: str):
-    """Gibt ein Inline-Bild (cid:-Referenz) aus einer E-Mail zurück."""
+    """Gibt ein Inline-Bild (cid:-Referenz) aus einer E-Mail zurück.
+
+    A11: bewusste Admin-Nutzung — Endpoint wird per signiertem URL aus `<img src>`
+    aufgerufen, kein Bearer-Header möglich.
+    """
     email_rec = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
     account_id = email_rec.get("account")
     folder = email_rec.get("folder", "INBOX")
@@ -1471,11 +1487,13 @@ async def delete_upload(temp_id: str):
 
 
 @app.get("/emails/{email_id}")
-async def get_email(email_id: str, background_tasks: BackgroundTasks):
-    email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
+async def get_email(email_id: str, background_tasks: BackgroundTasks,
+                    token: str = Depends(pb_user_auth.get_user_token)):
+    email = await pb_client.pb_get_as(token, f"/api/collections/emails/records/{email_id}")
     if email.get("is_new"):
         background_tasks.add_task(
-            pb_client.pb_patch,
+            pb_client.pb_patch_as,
+            token,
             f"/api/collections/emails/records/{email_id}",
             {"is_new": False},
         )

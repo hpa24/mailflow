@@ -96,10 +96,13 @@ async def setup_pocketbase_schema(token: str) -> None:
             "updateRule": '@request.auth.id != ""',
             "deleteRule": '@request.auth.id != ""',
         }
+        # A11 Phase 3d — emails + attachments. IMAP-Sync, spam_filter, scheduler usw.
+        # schreiben weiterhin als Admin; Frontend nutzt User-Token für Reads/Marks/Moves.
         for _name in (
             "email_variables", "email_snippets", "email_templates",
             "contacts", "contact_groups",
             "folders", "smtp_servers", "triage_rules", "spam_rules", "response_patterns",
+            "emails", "attachments",
         ):
             if _name in existing:
                 await _ensure_rules(client, headers, _name, existing[_name], _cluster_rules)
@@ -314,11 +317,14 @@ def _emails_schema(accounts_id: str) -> dict:
     return {
         "name": "emails",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3d — heißester Code-Pfad. IMAP-Sync schreibt als Admin (Backend);
+        # Frontend liest/markiert/verschiebt/löscht als User. Signed-URL-Endpoints
+        # (/emails/{id}/inline, /attachments/{id}/download) bleiben Admin.
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "indexes": [
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_message_id ON emails (message_id)",
             "CREATE INDEX IF NOT EXISTS idx_emails_account_uid ON emails (account, imap_uid)",
@@ -366,11 +372,13 @@ def _attachments_schema(emails_id: str) -> dict:
     return {
         "name": "attachments",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3d — siehe emails-Schema. IMAP-Sync schreibt Admin; Frontend lädt
+        # Anhänge per signed URL (bleibt Admin) und listet sie per Bearer (User).
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "fields": [
             _field("email", "relation", required=True,
                    collectionId=emails_id, maxSelect=1, cascadeDelete=True),
