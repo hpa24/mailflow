@@ -15,9 +15,10 @@
 - ✅ A11 Phase 2 — Pilot `GET /accounts` auf User-Token + PB-Rule auf `accounts.list/viewRule` (Commit `174a757`). `_ensure_rules`-Helper patcht PB-Rules idempotent.
 - ✅ A11 Phase 3a — Vorlagen-Cluster (variables/snippets/templates): full User-CRUD via PB-Rules, 16 Endpoints + 2 Helper migriert (Commit `8543fb7`).
 - ✅ A11 Phase 3b — Kontakte-Cluster (contacts/contact_groups): 7 User-Endpoints migriert, admin-Pfade (Import, IMAP-Upsert) dokumentiert (Commit `9494d00`).
+- ✅ A11 Phase 3c — Kleinkram-Cluster (5 Collections): 5 User-Endpoints migriert, Backend-Schreiber dokumentiert (Commit `dabf66c`).
 
 **Offen — nächster Chat startet hier:**
-- A11 Phase 3c (Kleinkram: folders/smtp_servers/triage_rules/spam_rules/response_patterns) → 3d (emails/attachments) → 3e (Audit/Bulk)
+- A11 Phase 3d (emails/attachments) → 3e (Audit/Bulk)
 - B9, B14, B15 (BODYSTRUCTURE / Temp-Upload-TTL / Bulk-Jobs persistent)
 - C1 / C3 / C4 — jeweils Phase 2 (weitere Router, ImapService-Klasse, weitere JS-Module)
 - C2 (Pydantic-Request-Modelle, verteilt)
@@ -82,7 +83,7 @@ Reihenfolge nach Priorität: **Security zuerst, dann Robustheit, dann Architektu
 
 - **3a — Vorlagen ✅ (2026-05-20):** `email_variables`, `email_snippets`, `email_templates`. Alle 5 Rules je Collection auf `@request.auth.id != ""`. 16 Endpoints + 2 Helper migriert. Pattern: reine User-CRUD-Collection ohne Backend-Schreiber.
 - **3b — Kontakte ✅ (2026-05-20):** `contacts`, `contact_groups`. 7 User-Endpoints migriert (`/contacts/search`, `/contact-groups` list/create/update/delete/members, `/templates/render` contacts-Lookup). Admin-Pfade explizit dokumentiert: `/contacts/import` (X-Import-Key), `imap_sync.upsert_contact` (Backend-Job). `/emails/by-sender` verschoben auf 3d (cross mit emails).
-- **3c — Kleinkram-Cluster (offen):** `folders`, `smtp_servers`, `triage_rules`, `spam_rules`, `response_patterns`. Prüfen, wer schreibt: IMAP-Sync entdeckt folders, also Backend-Schreiber → user nur read.
+- **3c — Kleinkram-Cluster ✅ (2026-05-20):** `folders`, `smtp_servers`, `triage_rules`, `spam_rules`, `response_patterns`. Alle 5 Rules je Collection auf `@request.auth.id != ""`. 5 User-Endpoints migriert (`GET /smtp-servers`, `GET /folders`, `GET /spam-rules`, `DELETE /spam-rules/{id}`, `POST /response-patterns`). Backend-Schreiber dokumentiert (`imap_sync._get_or_create_folder`, `spam_filter`, `smtp_sender`, `cleanup_folders`). Cross-emails-Endpoints (`/folders/counts`, `/ai/triage`, `/triage/example`, `_update_folder_unread_count`) verschoben auf 3d. FIXME im `smtp_servers`-Schema: GET-Endpoint reicht aktuell das `password`-Feld ohne `fields`-Filter durch — bestehende Lücke, separat zu adressieren.
 - **3d — Mails (offen, größter Brocken):** `emails`, `attachments`. IMAP-Sync schreibt → admin. User-Aktionen (read/move/delete/star/draft) → user-token. Verlangt sorgfältige Rule-Gestaltung.
 - **3e — Audit-/Bulk-Collections (offen):** `bulk_sends`, `webhook_logs`, `webhooks`. Backend schreibt (Bulk-Send-Status, Webhook-Log), User liest. Webhook-CRUD aus UI → user-token.
 
