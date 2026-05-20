@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import quote as _url_quote
 
 import httpx
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -353,9 +353,11 @@ async def sse_events(request: Request):
 _ACCOUNT_SAFE_FIELDS = "id,name,from_email,from_name,signature,color_tag,reply_to_email,imap_host,imap_port,imap_user"
 
 @app.get("/accounts")
-async def get_accounts():
-    return await pb_client.pb_get("/api/collections/accounts/records",
-                                  params={"perPage": 100, "fields": _ACCOUNT_SAFE_FIELDS})
+async def get_accounts(token: str = Depends(pb_user_auth.get_user_token)):
+    # A11 Phase 2 — Pilot: ruft PB mit User-Token statt Admin-Token auf.
+    # PB-Rule `@request.auth.id != ""` auf accounts erlaubt Read für eingeloggte User.
+    return await pb_client.pb_get_as(token, "/api/collections/accounts/records",
+                                     params={"perPage": 100, "fields": _ACCOUNT_SAFE_FIELDS})
 
 
 # Tagesversand-Limit von mailbox.org. Wenn sich Stefans Tarif ändert,

@@ -74,6 +74,12 @@ async def setup_pocketbase_schema(token: str) -> None:
                 _field("signature", "text"),
                 _field("reply_to_email", "text"),
             ])
+            # A11 Phase 2: listRule/viewRule auf "any authenticated user" patchen,
+            # damit GET /accounts mit User-Token funktioniert (statt Admin-Bypass).
+            await _ensure_rules(client, headers, "accounts", existing["accounts"], {
+                "listRule": '@request.auth.id != ""',
+                "viewRule": '@request.auth.id != ""',
+            })
         if "emails" in existing:
             await _add_missing_fields(client, headers, "emails", existing["emails"], [
                 _field("reply_to", "text"),
@@ -203,6 +209,29 @@ async def _fix_text_field_max(
         logger.warning(f"Limit-Korrektur fehlgeschlagen für '{collection_name}'.'{field_name}': {patch.text[:200]}")
 
 
+async def _ensure_rules(
+    client: httpx.AsyncClient, headers: dict,
+    collection_name: str, collection_id: str, rules: dict
+) -> None:
+    """PATCHt list/view/create/update/deleteRule auf existierender Collection,
+    wenn die aktuellen Werte nicht mit `rules` übereinstimmen. Idempotent —
+    sorgt dafür, dass Code-Schema = Source of Truth für PB-Rules ist.
+    """
+    resp = await client.get(f"/api/collections/{collection_id}", headers=headers)
+    if not resp.is_success:
+        logger.warning(f"Could not fetch collection '{collection_name}': {resp.text[:200]}")
+        return
+    current = resp.json()
+    changes = {k: v for k, v in rules.items() if current.get(k) != v}
+    if not changes:
+        return
+    patch = await client.patch(f"/api/collections/{collection_id}", headers=headers, json=changes)
+    if patch.is_success:
+        logger.info(f"Updated rules for '{collection_name}': {changes}")
+    else:
+        logger.warning(f"Failed to update rules on '{collection_name}': {patch.text[:300]}")
+
+
 async def _ensure_collection(
     client: httpx.AsyncClient, headers: dict, existing: dict, schema: dict
 ) -> str:
@@ -231,8 +260,10 @@ def _accounts_schema() -> dict:
     return {
         "name": "accounts",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
+        # listRule/viewRule: A11 Phase 2 — jeder eingeloggte User darf lesen.
+        # createRule/updateRule/deleteRule bleiben admin-only (kein User-Self-Service).
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
         "createRule": None,
         "updateRule": None,
         "deleteRule": None,
