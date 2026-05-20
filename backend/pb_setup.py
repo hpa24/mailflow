@@ -80,6 +80,19 @@ async def setup_pocketbase_schema(token: str) -> None:
                 "listRule": '@request.auth.id != ""',
                 "viewRule": '@request.auth.id != ""',
             })
+
+        # A11 Phase 3a — Vorlagen-Cluster: full User-CRUD auf email_variables,
+        # email_snippets, email_templates. Reine User-Daten, kein Backend-Job schreibt rein.
+        _cluster_rules = {
+            "listRule": '@request.auth.id != ""',
+            "viewRule": '@request.auth.id != ""',
+            "createRule": '@request.auth.id != ""',
+            "updateRule": '@request.auth.id != ""',
+            "deleteRule": '@request.auth.id != ""',
+        }
+        for _name in ("email_variables", "email_snippets", "email_templates"):
+            if _name in existing:
+                await _ensure_rules(client, headers, _name, existing[_name], _cluster_rules)
         if "emails" in existing:
             await _add_missing_fields(client, headers, "emails", existing["emails"], [
                 _field("reply_to", "text"),
@@ -494,11 +507,12 @@ def _email_variables_schema() -> dict:
     return {
         "name": "email_variables",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3a — Vorlagen-Cluster: full User-CRUD via PB-Rules.
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "indexes": [
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_email_variables_name ON email_variables (name)",
         ],
@@ -513,11 +527,12 @@ def _email_snippets_schema() -> dict:
     return {
         "name": "email_snippets",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3a — Vorlagen-Cluster: full User-CRUD via PB-Rules.
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "indexes": [
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_email_snippets_name ON email_snippets (name)",
         ],
@@ -532,11 +547,12 @@ def _email_templates_schema() -> dict:
     return {
         "name": "email_templates",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3a — Vorlagen-Cluster: full User-CRUD via PB-Rules.
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "indexes": [
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_email_templates_prefix_name ON email_templates (prefix, name)",
             "CREATE INDEX IF NOT EXISTS idx_email_templates_prefix ON email_templates (prefix)",

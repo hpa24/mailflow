@@ -2409,8 +2409,9 @@ _VAR_RESERVED_NAMES = {"name", "email"}
 
 
 @app.get("/variables")
-async def variables_list():
-    data = await pb_client.pb_get(
+async def variables_list(token: str = Depends(pb_user_auth.get_user_token)):
+    data = await pb_client.pb_get_as(
+        token,
         "/api/collections/email_variables/records",
         params={"perPage": 500, "sort": "name"},
     )
@@ -2418,7 +2419,7 @@ async def variables_list():
 
 
 @app.post("/variables")
-async def variables_create(data: dict):
+async def variables_create(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     name = (data.get("name") or "").strip().lower()
     if not _VAR_NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="name ungültig (nur a-z, 0-9, _; Start mit Buchstabe oder _)")
@@ -2429,7 +2430,7 @@ async def variables_create(data: dict):
         "value": data.get("value") or "",
     }
     try:
-        return await pb_client.pb_post("/api/collections/email_variables/records", record)
+        return await pb_client.pb_post_as(token, "/api/collections/email_variables/records", record)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 400 and "name" in exc.response.text:
             raise HTTPException(status_code=409, detail=f"Variable '{name}' existiert bereits")
@@ -2437,7 +2438,7 @@ async def variables_create(data: dict):
 
 
 @app.patch("/variables/{var_id}")
-async def variables_update(var_id: str, data: dict):
+async def variables_update(var_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     patch: dict = {}
     if "value" in data:
         patch["value"] = data["value"] or ""
@@ -2451,7 +2452,7 @@ async def variables_update(var_id: str, data: dict):
     if not patch:
         raise HTTPException(status_code=400, detail="nichts zu ändern")
     try:
-        return await pb_client.pb_patch(f"/api/collections/email_variables/records/{var_id}", patch)
+        return await pb_client.pb_patch_as(token, f"/api/collections/email_variables/records/{var_id}", patch)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 400 and "name" in exc.response.text:
             raise HTTPException(status_code=409, detail="Variable mit diesem Namen existiert bereits")
@@ -2459,23 +2460,23 @@ async def variables_update(var_id: str, data: dict):
 
 
 @app.get("/variables/{var_id}/usage")
-async def variables_usage(var_id: str):
+async def variables_usage(var_id: str, token: str = Depends(pb_user_auth.get_user_token)):
     """Findet alle Templates + Snippets, die diese Variable referenzieren."""
-    var = await pb_client.pb_get(f"/api/collections/email_variables/records/{var_id}")
+    var = await pb_client.pb_get_as(token, f"/api/collections/email_variables/records/{var_id}")
     name = var.get("name") or ""
     if not name:
         return {"name": "", "templates": [], "snippets": []}
-    return await _find_placeholder_usage(name, include_snippets=True, snippet_prefix=False)
+    return await _find_placeholder_usage(token, name, include_snippets=True, snippet_prefix=False)
 
 
 @app.delete("/variables/{var_id}")
-async def variables_delete(var_id: str):
-    await pb_client.pb_delete(f"/api/collections/email_variables/records/{var_id}")
+async def variables_delete(var_id: str, token: str = Depends(pb_user_auth.get_user_token)):
+    await pb_client.pb_delete_as(token, f"/api/collections/email_variables/records/{var_id}")
     return {"status": "deleted"}
 
 
 @app.post("/variables/{var_id}/rename")
-async def variables_rename(var_id: str, data: dict):
+async def variables_rename(var_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     """Benennt eine Variable um und ersetzt optional alle `{{old}}`-Vorkommen
     in Templates+Snippets durch `{{new}}`.
 
@@ -2489,7 +2490,7 @@ async def variables_rename(var_id: str, data: dict):
     if new_name in _VAR_RESERVED_NAMES:
         raise HTTPException(status_code=400, detail=f"name '{new_name}' ist reserviert")
 
-    cur = await pb_client.pb_get(f"/api/collections/email_variables/records/{var_id}")
+    cur = await pb_client.pb_get_as(token, f"/api/collections/email_variables/records/{var_id}")
     old_name = (cur.get("name") or "").strip().lower()
     if old_name == new_name:
         return {"old_name": old_name, "new_name": new_name,
@@ -2498,11 +2499,12 @@ async def variables_rename(var_id: str, data: dict):
     replaced_t = replaced_s = 0
     if replace:
         replaced_t, replaced_s = await _replace_placeholder_refs(
-            old_name, new_name, is_snippet=False
+            token, old_name, new_name, is_snippet=False
         )
 
     try:
-        await pb_client.pb_patch(
+        await pb_client.pb_patch_as(
+            token,
             f"/api/collections/email_variables/records/{var_id}",
             {"name": new_name},
         )
@@ -2515,7 +2517,7 @@ async def variables_rename(var_id: str, data: dict):
             "replaced_templates": replaced_t, "replaced_snippets": replaced_s}
 
 
-async def _replace_placeholder_refs(old: str, new: str, *, is_snippet: bool) -> tuple[int, int]:
+async def _replace_placeholder_refs(token: str, old: str, new: str, *, is_snippet: bool) -> tuple[int, int]:
     """Ersetzt `{{old}}` (Variable) bzw. `{{> old}}` (Snippet) in
     email_templates (subject+html_body) und — nur bei Variablen — auch
     in email_snippets (html). Snippet-in-Snippet ist per Plan verboten,
@@ -2544,7 +2546,8 @@ async def _replace_placeholder_refs(old: str, new: str, *, is_snippet: bool) -> 
         return result, changed
 
     tpl_modified = 0
-    tpls = await pb_client.pb_get(
+    tpls = await pb_client.pb_get_as(
+        token,
         "/api/collections/email_templates/records",
         params={"perPage": 500, "fields": "id,subject,html_body"},
     )
@@ -2557,21 +2560,23 @@ async def _replace_placeholder_refs(old: str, new: str, *, is_snippet: bool) -> 
                 patch["subject"] = new_subj
             if ch2:
                 patch["html_body"] = new_body
-            await pb_client.pb_patch(
-                f"/api/collections/email_templates/records/{t['id']}", patch
+            await pb_client.pb_patch_as(
+                token, f"/api/collections/email_templates/records/{t['id']}", patch
             )
             tpl_modified += 1
 
     snip_modified = 0
     if not is_snippet:
-        snips = await pb_client.pb_get(
+        snips = await pb_client.pb_get_as(
+            token,
             "/api/collections/email_snippets/records",
             params={"perPage": 500, "fields": "id,html"},
         )
         for s in snips.get("items", []):
             new_html, ch = rewrite(s.get("html") or "")
             if ch:
-                await pb_client.pb_patch(
+                await pb_client.pb_patch_as(
+                    token,
                     f"/api/collections/email_snippets/records/{s['id']}",
                     {"html": new_html},
                 )
@@ -2580,7 +2585,7 @@ async def _replace_placeholder_refs(old: str, new: str, *, is_snippet: bool) -> 
     return tpl_modified, snip_modified
 
 
-async def _find_placeholder_usage(name: str, *, include_snippets: bool, snippet_prefix: bool) -> dict:
+async def _find_placeholder_usage(token: str, name: str, *, include_snippets: bool, snippet_prefix: bool) -> dict:
     """Sucht `{{name}}` (oder `{{> name}}` wenn snippet_prefix=True) in
     email_templates.subject + html_body und optional email_snippets.html.
     Nutzt rendering._PLACEHOLDER_RE: (>?)(name).
@@ -2589,7 +2594,8 @@ async def _find_placeholder_usage(name: str, *, include_snippets: bool, snippet_
     matched_templates: list[dict] = []
     matched_snippets: list[dict] = []
 
-    tpls_resp = await pb_client.pb_get(
+    tpls_resp = await pb_client.pb_get_as(
+        token,
         "/api/collections/email_templates/records",
         params={"perPage": 500, "sort": "prefix,name"},
     )
@@ -2617,7 +2623,8 @@ async def _find_placeholder_usage(name: str, *, include_snippets: bool, snippet_
             })
 
     if include_snippets:
-        snips_resp = await pb_client.pb_get(
+        snips_resp = await pb_client.pb_get_as(
+            token,
             "/api/collections/email_snippets/records",
             params={"perPage": 500, "sort": "name"},
         )
@@ -2642,8 +2649,9 @@ _SNIPPET_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{0,49}$")
 
 
 @app.get("/snippets")
-async def snippets_list():
-    data = await pb_client.pb_get(
+async def snippets_list(token: str = Depends(pb_user_auth.get_user_token)):
+    data = await pb_client.pb_get_as(
+        token,
         "/api/collections/email_snippets/records",
         params={"perPage": 500, "sort": "name"},
     )
@@ -2651,7 +2659,7 @@ async def snippets_list():
 
 
 @app.post("/snippets")
-async def snippets_create(data: dict):
+async def snippets_create(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     name = (data.get("name") or "").strip().lower()
     if not _SNIPPET_NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="name ungültig (1–50 Zeichen, nur a-z, 0-9, _; Start mit Buchstabe oder _)")
@@ -2660,7 +2668,7 @@ async def snippets_create(data: dict):
         "html": data.get("html") or "",
     }
     try:
-        return await pb_client.pb_post("/api/collections/email_snippets/records", record)
+        return await pb_client.pb_post_as(token, "/api/collections/email_snippets/records", record)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 400 and "name" in exc.response.text:
             raise HTTPException(status_code=409, detail=f"Snippet '{name}' existiert bereits")
@@ -2668,7 +2676,7 @@ async def snippets_create(data: dict):
 
 
 @app.patch("/snippets/{snippet_id}")
-async def snippets_update(snippet_id: str, data: dict):
+async def snippets_update(snippet_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     patch: dict = {}
     if "html" in data:
         patch["html"] = data["html"] or ""
@@ -2680,7 +2688,7 @@ async def snippets_update(snippet_id: str, data: dict):
     if not patch:
         raise HTTPException(status_code=400, detail="nichts zu ändern")
     try:
-        return await pb_client.pb_patch(f"/api/collections/email_snippets/records/{snippet_id}", patch)
+        return await pb_client.pb_patch_as(token, f"/api/collections/email_snippets/records/{snippet_id}", patch)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 400 and "name" in exc.response.text:
             raise HTTPException(status_code=409, detail="Snippet mit diesem Namen existiert bereits")
@@ -2688,25 +2696,25 @@ async def snippets_update(snippet_id: str, data: dict):
 
 
 @app.get("/snippets/{snippet_id}/usage")
-async def snippets_usage(snippet_id: str):
+async def snippets_usage(snippet_id: str, token: str = Depends(pb_user_auth.get_user_token)):
     """Findet alle Templates, die dieses Snippet via {{> name}} referenzieren.
     Snippets duerfen keine anderen Snippets includen (Plan-Konvention), deshalb
     wird email_snippets nicht gescannt."""
-    snip = await pb_client.pb_get(f"/api/collections/email_snippets/records/{snippet_id}")
+    snip = await pb_client.pb_get_as(token, f"/api/collections/email_snippets/records/{snippet_id}")
     name = snip.get("name") or ""
     if not name:
         return {"name": "", "templates": [], "snippets": []}
-    return await _find_placeholder_usage(name, include_snippets=False, snippet_prefix=True)
+    return await _find_placeholder_usage(token, name, include_snippets=False, snippet_prefix=True)
 
 
 @app.delete("/snippets/{snippet_id}")
-async def snippets_delete(snippet_id: str):
-    await pb_client.pb_delete(f"/api/collections/email_snippets/records/{snippet_id}")
+async def snippets_delete(snippet_id: str, token: str = Depends(pb_user_auth.get_user_token)):
+    await pb_client.pb_delete_as(token, f"/api/collections/email_snippets/records/{snippet_id}")
     return {"status": "deleted"}
 
 
 @app.post("/snippets/{snippet_id}/rename")
-async def snippets_rename(snippet_id: str, data: dict):
+async def snippets_rename(snippet_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     """Benennt ein Snippet um und ersetzt optional alle `{{> old}}`-Refs
     in Templates durch `{{> new}}`.
 
@@ -2718,7 +2726,7 @@ async def snippets_rename(snippet_id: str, data: dict):
     if not _SNIPPET_NAME_RE.match(new_name):
         raise HTTPException(status_code=400, detail="name ungültig")
 
-    cur = await pb_client.pb_get(f"/api/collections/email_snippets/records/{snippet_id}")
+    cur = await pb_client.pb_get_as(token, f"/api/collections/email_snippets/records/{snippet_id}")
     old_name = (cur.get("name") or "").strip().lower()
     if old_name == new_name:
         return {"old_name": old_name, "new_name": new_name, "replaced_templates": 0}
@@ -2726,11 +2734,12 @@ async def snippets_rename(snippet_id: str, data: dict):
     replaced_t = 0
     if replace:
         replaced_t, _ = await _replace_placeholder_refs(
-            old_name, new_name, is_snippet=True
+            token, old_name, new_name, is_snippet=True
         )
 
     try:
-        await pb_client.pb_patch(
+        await pb_client.pb_patch_as(
+            token,
             f"/api/collections/email_snippets/records/{snippet_id}",
             {"name": new_name},
         )
@@ -2746,7 +2755,7 @@ _TEMPLATE_PREFIX_RE = re.compile(r"^[a-z0-9_]{0,30}$")
 
 
 @app.get("/templates")
-async def templates_list(prefix: str = "", search: str = ""):
+async def templates_list(prefix: str = "", search: str = "", token: str = Depends(pb_user_auth.get_user_token)):
     filters = []
     if prefix:
         filters.append(f'prefix={pb_client.pb_quote(prefix)}')
@@ -2756,7 +2765,8 @@ async def templates_list(prefix: str = "", search: str = ""):
     params = {"perPage": 500, "sort": "prefix,name"}
     if filters:
         params["filter"] = " && ".join(filters)
-    data = await pb_client.pb_get(
+    data = await pb_client.pb_get_as(
+        token,
         "/api/collections/email_templates/records",
         params=params,
     )
@@ -2764,7 +2774,7 @@ async def templates_list(prefix: str = "", search: str = ""):
 
 
 @app.post("/templates")
-async def templates_create(data: dict):
+async def templates_create(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     prefix = (data.get("prefix") or "").strip().lower()
     name = (data.get("name") or "").strip()
     if not _TEMPLATE_PREFIX_RE.match(prefix):
@@ -2779,7 +2789,7 @@ async def templates_create(data: dict):
         "text_body": data.get("text_body") or "",
     }
     try:
-        return await pb_client.pb_post("/api/collections/email_templates/records", record)
+        return await pb_client.pb_post_as(token, "/api/collections/email_templates/records", record)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 400 and ("prefix" in exc.response.text or "name" in exc.response.text):
             raise HTTPException(status_code=409, detail=f"Vorlage '{prefix}/{name}' existiert bereits")
@@ -2787,7 +2797,7 @@ async def templates_create(data: dict):
 
 
 @app.patch("/templates/{template_id}")
-async def templates_update(template_id: str, data: dict):
+async def templates_update(template_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     patch: dict = {}
     if "prefix" in data:
         p = (data["prefix"] or "").strip().lower()
@@ -2805,7 +2815,7 @@ async def templates_update(template_id: str, data: dict):
     if not patch:
         raise HTTPException(status_code=400, detail="nichts zu ändern")
     try:
-        return await pb_client.pb_patch(f"/api/collections/email_templates/records/{template_id}", patch)
+        return await pb_client.pb_patch_as(token, f"/api/collections/email_templates/records/{template_id}", patch)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 400 and ("prefix" in exc.response.text or "name" in exc.response.text):
             raise HTTPException(status_code=409, detail="Vorlage mit diesem Präfix+Name existiert bereits")
@@ -2813,8 +2823,8 @@ async def templates_update(template_id: str, data: dict):
 
 
 @app.delete("/templates/{template_id}")
-async def templates_delete(template_id: str):
-    await pb_client.pb_delete(f"/api/collections/email_templates/records/{template_id}")
+async def templates_delete(template_id: str, token: str = Depends(pb_user_auth.get_user_token)):
+    await pb_client.pb_delete_as(token, f"/api/collections/email_templates/records/{template_id}")
     return {"status": "deleted"}
 
 
