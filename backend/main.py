@@ -7,7 +7,10 @@ from urllib.parse import quote as _url_quote
 
 import httpx
 from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File
-from pydantic import BaseModel
+from fastapi.exceptions import RequestValidationError
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from slowapi.errors import RateLimitExceeded
@@ -520,6 +523,23 @@ async def _http_exception_handler(request: Request, exc: HTTPException):
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail},
+        headers={"Access-Control-Allow-Origin": request.headers.get("origin", "*")},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request: Request, exc: RequestValidationError):
+    """Pydantic-Validierungsfehler als flacher `{"detail": "..."}`-String,
+    damit das Frontend-Error-Handling (`new Error(j.detail)`) lesbare
+    Meldungen statt `[object Object]` zeigt."""
+    msgs = []
+    for err in exc.errors():
+        loc = ".".join(str(p) for p in err.get("loc", ()) if p != "body")
+        msg = err.get("msg", "")
+        msgs.append(f"{loc}: {msg}" if loc else msg)
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "; ".join(msgs) or "Ungültige Anfrage"},
         headers={"Access-Control-Allow-Origin": request.headers.get("origin", "*")},
     )
 
@@ -1956,19 +1976,18 @@ async def get_email(email_id: str, background_tasks: BackgroundTasks,
     return email
 
 
+class SetCategoryRequest(BaseModel):
+    ai_category: Literal["focus", "quick-reply", "office", "info-trash", ""] = ""
+
+
 @app.patch("/emails/{email_id}/category")
-async def set_category(email_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
+async def set_category(email_id: str, req: SetCategoryRequest, token: str = Depends(pb_user_auth.get_user_token)):
     """Setzt die KI-Kategorie einer E-Mail."""
-    category = data.get("ai_category", "")
-    valid = {"focus", "quick-reply", "office", "info-trash", ""}
-    if category not in valid:
-        raise HTTPException(status_code=400, detail=f"Ungültige Kategorie: {category}")
-    result = await pb_client.pb_patch_as(
+    return await pb_client.pb_patch_as(
         token,
         f"/api/collections/emails/records/{email_id}",
-        {"ai_category": category},
+        {"ai_category": req.ai_category},
     )
-    return result
 
 
 class BulkEmailRef(BaseModel):
@@ -2180,13 +2199,23 @@ async def _imap_move_to_spam(email: dict) -> tuple[str, int | None]:
     )
 
 
+class MoveEmailRequest(BaseModel):
+    target_folder: str = Field(..., min_length=1)
+
+    @field_validator("target_folder")
+    @classmethod
+    def strip_target(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("target_folder darf nicht leer sein")
+        return v
+
+
 @app.post("/emails/{email_id}/move")
-async def move_email(email_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
+async def move_email(email_id: str, req: MoveEmailRequest, token: str = Depends(pb_user_auth.get_user_token)):
     """Verschiebt E-Mail in einen anderen Ordner (IMAP + PocketBase).
     Beim Verlassen des Spam-Ordners werden Qdrant-Sample und spam_*-Felder mit aufgeräumt."""
-    target_folder = (data.get("target_folder") or "").strip()
-    if not target_folder:
-        raise HTTPException(status_code=400, detail="target_folder fehlt")
+    target_folder = req.target_folder
 
     email = await pb_client.pb_get_as(token, f"/api/collections/emails/records/{email_id}")
     source_folder = email.get("folder", "INBOX")
@@ -2786,22 +2815,29 @@ async def variables_list(token: str = Depends(pb_user_auth.get_user_token)):
     return data.get("items", [])
 
 
+class VariableCreateRequest(BaseModel):
+    name: str
+    value: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def normalize_and_validate_name(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if not _VAR_NAME_RE.match(v):
+            raise ValueError("name ungültig (nur a-z, 0-9, _; Start mit Buchstabe oder _)")
+        if v in _VAR_RESERVED_NAMES:
+            raise ValueError(f"name '{v}' ist reserviert für Kontakt-Felder")
+        return v
+
+
 @app.post("/variables")
-async def variables_create(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
-    name = (data.get("name") or "").strip().lower()
-    if not _VAR_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail="name ungültig (nur a-z, 0-9, _; Start mit Buchstabe oder _)")
-    if name in _VAR_RESERVED_NAMES:
-        raise HTTPException(status_code=400, detail=f"name '{name}' ist reserviert für Kontakt-Felder")
-    record = {
-        "name": name,
-        "value": data.get("value") or "",
-    }
+async def variables_create(req: VariableCreateRequest, token: str = Depends(pb_user_auth.get_user_token)):
+    record = {"name": req.name, "value": req.value}
     try:
         return await pb_client.pb_post_as(token, "/api/collections/email_variables/records", record)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 400 and "name" in exc.response.text:
-            raise HTTPException(status_code=409, detail=f"Variable '{name}' existiert bereits")
+            raise HTTPException(status_code=409, detail=f"Variable '{req.name}' existiert bereits")
         raise
 
 
