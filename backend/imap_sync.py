@@ -357,6 +357,8 @@ async def _get_or_create_folder(account_id: str, imap_path: str,
     """Gibt den Folder-Record zurück. Erstellt ihn falls nötig.
     email_folder: normierter Name der in emails.folder gespeichert wird (z.B. 'Drafts' für 'INBOX.Drafts').
     no_select: True wenn der Ordner \\NoSelect hat (reiner Namensraum, keine E-Mails).
+
+    A11: bewusste Admin-Nutzung — Folder-Discovery läuft im IMAP-Sync ohne User-Token.
     """
     async with _folder_create_lock:
         result = await pb_client.pb_get(

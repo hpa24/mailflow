@@ -429,17 +429,17 @@ async def search_contacts(q: str = "", limit: int = 8, token: str = Depends(pb_u
 
 
 @app.get("/smtp-servers")
-async def get_smtp_servers():
-    return await pb_client.pb_get("/api/collections/smtp_servers/records",
-                                  params={"perPage": 50, "sort": "name"})
+async def get_smtp_servers(token: str = Depends(pb_user_auth.get_user_token)):
+    return await pb_client.pb_get_as(token, "/api/collections/smtp_servers/records",
+                                     params={"perPage": 50, "sort": "name"})
 
 
 @app.get("/folders")
-async def get_folders(account: str | None = None):
+async def get_folders(account: str | None = None, token: str = Depends(pb_user_auth.get_user_token)):
     params = {"perPage": 200}
     if account:
         params["filter"] = f'account={pb_client.pb_quote(account)}'
-    return await pb_client.pb_get("/api/collections/folders/records", params=params)
+    return await pb_client.pb_get_as(token, "/api/collections/folders/records", params=params)
 
 
 @app.get("/search")
@@ -1680,19 +1680,19 @@ async def dismiss_spam_suggestion(email_id: str):
 
 
 @app.get("/spam-rules")
-async def list_spam_rules(account: str | None = None):
+async def list_spam_rules(account: str | None = None, token: str = Depends(pb_user_auth.get_user_token)):
     """Listet alle Spam-Regeln, optional nach Account gefiltert."""
     params: dict = {"perPage": 500}
     if account:
         params["filter"] = f'account={pb_client.pb_quote(account)}'
-    result = await pb_client.pb_get("/api/collections/spam_rules/records", params=params)
+    result = await pb_client.pb_get_as(token, "/api/collections/spam_rules/records", params=params)
     return {"items": result.get("items", []), "totalItems": result.get("totalItems", 0)}
 
 
 @app.delete("/spam-rules/{rule_id}")
-async def delete_spam_rule(rule_id: str):
+async def delete_spam_rule(rule_id: str, token: str = Depends(pb_user_auth.get_user_token)):
     """Löscht eine Spam-Regel (Absender wieder erlaubt)."""
-    await pb_client.pb_delete(f"/api/collections/spam_rules/records/{rule_id}")
+    await pb_client.pb_delete_as(token, f"/api/collections/spam_rules/records/{rule_id}")
     return {"deleted": rule_id}
 
 
@@ -2309,10 +2309,10 @@ class SavePatternRequest(BaseModel):
 
 
 @app.post("/response-patterns")
-async def save_response_pattern(req: SavePatternRequest):
+async def save_response_pattern(req: SavePatternRequest, token: str = Depends(pb_user_auth.get_user_token)):
     """Speichert ein Antwort-Pattern (Element + Entwurf) in PocketBase."""
     try:
-        await pb_client.pb_post("/api/collections/response_patterns/records", {
+        await pb_client.pb_post_as(token, "/api/collections/response_patterns/records", {
             "account":       req.account_id,
             "element_text":  req.element_text,
             "action":        req.action,

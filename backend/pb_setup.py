@@ -86,6 +86,9 @@ async def setup_pocketbase_schema(token: str) -> None:
         # A11 Phase 3b — Kontakte-Cluster: contacts und contact_groups dito. Admin-Pfade
         # (Import via X-Import-Key, IMAP-Sync-Upsert) nutzen Admin-Token und sind von
         # Rules nicht betroffen (Superuser-Bypass).
+        # A11 Phase 3c — Kleinkram-Cluster: folders, smtp_servers, triage_rules, spam_rules,
+        # response_patterns. Backend-Schreiber (imap_sync, spam_filter, smtp_sender,
+        # cleanup_folders) nutzen Admin-Token.
         _cluster_rules = {
             "listRule": '@request.auth.id != ""',
             "viewRule": '@request.auth.id != ""',
@@ -96,6 +99,7 @@ async def setup_pocketbase_schema(token: str) -> None:
         for _name in (
             "email_variables", "email_snippets", "email_templates",
             "contacts", "contact_groups",
+            "folders", "smtp_servers", "triage_rules", "spam_rules", "response_patterns",
         ):
             if _name in existing:
                 await _ensure_rules(client, headers, _name, existing[_name], _cluster_rules)
@@ -382,11 +386,12 @@ def _folders_schema(accounts_id: str) -> dict:
     return {
         "name": "folders",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3c — Kleinkram-Cluster. IMAP-Sync schreibt folders als Admin (Backend).
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "fields": [
             _field("account", "relation", required=True,
                    collectionId=accounts_id, maxSelect=1, cascadeDelete=True),
@@ -405,11 +410,14 @@ def _smtp_servers_schema() -> dict:
     return {
         "name": "smtp_servers",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3c — Kleinkram-Cluster. smtp_sender liest als Admin (Backend-Versand).
+        # FIXME: password-Feld kommt aktuell ohne fields-Filter durch GET /smtp-servers
+        # zum Frontend — bestehende Lücke, separat zu adressieren (nicht im Scope von 3c).
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "fields": [
             _field("name", "text", required=True),
             _field("host", "text", required=True),
@@ -427,11 +435,12 @@ def _triage_rules_schema(accounts_id: str) -> dict:
     return {
         "name": "triage_rules",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3c — Kleinkram-Cluster.
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "fields": [
             _field("account", "relation", required=True,
                    collectionId=accounts_id, maxSelect=1, cascadeDelete=True),
@@ -445,11 +454,12 @@ def _spam_rules_schema(accounts_id: str) -> dict:
     return {
         "name": "spam_rules",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3c — Kleinkram-Cluster. spam_filter liest+schreibt als Admin (Backend).
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "indexes": [
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_spam_rules_account_pattern ON spam_rules (account, match_type, pattern)",
         ],
@@ -469,11 +479,12 @@ def _response_patterns_schema(accounts_id: str) -> dict:
     return {
         "name": "response_patterns",
         "type": "base",
-        "listRule": None,
-        "viewRule": None,
-        "createRule": None,
-        "updateRule": None,
-        "deleteRule": None,
+        # A11 Phase 3c — Kleinkram-Cluster.
+        "listRule": '@request.auth.id != ""',
+        "viewRule": '@request.auth.id != ""',
+        "createRule": '@request.auth.id != ""',
+        "updateRule": '@request.auth.id != ""',
+        "deleteRule": '@request.auth.id != ""',
         "fields": [
             _field("account", "relation", required=True,
                    collectionId=accounts_id, maxSelect=1, cascadeDelete=True),
