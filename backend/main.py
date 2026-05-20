@@ -2,7 +2,7 @@ import logging
 import re
 import secrets as _secrets
 import uuid as _uuid_mod
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from urllib.parse import quote as _url_quote
 
 import httpx
@@ -18,6 +18,7 @@ from services.imap import imap_session
 
 import asyncio
 import json
+import time
 
 import pb_client
 from pb_client import start_token_refresh, stop_token_refresh
@@ -42,8 +43,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Temporärer Speicher für hochgeladene Anhänge (in-memory, max. 25 MB pro Datei)
-_temp_uploads: dict[str, dict] = {}  # {temp_id: {filename, content_type, data: bytes}}
+# Limits & Cleanup für temporäre Uploads (B14)
+MAX_UPLOAD_SIZE = 25 * 1024 * 1024            # 25 MB pro Datei
+MAX_TOTAL_UPLOAD_SIZE = 200 * 1024 * 1024     # 200 MB über alle aktiven Uploads
+UPLOAD_TTL_SECONDS = 30 * 60                  # 30 min — danach wird der Eintrag verworfen
+UPLOAD_CLEANUP_INTERVAL_SECONDS = 5 * 60      # 5 min — Sweep-Intervall
+
+# Temporärer Speicher für hochgeladene Anhänge (in-memory)
+# {temp_id: {filename, content_type, data: bytes, size: int, created_at: float}}
+_temp_uploads: dict[str, dict] = {}
 
 # Hintergrund-Sendejobs: {job_id: {status, to, subject}}
 _send_jobs: dict[str, dict] = {}
@@ -105,6 +113,32 @@ async def _update_folder_unread_count(token: str, account_id: str, folder: str) 
         )
 
 
+async def _cleanup_temp_uploads_loop() -> None:
+    """Verwirft Einträge in `_temp_uploads`, die älter als UPLOAD_TTL_SECONDS sind.
+
+    Verhindert RAM-Leaks bei Browser-Crash / Compose-Abbruch — ohne dieses
+    Aufräumen würden Anhänge bis zum nächsten Backend-Restart belegt bleiben.
+    """
+    while True:
+        try:
+            await asyncio.sleep(UPLOAD_CLEANUP_INTERVAL_SECONDS)
+            now = time.monotonic()
+            stale_ids = [tid for tid, entry in _temp_uploads.items()
+                         if now - entry.get("created_at", now) > UPLOAD_TTL_SECONDS]
+            for tid in stale_ids:
+                entry = _temp_uploads.pop(tid, None)
+                if entry:
+                    logger.warning(
+                        "Temporärer Upload abgelaufen: %s (%d bytes, age=%.0fs)",
+                        entry.get("filename"), entry.get("size", 0),
+                        now - entry.get("created_at", now),
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Cleanup-Loop für _temp_uploads fehlgeschlagen")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Mailflow backend...")
@@ -115,6 +149,7 @@ async def lifespan(app: FastAPI):
     fts_setup(settings.PB_DATA_PATH)
     start_scheduler()
     await idle_manager.start()
+    upload_cleanup_task = asyncio.create_task(_cleanup_temp_uploads_loop())
 
     if settings.QDRANT_URL:
         try:
@@ -132,6 +167,9 @@ async def lifespan(app: FastAPI):
 
     logger.info("Mailflow backend ready")
     yield
+    upload_cleanup_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await upload_cleanup_task
     await idle_manager.stop()
     stop_scheduler()
     stop_token_refresh()
@@ -1479,22 +1517,42 @@ async def get_inline_image(email_id: str, cid: str):
 
 @app.post("/attachments/upload")
 async def upload_attachment(file: UploadFile = File(...)):
-    """Lädt eine Datei temporär in den Arbeitsspeicher (max. 25 MB)."""
-    MAX_SIZE = 25 * 1024 * 1024
+    """Lädt eine Datei temporär in den Arbeitsspeicher.
+
+    Limits: ``MAX_UPLOAD_SIZE`` pro Datei, ``MAX_TOTAL_UPLOAD_SIZE`` über alle
+    aktiven Uploads. Einträge werden nach ``UPLOAD_TTL_SECONDS`` durch
+    ``_cleanup_temp_uploads_loop`` verworfen.
+    """
     data = await file.read()
-    if len(data) > MAX_SIZE:
-        raise HTTPException(status_code=413, detail="Datei zu groß (max. 25 MB)")
+    size = len(data)
+    if size > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Datei zu groß (max. {MAX_UPLOAD_SIZE // (1024 * 1024)} MB)",
+        )
+    current_total = sum(e.get("size", 0) for e in _temp_uploads.values())
+    if current_total + size > MAX_TOTAL_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Upload-Speicher voll (max. {MAX_TOTAL_UPLOAD_SIZE // (1024 * 1024)} MB total) "
+                "— bitte später erneut versuchen"
+            ),
+        )
     temp_id = str(_uuid_mod.uuid4())
     _temp_uploads[temp_id] = {
         "filename": file.filename or "anhang",
         "content_type": file.content_type or "application/octet-stream",
         "data": data,
+        "size": size,
+        "created_at": time.monotonic(),
     }
-    logger.info("Temporärer Upload: %s (%d bytes)", file.filename, len(data))
+    logger.info("Temporärer Upload: %s (%d bytes, total=%d)",
+                file.filename, size, current_total + size)
     return {
         "id": temp_id,
         "filename": file.filename or "anhang",
-        "size": len(data),
+        "size": size,
         "content_type": file.content_type,
     }
 
