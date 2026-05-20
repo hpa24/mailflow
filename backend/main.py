@@ -818,7 +818,13 @@ async def _finalize_for_recipient(to_field: str, subject: str,
 
 
 async def _do_send_job(job_id: str, data: dict, attachments: list) -> None:
-    """Führt den SMTP-Versand im Hintergrund aus und meldet das Ergebnis via SSE."""
+    """Führt den SMTP-Versand im Hintergrund aus und meldet das Ergebnis via SSE.
+
+    A11: bewusste Admin-Nutzung — läuft als asyncio-Task ohne User-Token-Kontext;
+    kann minutenlang dauern (Bulk-Send mit Delay) und überlebt damit das User-Session-
+    Token-Cache-TTL. Schreibt emails (is_answered, Draft-Cleanup) und bulk_sends-
+    Recipient-Status als Admin.
+    """
     to      = data["to"]
     subject = data["subject"]
     cc      = data.get("cc", "")
@@ -913,8 +919,13 @@ async def _do_send_job(job_id: str, data: dict, attachments: list) -> None:
 
 
 @app.post("/emails/send")
-async def send_email_endpoint(data: dict):
-    """Startet den E-Mail-Versand im Hintergrund und gibt sofort eine Job-ID zurück."""
+async def send_email_endpoint(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
+    """Startet den E-Mail-Versand im Hintergrund und gibt sofort eine Job-ID zurück.
+
+    Endpoint selbst macht keine direkten PB-Calls; der Background-Job (`_do_send_job`)
+    nutzt bewusst weiterhin den Admin-Token, weil er über die Lebenszeit der
+    User-Session hinaus laufen kann (z.B. Bulk-Send mit Sekunden-Delays).
+    """
     to           = (data.get("to") or "").strip()
     from_account = (data.get("from_account") or "").strip()
     smtp_server  = (data.get("smtp_server") or "").strip()
@@ -984,12 +995,16 @@ async def _do_bulk_send(bulk_id: str, jobs: list[dict], base_data: dict,
 
 
 @app.post("/emails/bulk-send")
-async def bulk_send_endpoint(data: dict):
+async def bulk_send_endpoint(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     """Versendet dieselbe E-Mail einzeln an viele Empfänger mit Zeitversatz.
 
     Body wie ``/emails/send``, zusätzlich:
       - ``recipients``: list[str] — eine E-Mail-Adresse pro Eintrag
       - ``delay_seconds``: float (default 5.0) — Abstand zwischen den Mails
+
+    accounts-Read läuft im User-Kontext; der bulk_sends-Audit-Record und der
+    Background-Versand (`_do_bulk_send` → `_do_send_job`) nutzen weiterhin
+    Admin-Token (bulk_sends-Collection wird in Phase 3e migriert).
     """
     recipients_raw = data.get("recipients") or []
     if not isinstance(recipients_raw, list) or not recipients_raw:
@@ -1057,7 +1072,7 @@ async def bulk_send_endpoint(data: dict):
 
     bulk_send_id = None
     try:
-        acc = await pb_client.pb_get(f"/api/collections/accounts/records/{from_account}")
+        acc = await pb_client.pb_get_as(token, f"/api/collections/accounts/records/{from_account}")
         from_email = acc.get("from_email") or ""
     except Exception:
         from_email = ""
@@ -1186,7 +1201,7 @@ async def _bulk_record_recipient_result(
 
 
 @app.post("/emails/draft")
-async def create_draft(data: dict):
+async def create_draft(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     """Erstellt einen neuen Entwurf in PocketBase."""
     import uuid
     from datetime import datetime, timezone
@@ -1197,7 +1212,7 @@ async def create_draft(data: dict):
 
     # Account-Daten laden, um from_email zu bekommen
     try:
-        acc = await pb_client.pb_get(f"/api/collections/accounts/records/{account_id}")
+        acc = await pb_client.pb_get_as(token, f"/api/collections/accounts/records/{account_id}")
         from_email = acc.get("from_email", "")
         from_name = acc.get("from_name", "")
     except Exception:
@@ -1228,23 +1243,23 @@ async def create_draft(data: dict):
         "is_read": True,
         "date_sent": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
     }
-    return await pb_client.pb_post("/api/collections/emails/records", draft)
+    return await pb_client.pb_post_as(token, "/api/collections/emails/records", draft)
 
 
 @app.post("/emails/draft/{draft_id}/sync")
-async def sync_draft_to_imap(draft_id: str):
+async def sync_draft_to_imap(draft_id: str, token: str = Depends(pb_user_auth.get_user_token)):
     """APPENDet einen Entwurf in den IMAP-Drafts-Ordner."""
     import email.utils
     from datetime import datetime, timezone
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
-    draft = await pb_client.pb_get(f"/api/collections/emails/records/{draft_id}")
+    draft = await pb_client.pb_get_as(token, f"/api/collections/emails/records/{draft_id}")
     account_id = draft.get("account")
     if not account_id:
         raise HTTPException(status_code=400, detail="Kein Account am Entwurf")
 
-    acc = await pb_client.pb_get(f"/api/collections/accounts/records/{account_id}")
+    acc = await pb_client.pb_get_as(token, f"/api/collections/accounts/records/{account_id}")
 
     # MIME-Nachricht aufbauen
     msg = MIMEMultipart("mixed")
@@ -1315,7 +1330,7 @@ def _imap_append_draft(acc: dict, msg_bytes: bytes, message_id: str = None) -> N
 
 
 @app.patch("/emails/draft/{draft_id}")
-async def update_draft(draft_id: str, data: dict):
+async def update_draft(draft_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     """Aktualisiert einen bestehenden Entwurf."""
     to = data.get("to", "")
     subject = data.get("subject", "") or "(Kein Betreff)"
@@ -1334,8 +1349,8 @@ async def update_draft(draft_id: str, data: dict):
         "snippet": (full_body[:120] if full_body else ""),
         "to_emails": [to] if to else [],
     }
-    return await pb_client.pb_patch(
-        f"/api/collections/emails/records/{draft_id}", patch
+    return await pb_client.pb_patch_as(
+        token, f"/api/collections/emails/records/{draft_id}", patch
     )
 
 
@@ -2039,7 +2054,7 @@ async def get_categories():
 
 
 @app.post("/ai/triage")
-async def ai_triage(req: TriageRequest):
+async def ai_triage(req: TriageRequest, token: str = Depends(pb_user_auth.get_user_token)):
     """Kategorisiert ungelesene E-Mails ohne ai_category via Claude Haiku.
 
     Max. 50 E-Mails pro Aufruf (Kostenschutz).
@@ -2051,7 +2066,7 @@ async def ai_triage(req: TriageRequest):
         filters.append(f'folder={pb_client.pb_quote(req.folder)}')
 
     try:
-        data = await pb_client.pb_get("/api/collections/emails/records", params={
+        data = await pb_client.pb_get_as(token, "/api/collections/emails/records", params={
             "filter": " && ".join(filters),
             "perPage": 50,
             "sort": "-date_sent",
@@ -2069,7 +2084,7 @@ async def ai_triage(req: TriageRequest):
     rules: list[str] = []
     try:
         rule_filter = f'account={pb_client.pb_quote(req.account_id)}' if req.account_id else ""
-        rule_data = await pb_client.pb_get("/api/collections/triage_rules/records", params={
+        rule_data = await pb_client.pb_get_as(token, "/api/collections/triage_rules/records", params={
             "filter": rule_filter,
             "perPage": 100,
             "sort": "-created",
@@ -2093,7 +2108,8 @@ async def ai_triage(req: TriageRequest):
                     from_email=email.get("from_email") or "",
                     rules=rules,
                 )
-                await pb_client.pb_patch(
+                await pb_client.pb_patch_as(
+                    token,
                     f"/api/collections/emails/records/{email['id']}",
                     {"ai_category": category},
                 )
@@ -2109,7 +2125,7 @@ async def ai_triage(req: TriageRequest):
 
 
 @app.post("/triage/example")
-async def save_triage_example(data: dict):
+async def save_triage_example(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     """Speichert eine manuelle Korrektur als Lernregel für die KI-Triage."""
     email_id = data.get("email_id", "").strip()
     category = data.get("category", "").strip()
@@ -2118,8 +2134,8 @@ async def save_triage_example(data: dict):
         raise HTTPException(status_code=400, detail="email_id und gültige category erforderlich")
 
     try:
-        email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}",
-                                       params={"fields": "account,from_email,subject,body_plain"})
+        email = await pb_client.pb_get_as(token, f"/api/collections/emails/records/{email_id}",
+                                          params={"fields": "account,from_email,subject,body_plain"})
     except Exception as exc:
         logger.error("triage/example: E-Mail %s konnte nicht geladen werden: %s", email_id, exc)
         status = 404 if "404" in str(exc) else 502
@@ -2135,7 +2151,7 @@ async def save_triage_example(data: dict):
     logger.info("Triage-Regel extrahiert: %s → %s", category, rule_text)
 
     try:
-        await pb_client.pb_post("/api/collections/triage_rules/records", {
+        await pb_client.pb_post_as(token, "/api/collections/triage_rules/records", {
             "account":       email["account"],
             "category_slug": category,
             "rule_text":     rule_text,
@@ -2146,12 +2162,13 @@ async def save_triage_example(data: dict):
 
     # Konsolidierung prüfen: bei ≥15 Regeln für diesen Account + Kategorie
     try:
-        count_data = await pb_client.pb_get("/api/collections/triage_rules/records", params={
+        count_data = await pb_client.pb_get_as(token, "/api/collections/triage_rules/records", params={
             "filter": f'account={pb_client.pb_quote(email["account"])} && category_slug={pb_client.pb_quote(category)}',
             "perPage": 1,
         })
         total = count_data.get("totalItems", 0)
         if total >= 15:
+            # _consolidate_rules läuft als Background-Task ohne User-Session → Admin-Token (bewusst).
             asyncio.create_task(_consolidate_rules(email["account"], category))
     except Exception as exc:
         logger.warning("Konsolidierungsprüfung fehlgeschlagen: %s", exc)
@@ -2195,10 +2212,10 @@ class AnalyzeRequest(BaseModel):
 
 
 @app.post("/ai/analyze")
-async def ai_analyze(req: AnalyzeRequest):
+async def ai_analyze(req: AnalyzeRequest, token: str = Depends(pb_user_auth.get_user_token)):
     """Analysiert eine E-Mail strukturell: Elemente + Aktionsvorschläge."""
     try:
-        email = await pb_client.pb_get(f"/api/collections/emails/records/{req.email_id}")
+        email = await pb_client.pb_get_as(token, f"/api/collections/emails/records/{req.email_id}")
     except Exception as exc:
         raise HTTPException(status_code=404, detail=f"E-Mail nicht gefunden: {exc}")
 
@@ -2224,11 +2241,11 @@ async def ai_analyze(req: AnalyzeRequest):
 
 
 @app.post("/ai/suggest")
-async def ai_suggest(req: SuggestRequest):
+async def ai_suggest(req: SuggestRequest, token: str = Depends(pb_user_auth.get_user_token)):
     """Generiert einen Antwortvorschlag für eine E-Mail."""
     try:
-        email = await pb_client.pb_get(
-            f"/api/collections/emails/records/{req.email_id}"
+        email = await pb_client.pb_get_as(
+            token, f"/api/collections/emails/records/{req.email_id}"
         )
     except Exception as exc:
         raise HTTPException(status_code=404, detail=f"E-Mail nicht gefunden: {exc}")
@@ -2248,7 +2265,8 @@ async def ai_suggest(req: SuggestRequest):
     thread_emails: list = []
     if thread_id:
         try:
-            thread_data = await pb_client.pb_get(
+            thread_data = await pb_client.pb_get_as(
+                token,
                 "/api/collections/emails/records",
                 params={
                     "filter": f'thread_id={pb_client.pb_quote(thread_id)} && id!={pb_client.pb_quote(req.email_id)}',
@@ -2269,7 +2287,8 @@ async def ai_suggest(req: SuggestRequest):
         if thread_id:
             history_filter += f' && thread_id!={pb_client.pb_quote(thread_id)}'
         try:
-            history_data = await pb_client.pb_get(
+            history_data = await pb_client.pb_get_as(
+                token,
                 "/api/collections/emails/records",
                 params={
                     "filter": history_filter,
