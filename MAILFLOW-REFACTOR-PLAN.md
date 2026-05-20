@@ -20,9 +20,10 @@
 - ✅ A11 Phase 3d.2 — 9 emails-State-Writes migriert, `_update_folder_unread_count(token, …)` durchgereicht (Commit `f45fbca`).
 - ✅ A11 Phase 3d.3 — Drafts (3), AI (4), Send (2) migriert; Background-Helper (`_do_send_job` etc.) bleiben dokumentiert Admin (Commit `69cb0f3`).
 - ✅ A11 Phase 3e — Audit-/Bulk-Cluster (bulk_sends/webhooks/webhook_logs): 3 PB-Rules + 8 User-Endpoints, Backend-Schreiber dokumentiert. **Damit ist A11 komplett** (Commit `76c1676`).
+- ✅ Backlog A11-Nachzügler (2026-05-20) — `GET /smtp-servers` `fields=id,name,is_default`-Whitelist in `main.py`, FIXME im `_smtp_servers_schema` entfernt. `password` (und übrige Credentials) erreichen das Frontend nicht mehr.
 
 **Offen — nächster Chat startet hier:**
-- A11 abgeschlossen. Nächste Punkte aus dem Plan-Notiz: B9 (BODYSTRUCTURE), B14 (_temp_uploads TTL), B15 (Bulk-Jobs persistent), Refactor-Phase-2 (C1/C3/C4/C2). Plus Backlog: GET /smtp-servers `fields`-Filter (password-Leak).
+- A11 abgeschlossen, smtp-servers-Backlog erledigt. Nächste Punkte aus dem Plan-Notiz: B9 (BODYSTRUCTURE), B14 (_temp_uploads TTL), B15 (Bulk-Jobs persistent), Refactor-Phase-2 (C1/C3/C4/C2).
 - B9, B14, B15 (BODYSTRUCTURE / Temp-Upload-TTL / Bulk-Jobs persistent)
 - C1 / C3 / C4 — jeweils Phase 2 (weitere Router, ImapService-Klasse, weitere JS-Module)
 - C2 (Pydantic-Request-Modelle, verteilt)
