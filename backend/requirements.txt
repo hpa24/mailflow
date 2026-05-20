@@ -10,3 +10,4 @@ pydantic-settings>=2.0.0
 python-multipart>=0.0.9
 qdrant-client>=1.9.0
 openai>=1.30.0
+slowapi>=0.1.9

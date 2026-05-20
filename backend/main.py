@@ -10,6 +10,9 @@ from fastapi import FastAPI, BackgroundTasks, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 import asyncio
 import json
@@ -142,6 +145,21 @@ def _parse_cors_origins(raw: str) -> list[str]:
 
 
 app = FastAPI(title="Mailflow API", lifespan=lifespan)
+
+# Rate-Limiter: In-Memory (Single-Worker-Setup), Key = Client-IP.
+# Schützt Webhook-Send + Kontakt-Import gegen Spam/Brute-Force.
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Rate-Limit erreicht — bitte später erneut versuchen"},
+        headers={"Access-Control-Allow-Origin": request.headers.get("origin", "*")},
+    )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -2429,6 +2447,7 @@ async def _webhook_log(webhook_id: str, ip: str, status: str,
 
 
 @app.post("/webhooks/{slug}/send")
+@limiter.limit("30/minute")
 async def webhook_send(slug: str, request: Request, data: dict):
     """Externer Mail-Versand via Webhook.
 
@@ -3137,7 +3156,8 @@ def _parse_import_line(line: str, lineno: int) -> tuple | None:
 
 
 @app.post("/contacts/import")
-async def contacts_import(data: dict):
+@limiter.limit("30/minute")
+async def contacts_import(request: Request, data: dict):
     """Importiert Kontakte + Gruppen-Zuordnungen aus einer Multiline-Liste."""
     lines_raw = data.get("lines") or ""
     mode = (data.get("mode") or "add").lower()
