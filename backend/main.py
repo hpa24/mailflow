@@ -83,22 +83,23 @@ async def _get_imap_account(account_id: str) -> dict | None:
     return items[0] if items else None
 
 
-async def _update_folder_unread_count(account_id: str, folder: str) -> None:
+async def _update_folder_unread_count(token: str, account_id: str, folder: str) -> None:
     """Zählt is_read=false E-Mails für den Ordner und schreibt den Wert in folders.unread_count."""
-    count_data = await pb_client.pb_get("/api/collections/emails/records", params={
+    count_data = await pb_client.pb_get_as(token, "/api/collections/emails/records", params={
         "filter": f'account={pb_client.pb_quote(account_id)} && folder={pb_client.pb_quote(folder)} && is_read=false',
         "perPage": 1,
         "fields": "id",
     })
     new_unread = count_data.get("totalItems", 0)
-    folder_data = await pb_client.pb_get("/api/collections/folders/records", params={
+    folder_data = await pb_client.pb_get_as(token, "/api/collections/folders/records", params={
         "filter": f'account={pb_client.pb_quote(account_id)} && imap_path={pb_client.pb_quote(folder)}',
         "perPage": 1,
         "fields": "id",
     })
     folder_items = folder_data.get("items", [])
     if folder_items:
-        await pb_client.pb_patch(
+        await pb_client.pb_patch_as(
+            token,
             f"/api/collections/folders/records/{folder_items[0]['id']}",
             {"unread_count": new_unread},
         )
@@ -1501,13 +1502,14 @@ async def get_email(email_id: str, background_tasks: BackgroundTasks,
 
 
 @app.patch("/emails/{email_id}/category")
-async def set_category(email_id: str, data: dict):
+async def set_category(email_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     """Setzt die KI-Kategorie einer E-Mail."""
     category = data.get("ai_category", "")
     valid = {"focus", "quick-reply", "office", "info-trash", ""}
     if category not in valid:
         raise HTTPException(status_code=400, detail=f"Ungültige Kategorie: {category}")
-    result = await pb_client.pb_patch(
+    result = await pb_client.pb_patch_as(
+        token,
         f"/api/collections/emails/records/{email_id}",
         {"ai_category": category},
     )
@@ -1527,7 +1529,7 @@ class BulkReadRequest(BaseModel):
 
 
 @app.patch("/emails/bulk/read")
-async def bulk_mark_read(req: BulkReadRequest):
+async def bulk_mark_read(req: BulkReadRequest, token: str = Depends(pb_user_auth.get_user_token)):
     """Markiert mehrere E-Mails als gelesen/ungelesen.
     PocketBase: parallel; IMAP: eine Verbindung pro Account+Ordner."""
     if not req.emails:
@@ -1540,7 +1542,7 @@ async def bulk_mark_read(req: BulkReadRequest):
 
     # 1. PocketBase-Updates parallel (keine vorherige Abfrage nötig)
     await asyncio.gather(*[
-        pb_client.pb_patch(f"/api/collections/emails/records/{e['id']}", {"is_read": req.is_read})
+        pb_client.pb_patch_as(token, f"/api/collections/emails/records/{e['id']}", {"is_read": req.is_read})
         for e in emails
     ])
 
@@ -1554,7 +1556,7 @@ async def bulk_mark_read(req: BulkReadRequest):
             logger.warning("bulk_mark_read: E-Mail %s hat keine imap_uid — nur PocketBase aktualisiert", e.get("id"))
 
     await asyncio.gather(*[
-        _update_folder_unread_count(account_id, folder)
+        _update_folder_unread_count(token, account_id, folder)
         for account_id, folder in affected_groups.keys()
     ])
 
@@ -1597,9 +1599,10 @@ async def bulk_mark_read(req: BulkReadRequest):
 
 
 @app.patch("/emails/{email_id}/read")
-async def mark_read(email_id: str, is_read: bool = True):
+async def mark_read(email_id: str, is_read: bool = True, token: str = Depends(pb_user_auth.get_user_token)):
     # PocketBase aktualisieren
-    result = await pb_client.pb_patch(
+    result = await pb_client.pb_patch_as(
+        token,
         f"/api/collections/emails/records/{email_id}",
         {"is_read": is_read}
     )
@@ -1610,16 +1613,17 @@ async def mark_read(email_id: str, is_read: bool = True):
         logger.warning(f"IMAP mark-read failed for {email_id}: {e}")
     # Ordner-Zähler aktualisieren
     try:
-        await _update_folder_unread_count(result["account"], result["folder"])
+        await _update_folder_unread_count(token, result["account"], result["folder"])
     except Exception as e:
         logger.warning(f"folder unread_count update failed for {email_id}: {e}")
     return result
 
 
 @app.post("/emails/{email_id}/spam")
-async def move_to_spam(email_id: str, block_sender: bool = False, block_domain: bool = False):
+async def move_to_spam(email_id: str, block_sender: bool = False, block_domain: bool = False,
+                       token: str = Depends(pb_user_auth.get_user_token)):
     """Verschiebt E-Mail in den Spam-Ordner (IMAP + PocketBase) und lernt das Sample."""
-    email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
+    email = await pb_client.pb_get_as(token, f"/api/collections/emails/records/{email_id}")
     source_folder = email.get("folder", "INBOX")
     new_folder, new_uid = "Spam", None
     try:
@@ -1630,11 +1634,11 @@ async def move_to_spam(email_id: str, block_sender: bool = False, block_domain: 
     if new_uid:
         patch["imap_uid"] = new_uid
     try:
-        await pb_client.pb_patch(f"/api/collections/emails/records/{email_id}", patch)
+        await pb_client.pb_patch_as(token, f"/api/collections/emails/records/{email_id}", patch)
     except Exception as e:
         logger.warning(f"move_to_spam: pb_patch fehlgeschlagen (wahrscheinlich Race mit imap_sync): {e}")
     try:
-        await _update_folder_unread_count(email["account"], source_folder)
+        await _update_folder_unread_count(token, email["account"], source_folder)
     except Exception as e:
         logger.warning(f"folder unread_count update failed after spam move {email_id}: {e}")
 
@@ -1653,9 +1657,9 @@ async def move_to_spam(email_id: str, block_sender: bool = False, block_domain: 
 
 
 @app.post("/emails/{email_id}/unspam")
-async def unspam_email(email_id: str):
+async def unspam_email(email_id: str, token: str = Depends(pb_user_auth.get_user_token)):
     """Holt eine Mail aus dem Spam-Ordner zurück nach INBOX und entfernt das Spam-Sample."""
-    email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
+    email = await pb_client.pb_get_as(token, f"/api/collections/emails/records/{email_id}")
     source_folder = email.get("folder", "Spam")
     new_uid = None
     try:
@@ -1666,12 +1670,12 @@ async def unspam_email(email_id: str):
     if new_uid:
         patch["imap_uid"] = new_uid
     try:
-        await pb_client.pb_patch(f"/api/collections/emails/records/{email_id}", patch)
+        await pb_client.pb_patch_as(token, f"/api/collections/emails/records/{email_id}", patch)
     except Exception as e:
         logger.warning(f"unspam: pb_patch fehlgeschlagen: {e}")
     try:
-        await _update_folder_unread_count(email["account"], source_folder)
-        await _update_folder_unread_count(email["account"], "INBOX")
+        await _update_folder_unread_count(token, email["account"], source_folder)
+        await _update_folder_unread_count(token, email["account"], "INBOX")
     except Exception as e:
         logger.warning(f"folder unread_count update failed after unspam {email_id}: {e}")
     await spam_filter.remove_spam_sample(email_id)
@@ -1679,16 +1683,17 @@ async def unspam_email(email_id: str):
 
 
 @app.post("/emails/{email_id}/spam-suggestion/confirm")
-async def confirm_spam_suggestion(email_id: str):
+async def confirm_spam_suggestion(email_id: str, token: str = Depends(pb_user_auth.get_user_token)):
     """Bestätigt einen Spam-Vorschlag aus dem Vorschlag-Badge."""
-    return await move_to_spam(email_id, block_sender=False, block_domain=False)
+    return await move_to_spam(email_id, block_sender=False, block_domain=False, token=token)
 
 
 @app.post("/emails/{email_id}/spam-suggestion/dismiss")
-async def dismiss_spam_suggestion(email_id: str):
+async def dismiss_spam_suggestion(email_id: str, token: str = Depends(pb_user_auth.get_user_token)):
     """Verwirft den Spam-Vorschlag — Mail bleibt in INBOX."""
     try:
-        await pb_client.pb_patch(
+        await pb_client.pb_patch_as(
+            token,
             f"/api/collections/emails/records/{email_id}",
             {"spam_suggested": False, "spam_score": None, "spam_rule_match": ""},
         )
@@ -1766,14 +1771,14 @@ async def _imap_move_to_spam(email: dict) -> tuple[str, int | None]:
 
 
 @app.post("/emails/{email_id}/move")
-async def move_email(email_id: str, data: dict):
+async def move_email(email_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
     """Verschiebt E-Mail in einen anderen Ordner (IMAP + PocketBase).
     Beim Verlassen des Spam-Ordners werden Qdrant-Sample und spam_*-Felder mit aufgeräumt."""
     target_folder = (data.get("target_folder") or "").strip()
     if not target_folder:
         raise HTTPException(status_code=400, detail="target_folder fehlt")
 
-    email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
+    email = await pb_client.pb_get_as(token, f"/api/collections/emails/records/{email_id}")
     source_folder = email.get("folder", "INBOX")
     leaving_spam = source_folder == "Spam" and target_folder != "Spam"
 
@@ -1798,15 +1803,15 @@ async def move_email(email_id: str, data: dict):
         except Exception as ex:
             logger.warning("move_email: IMAP mark-read fehlgeschlagen: %s", ex)
     try:
-        await pb_client.pb_patch(f"/api/collections/emails/records/{email_id}", patch)
+        await pb_client.pb_patch_as(token, f"/api/collections/emails/records/{email_id}", patch)
     except Exception as e:
         # Race condition: imap_sync hat den Record bereits gelöscht (UID weg aus Quellordner)
         # IMAP-Move ist trotzdem erfolgt — nächster Sync legt Record im Zielordner neu an
         logger.warning("move_email: pb_patch fehlgeschlagen (wahrscheinlich Race mit imap_sync): %s", e)
     try:
         await asyncio.gather(
-            _update_folder_unread_count(email["account"], source_folder),
-            _update_folder_unread_count(email["account"], target_folder),
+            _update_folder_unread_count(token, email["account"], source_folder),
+            _update_folder_unread_count(token, email["account"], target_folder),
         )
     except Exception as e:
         logger.warning("move_email: folder unread_count update fehlgeschlagen: %s", e)
@@ -1847,14 +1852,15 @@ async def _imap_move(email: dict, target_folder: str) -> int | None:
 
 
 @app.delete("/emails/{email_id}")
-async def delete_email(email_id: str):
+async def delete_email(email_id: str, token: str = Depends(pb_user_auth.get_user_token)):
     """Löscht E-Mail in PocketBase und verschiebt sie auf dem IMAP-Server in den Papierkorb."""
-    email = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
+    email = await pb_client.pb_get_as(token, f"/api/collections/emails/records/{email_id}")
     source_folder = email.get("folder", "INBOX")
     was_unread = not email.get("is_read", True)
     if was_unread:
         try:
-            await pb_client.pb_patch(
+            await pb_client.pb_patch_as(
+                token,
                 f"/api/collections/emails/records/{email_id}", {"is_read": True}
             )
         except Exception:
@@ -1863,16 +1869,11 @@ async def delete_email(email_id: str):
         await _imap_trash(email)
     except Exception as e:
         logger.warning(f"IMAP trash failed for {email_id}: {e}")
-    async with httpx.AsyncClient(base_url=settings.PB_URL, timeout=10) as client:
-        resp = await client.delete(
-            f"/api/collections/emails/records/{email_id}",
-            headers={"Authorization": f"Bearer {pb_client.get_token()}"}
-        )
-        resp.raise_for_status()
+    await pb_client.pb_delete_as(token, f"/api/collections/emails/records/{email_id}")
     fts_delete(settings.PB_DATA_PATH, email_id)
     if was_unread:
         try:
-            await _update_folder_unread_count(email["account"], source_folder)
+            await _update_folder_unread_count(token, email["account"], source_folder)
         except Exception as e:
             logger.warning(f"folder unread_count update failed after delete {email_id}: {e}")
     return {"deleted": email_id}
