@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # Optionaler separater Key für externen Kontakt-Import (FileMaker, Xano etc.).
     # Wird per X-Import-Key-Header geprüft. Leer = Endpoint nur per PB-Login erreichbar.
     IMPORT_API_KEY: str = ""
+    # Separater Schlüssel für /admin/*-Endpoints (Embed-Backfill, IMAP-UID-Backfill, Embed-Suche).
+    # Wird per X-Admin-Key-Header geprüft. Leer = /admin/* liefert 503.
+    ADMIN_API_KEY: str = ""
     # HMAC-Secret für kurzlebige signierte URLs (SSE, Attachments, Inline-Bilder).
     # Im Coolify zufällig generieren — bei Rotation invalidieren alte Links sofort.
     SIGN_SECRET: str = ""

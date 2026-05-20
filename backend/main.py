@@ -188,6 +188,24 @@ async def _auth_middleware(request: Request, call_next):
         if import_key == settings.IMPORT_API_KEY:
             return await call_next(request)
 
+    # /admin/*: separater ADMIN_API_KEY via X-Admin-Key. PB-Bearer reicht hier NICHT,
+    # damit eine Frontend-Token-Kompromittierung nicht auch Admin-Funktionen öffnet.
+    if path.startswith("/admin/"):
+        if not settings.ADMIN_API_KEY:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "ADMIN_API_KEY nicht konfiguriert"},
+                headers={"Access-Control-Allow-Origin": request.headers.get("origin", "*")},
+            )
+        admin_key = request.headers.get("X-Admin-Key", "")
+        if _secrets.compare_digest(admin_key, settings.ADMIN_API_KEY):
+            return await call_next(request)
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Unauthorized"},
+            headers={"Access-Control-Allow-Origin": request.headers.get("origin", "*")},
+        )
+
     # PB-User-Token via Authorization-Header
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
