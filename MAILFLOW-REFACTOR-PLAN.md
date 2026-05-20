@@ -19,9 +19,10 @@
 - ✅ A11 Phase 3d.1 — emails+attachments PB-Rules + 8 Read-Endpoints auf User-Token (Commit `6933cbe`). Signed-URL-Endpoints bleiben Admin.
 - ✅ A11 Phase 3d.2 — 9 emails-State-Writes migriert, `_update_folder_unread_count(token, …)` durchgereicht (Commit `f45fbca`).
 - ✅ A11 Phase 3d.3 — Drafts (3), AI (4), Send (2) migriert; Background-Helper (`_do_send_job` etc.) bleiben dokumentiert Admin (Commit `69cb0f3`).
+- ✅ A11 Phase 3e — Audit-/Bulk-Cluster (bulk_sends/webhooks/webhook_logs): 3 PB-Rules + 8 User-Endpoints, Backend-Schreiber dokumentiert. **Damit ist A11 komplett** (Commit `76c1676`).
 
 **Offen — nächster Chat startet hier:**
-- A11 Phase 3e (Audit/Bulk: bulk_sends, webhook_logs, webhooks)
+- A11 abgeschlossen. Nächste Punkte aus dem Plan-Notiz: B9 (BODYSTRUCTURE), B14 (_temp_uploads TTL), B15 (Bulk-Jobs persistent), Refactor-Phase-2 (C1/C3/C4/C2). Plus Backlog: GET /smtp-servers `fields`-Filter (password-Leak).
 - B9, B14, B15 (BODYSTRUCTURE / Temp-Upload-TTL / Bulk-Jobs persistent)
 - C1 / C3 / C4 — jeweils Phase 2 (weitere Router, ImapService-Klasse, weitere JS-Module)
 - C2 (Pydantic-Request-Modelle, verteilt)
@@ -91,9 +92,11 @@ Reihenfolge nach Priorität: **Security zuerst, dann Robustheit, dann Architektu
   - **3d.1 — Reads ✅ (2026-05-20):** 8 Read-Endpoints (`/search`, `/emails`, `/emails/threaded`, `/emails/by-sender`, `/emails/{id}`, `/emails/{id}/attachments`, `/folders/counts`, `/accounts/sent-today`) auf `pb_get_as`. Signed-URL-Endpoints (`/emails/{id}/inline`, `/attachments/{id}/download`) bleiben Admin (kein Bearer im URL). Commit `6933cbe`.
   - **3d.2 — State-Writes ✅ (2026-05-20):** 9 Endpoints (`category`, `bulk/read`, `read`, `spam`/`unspam`, `spam-suggestion/{confirm,dismiss}`, `move`, `DELETE /emails/{id}`) auf `pb_*_as`. Helper `_update_folder_unread_count(token, …)` durchgereicht (8 Call-Sites). `delete_email` nutzt jetzt `pb_delete_as` statt direkten httpx-Call. Commit `f45fbca`.
   - **3d.3 — Drafts + AI + Send ✅ (2026-05-20):** 9 Endpoints (Drafts ×3, AI ×4, Send ×2) auf `pb_*_as`. Background-Helper bleiben Admin und sind im Docstring markiert: `_do_send_job` (überlebt User-Session bei Bulk-Send-Delay), `_do_bulk_send`, `_bulk_record_recipient_result`, `_consolidate_rules`, `_finalize_for_recipient`. `bulk_send_endpoint` mischt User-Token (accounts-Lookup) und Admin (bulk_sends-Audit, wird in 3e migriert). Commit `69cb0f3`.
-- **3e — Audit-/Bulk-Collections (offen):** `bulk_sends`, `webhook_logs`, `webhooks`. Backend schreibt (Bulk-Send-Status, Webhook-Log), User liest. Webhook-CRUD aus UI → user-token.
+- **3e — Audit-/Bulk-Collections ✅ (2026-05-20):** `bulk_sends`, `webhooks`, `webhook_logs`. 3 PB-Rules-Migrationen, 8 User-Endpoints (3 bulk_sends in main.py, 5 webhooks im Router). Backend-Pfade bleiben Admin und sind dokumentiert: `bulk_send_endpoint`-Audit-Write, `_bulk_record_recipient_result`, `_webhook_by_slug`, `_webhook_log`, `imap_sync._webhook_id_for_message`. Commit `76c1676`.
 
 Am Ende: Admin-Token nur noch für IMAP-Sync, Bulk-Backend, Webhook-Send-Backend und ähnliche reine Backend-Operationen.
+
+**A11 abgeschlossen (2026-05-20):** Alle 16 PocketBase-Collections via Code-Schema + `_ensure_rules` auf `@request.auth.id != ""` umgestellt. Frontend-Endpoints durchgehend im User-Token-Kontext (`pb_*_as`). Admin-Pfade (mit Begründung im Docstring): IMAP-Sync, Bulk-Send-Background, Webhook-Send mit X-Webhook-Key, Kontakt-Import mit X-Import-Key, Signed-URL-Endpoints, `/admin/*`.
 
 ### A13 — Filter-Escape konsistent
 
