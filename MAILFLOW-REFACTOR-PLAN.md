@@ -117,11 +117,17 @@ Am Ende: Admin-Token nur noch für IMAP-Sync, Bulk-Backend, Webhook-Send-Backend
 
 **Plan:** `_webhooks_schema()` und `_webhook_logs_schema()` ergänzen, inkl. unique-Indizes auf `slug` und `api_key`. Gegen frische PB-Instanz testen.
 
-### B9 — Anhänge/Inline-Bilder via BODYSTRUCTURE, nicht ganze Mail
+### B9 — Anhänge/Inline-Bilder via BODYSTRUCTURE, nicht ganze Mail ✅ (erledigt 2026-05-21, Commit `a2c8eea`)
 
-**Problem:** `_imap_fetch_attachment()` und `_imap_fetch_inline_cid()` holen `BODY[]`, also die komplette Mail. Bei großen Anhängen langsam und speicherfressend.
+**Umgesetzt:**
+- `services/imap.py`: Helper `_walk_bodystructure` (DFS, kompatibel zu `email.message.walk()`), `_decode_part_body` (base64/quoted-printable), `_is_attachment_leaf` (Disposition=attachment ODER filename/name).
+- `ImapService.fetch_attachment` und `fetch_inline` holen jetzt zuerst `BODYSTRUCTURE` (~1 KB), bestimmen die MIME-Part-ID des Ziels und fetchen gezielt `BODY[<part-id>]`. Decoding via Encoding-Feld aus der BODYSTRUCTURE.
+- Fallback auf `BODY[]` bei: keine BODYSTRUCTURE, part_index außerhalb, CID nicht gefunden — Aufrufer verlieren nichts.
+- Log-Zeile pro Fetch zeigt part_id + Rohbytes + Encoding → erlaubt Live-Beobachtung der Übertragungsmenge.
 
-**Plan:** Erst `BODYSTRUCTURE` parsen → MIME-Part-ID des gewünschten Anhangs ermitteln → `BODY[<part-id>]` gezielt fetchen. Bibliothek: `imap_tools` oder direkt `imaplib.fetch(..., '(BODYSTRUCTURE)')`.
+**Bekannte Restriktion:** Eingebettete `message/rfc822` (z.B. weitergeleitete Mails mit eigenen Anhängen) werden vom Walker als Leaf behandelt, nicht hineinrekursiert. Bei normalem Mailverkehr irrelevant; bei Bedarf später Rekursion ergänzen (Position 8 im message/rfc822-Leaf-Tupel).
+
+**Side-Find während des manuellen Tests (separat in `b340a6f` gefixt):** Inline-Bilder waren seit der A11-Umstellung gar nicht sichtbar. Ursache: `_signUrl` in `frontend/js/api.js` hängte `?token=` immer mit `?` an — bei `inlineImageUrl` enthielt der Pfad bereits `?cid=`, das ergab `…/inline?cid=X?token=Y` (zwei `?`), Browser parste token als Teil des cid-Werts, Auth-Middleware antwortete 401. Fix: `_signUrl(path, ttl, extraParams)`, `inlineImageUrl` übergibt `cid` als Extra-Param.
 
 ### B12 — Schema-Setup als echtes Manifest, nicht historisch gewachsen
 
@@ -172,13 +178,16 @@ Am Ende: Admin-Token nur noch für IMAP-Sync, Bulk-Backend, Webhook-Send-Backend
 
 ### C3 — Zentraler IMAP-Service
 
-**Problem:** IMAP-Login/Folder-Auflösung/Executor-Handling ist in Sync, Move, Trash, Read, Draft, Attachments, Sent-Append wiederholt.
+**Phase 1 (erledigt früher):** `imap_session(acc)`-Context-Manager als zentrales Login. Genutzt von main.py, imap_sync.py, backfill.py, smtp_sender.py.
 
-**Plan:** `services/imap.py` mit:
-- `ImapService.with_account(account_id) → AsyncContextManager` (Login + Cleanup)
-- `run_blocking(fn, *args)` (Executor-Wrapper)
-- Methoden: `move()`, `trash()`, `set_read()`, `append_sent()`, `fetch_attachment()`, `fetch_inline()`
-- Dies behebt auch B9 als Nebeneffekt (BODYSTRUCTURE-Logik zentral)
+**Phase 2 ✅ (erledigt 2026-05-21, Commit `9e711da`):** `ImapService`-Klasse in `services/imap.py` bündelt alle blocking-IMAP-Methoden, die vorher als `_imap_*_sync` in `main.py` lagen:
+- `append_draft`, `fetch_attachment`, `fetch_inline`, `set_read`, `set_answered`, `bulk_set_read`, `move_to_spam`, `move`, `trash`, `fetch_uids_with_msgids`
+- Privater Helper `_search_by_msgid`
+- Methoden sind blocking; main.py-Wrapper rufen `asyncio.to_thread(ImapService(acc).method, ...)`
+- main.py 3736 → 3560 Zeilen (−176). Verhalten 1:1, kein Logik-Change.
+- B9 als Nebeneffekt: BODYSTRUCTURE-Logik lebt jetzt zentral in `fetch_attachment` / `fetch_inline` (siehe oben).
+
+Nicht migriert: `imap_session` selbst (weiter genutzt von imap_sync.py, backfill.py, smtp_sender.py — eigene Code-Pfade, out of scope).
 
 ### C4 — Frontend `inbox.js` weiter zerlegen
 
