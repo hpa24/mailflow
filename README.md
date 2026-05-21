@@ -357,3 +357,31 @@ Phase 2 (Disk-Spool via `tempfile.NamedTemporaryFile` für sehr große Files) is
 ## SMTP-Server Response-Whitelist 2026-05-20
 
 `GET /smtp-servers` liefert ans Frontend nur noch `id`, `name`, `is_default` (PB-`fields`-Param). `password`, `host`, `port`, `user`, `use_tls`, `use_starttls` werden serverseitig herausgefiltert. Backend-Versand (`smtp_sender.py`) ist nicht betroffen — der liest als Admin direkt aus PB.
+
+## Refactor-Schub 2026-05-21
+
+Mehrere Schritte aus `MAILFLOW-REFACTOR-PLAN.md` an einem Tag erledigt; volle Begründungen + Restriktionen dort.
+
+### C3 Phase 2 — `ImapService`-Klasse
+
+`backend/services/imap.py` bündelt jetzt alle blocking-IMAP-Methoden in einer Klasse: `append_draft`, `fetch_attachment`, `fetch_inline`, `set_read`, `set_answered`, `bulk_set_read`, `move_to_spam`, `move`, `trash`, `fetch_uids_with_msgids` plus privater Helper `_search_by_msgid`. Die zehn `_imap_*_sync`-Funktionen in `main.py` sind weg. Async-Wrapper in `main.py` rufen `asyncio.to_thread(ImapService(acc).method, ...)`. `imap_session(acc)`-Context-Manager bleibt für die übrigen IMAP-Aufrufer (`imap_sync.py`, `backfill.py`, `smtp_sender.py`) unverändert.
+
+### B9 — Anhang/Inline via BODYSTRUCTURE
+
+`ImapService.fetch_attachment` und `fetch_inline` holen jetzt zuerst die BODYSTRUCTURE (~1 KB), walken den MIME-Baum depth-first analog zu `email.message.walk()`, bestimmen die IMAP-Part-ID des Ziels und fetchen gezielt `BODY[<part-id>]`. Decoder (base64 / quoted-printable) anhand des Encoding-Felds aus der BODYSTRUCTURE. Gewinn vor allem bei Mails mit großen PDFs + kleinen Inline-Bildern — pro Inline-Bild wurde vorher die komplette Mail samt aller Anhänge transportiert. Fallback auf den alten `BODY[]`-Pfad bei: fehlender/unbrauchbarer BODYSTRUCTURE, `part_index` außerhalb, CID nicht gefunden. Eingebettete `message/rfc822` werden vom Walker als Leaf behandelt — bei Bedarf später Rekursion ergänzen.
+
+### Inline-Bild-Fix in `frontend/js/api.js` (pre-existing seit A11)
+
+Beim B9-Test aufgefallen: `_signUrl` hängte `?token=` immer mit `?` an, auch wenn der Pfad bereits `?cid=…` enthielt. Die resultierende URL `…/inline?cid=X?token=Y` parste der Browser als ein einziges `cid`-Query-Param mit Wert `X?token=Y`, der Server sah keinen `token` → 401. Inline-Bilder waren seit der A11-Umstellung stillschweigend kaputt. Neue Signatur: `_signUrl(path, ttl, extraParams)`. `inlineImageUrl` übergibt `cid` als Extra-Param.
+
+### Spam-UI im Spam-Ordner ausgeblendet
+
+Listen-Quick-Actions (V/B), Detail-Pane-Buttons („Spam", „+ Absender blocken") und der „Als Spam markieren"-Eintrag im Rechtsklick-Kontextmenü erscheinen nur noch, wenn die Mail **nicht** im Spam-Ordner liegt. Reset (Mail aus Spam zurück) geht weiterhin über normales „Verschieben nach…"; bewusst kein zusätzlicher „Aus Spam holen"-Eintrag, weil das Zielordner ambig wäre. **Backend-Verhalten unverändert:** `move_email` aus Spam entfernt nur das Qdrant-Vektor-Sample (`spam_filter.remove_spam_sample`); manuell gesetzte Blocklist-Regeln in `spam_rules` bleiben bewusst bestehen — die müssen aktiv über das Spam-Regeln-Modal gelöscht werden.
+
+### Infinite-Scroll-Pagination
+
+`loadEmails(false)` aus dem Infinite-Scroll-Listener durchlief die komplette Initial-Load-Logik (Stage 1/2/3). Stage 2 ersetzte die Liste via `_addEmailBatch(..., true)` zurück auf Seite 1, Stage 3 lud parallel 1500 Mails erneut, Scroll-Position sprang durch das DOM-Re-Render nach oben — Nachladen war faktisch unmöglich. Am sichtbarsten im Trash. Fix: separater Append-Pfad in `loadEmails`, der schlicht `state.page` mit voller `PAGE_SIZE` fetcht und via `_addEmailBatch(..., false)` anhängt. Anschluss-Fix: Cache-Hit setzte `state.allLoaded = true` pauschal, blockte Infinite-Scroll nach Ordnerwechsel + zurück bei großen Ordnern. Jetzt aus `cached.emails.length >= cached.totalItems` abgeleitet.
+
+### C2 Phase 1 + 2 — Pydantic für 13 Endpoints
+
+13 von 21 `data: dict`-Endpoints auf typisierte Request-Modelle umgestellt. Pattern: pro Endpoint ein `BaseModel`, manuelle Validierung verschwindet ins Modell (Literal-Types, Regex via `field_validator`, `min_length`). PATCH-Endpoints nutzen `Optional`-Felder + `model_dump(exclude_unset=True)`, damit die alte „nur was im Body steht, wird gepatcht"-Semantik erhalten bleibt. Name-Normalisierung pro Collection in privaten `_normalize_<x>_name`-Helpers konsolidiert, die sowohl Create- als auch Update-Modell nutzen. Begleit-Exception-Handler für `RequestValidationError` flacht das Pydantic-Error-Array zu `{"detail": "..."}` — kompatibel zum bestehenden Frontend-Error-Handling. Verbleibend: 7 komplexere Endpoints (send/bulk/draft/account/contacts_import/templates_render).

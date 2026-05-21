@@ -2,7 +2,7 @@
 
 **Quelle:** GPT-Codereview vom 2026-05-20 (zusammen mit Stefan). Ergänzend zu den vier sofortigen Security-Fixes (Commits `e137884`, `e4659bf`, `940b24b`, `182241d` am 2026-05-20).
 
-## Status (Stand 2026-05-20 abend)
+## Status (Stand 2026-05-21 nacht)
 
 **Erledigt, live, smoke-getestet:**
 - ✅ A1 — Auth-Modell-Umbau (Commits `9b64ee3` + `77592ea`)
@@ -23,12 +23,15 @@
 - ✅ Backlog A11-Nachzügler (2026-05-20) — `GET /smtp-servers` `fields=id,name,is_default`-Whitelist in `main.py`, FIXME im `_smtp_servers_schema` entfernt. `password` (und übrige Credentials) erreichen das Frontend nicht mehr.
 - ✅ B14 Phase 1 (2026-05-20) — `_temp_uploads` mit TTL (30 min) + Gesamtlimit (200 MB) + Sweep-Coroutine im `lifespan`. Phase 2 (Disk-Spool) zurückgestellt, mit 200-MB-Cap nicht akut.
 - ✅ B15 (2026-05-20) — Bulk-Jobs persistent: `next_attempt_at` + `job_id` pro Empfänger, `_bulk_worker_loop` im `lifespan`, `_bulk_restart_cleanup` für has_attachments-Bulks. `_do_bulk_send` raus.
+- ✅ **C3 Phase 2** (2026-05-21, Commit `9e711da`) — `ImapService`-Klasse in `services/imap.py` bündelt alle 10 blocking-IMAP-Methoden, die vorher als `_imap_*_sync` in main.py lagen. main.py 3736 → 3560 Zeilen, Verhalten 1:1.
+- ✅ **B9** (2026-05-21, Commit `a2c8eea`) — Anhang/Inline gezielt via BODYSTRUCTURE statt `BODY[]`. Walker DFS-kompatibel zu `email.message.walk()`, Fallback auf alten Pfad bei fehlender/unbrauchbarer Struktur. Side-Find: Inline-Bilder waren seit A11 stillschweigend kaputt (Doppel-`?` in Signed-URL) — separat in `b340a6f` gefixt.
+- ✅ **C2 Phase 1 + Phase 2** (2026-05-21, Commits `ad0e942` + `868ef0a`) — 13 von 21 `data: dict`-Endpoints auf typisierte Pydantic-Request-Modelle umgestellt. Begleit-Handler für `RequestValidationError` flacht das Error-Array zu `{"detail": "..."}`, kompatibel zum bestehenden Frontend-Error-Handling.
 
-**Offen — nächster Chat startet hier:**
-- B9 (BODYSTRUCTURE), Refactor-Phase-2 (C1/C3/C4/C2), evtl. B14 Phase 2 (Disk-Spool, erlaubt Bulk-Resume mit Anhängen).
-- B9 (BODYSTRUCTURE)
-- C1 / C3 / C4 — jeweils Phase 2 (weitere Router, ImapService-Klasse, weitere JS-Module)
-- C2 (Pydantic-Request-Modelle, verteilt)
+**Offen — nächster Chat (Reihenfolge optional, alles reine Architektur/Cleanup, kein Security/Robustheits-Item mehr):**
+- **C1 Phase 2** — restliche 5 Router (Templates, Mail/IMAP, Contacts, Bulk, Admin) aus `main.py` rausziehen. Mechanisch, aber riskant wegen geteilter Helpers/Globals. ~2–3 h.
+- **C2 Phase 3** — die verbleibenden 7 (komplexen) Endpoints: `update_account`, `send_email_endpoint`, `bulk_send_endpoint`, `create_draft`, `update_draft`, `contacts_import`, `templates_render`. Brauchen größere Modelle mit nested Feldern.
+- **C4 Phase 2** — restliche 4 JS-Module aus `inbox.js`: `compose.js`, `email_detail.js`, `spam.js`, `sse.js`. Frontend-Modulsplit ist tückisch (State, Event-Listener). ~4–8 h.
+- **B14 Phase 2** (optional) — Disk-Spool via `tempfile.NamedTemporaryFile` für Uploads >200 MB. Aktuell nicht akut. Bonus: würde Bulk-Resume *mit* Anhängen erlauben (siehe B15-Restriktion).
 
 Lessons aus den erledigten Schritten stehen als Checkliste für neue Web-Apps in `Wissen/20_Apps/_shared/sicherheit.md` (Abschnitt `#backend-patterns`).
 
@@ -163,18 +166,28 @@ Am Ende: Admin-Token nur noch für IMAP-Sync, Bulk-Backend, Webhook-Send-Backend
 
 ### C1 — `backend/main.py` in Router/Services aufteilen
 
-**Problem:** ~3300 Zeilen mit Auth, Mail, IMAP, AI, Webhooks, Templates, Bulk, Kontakte.
+**Problem:** ~3500 Zeilen mit Auth, Mail, IMAP, AI, Webhooks, Templates, Bulk, Kontakte.
 
 **Plan:**
 - `routers/mail.py`, `routers/webhooks.py`, `routers/templates.py`, `routers/contacts.py`, `routers/bulk.py`, `routers/admin.py`
 - `services/imap.py`, `services/send.py`, `services/pb.py`, `services/ai.py`
 - Schrittweise: erst Webhook-Router rausziehen (kleiner Block, klare Grenze), dann Templates, zuletzt der dicke Mail/IMAP-Block
 
+**Phase 1 ✅ (früher):** `routers/webhooks.py` rausgezogen.
+
+**Phase 2 (offen):** Templates, Mail/IMAP, Contacts, Bulk, Admin. 5 Router. Mechanisch, aber riskant wegen geteilter Helpers/Globals (`_get_imap_account`, `_update_folder_unread_count`, Settings, PB-Client). Reihenfolge nach Schmerz: Admin (klein, ~150 Z) → Templates (~700 Z) → Contacts → Bulk → Mail/IMAP (größter Brocken).
+
 ### C2 — Pydantic-Request-Modelle konsequent
 
 **Problem:** Viele Endpoints nehmen `data: dict` und validieren manuell.
 
 **Plan:** Pro Endpoint eigenes Request-Modell (`class SendEmailRequest(BaseModel): ...`). FastAPI generiert dann Validierung, Defaults, OpenAPI-Doku automatisch. Schrittweise — kein Big-Bang.
+
+**Phase 1 ✅ (2026-05-21, Commit `ad0e942`):** 3 Endpoints (`set_category`, `move_email`, `variables_create`) + `RequestValidationError`-Handler, der das Error-Array zu `{"detail": "..."}` flacht (kompatibel zum `apiFetch`-Error-Handling im Frontend, das sonst `[object Object]` zeigen würde).
+
+**Phase 2 ✅ (2026-05-21, Commit `868ef0a`):** 10 weitere Endpoints — `variables_update/rename`, `snippets_create/update/rename`, `templates_create/update`, `contact_groups_create/update`, `save_triage_example`. Update-Endpoints nutzen `Optional`-Felder + `model_dump(exclude_unset=True)` für PATCH-Semantik. Name-Normalisierung pro Collection in `_normalize_<x>_name`-Helpers konsolidiert.
+
+**Phase 3 (offen):** 7 komplexere Endpoints — `update_account`, `send_email_endpoint`, `bulk_send_endpoint`, `create_draft`, `update_draft`, `contacts_import`, `templates_render`. Brauchen größere Modelle mit nested Feldern (Recipients-Listen, Attachments-IDs, Render-Kontext etc.).
 
 ### C3 — Zentraler IMAP-Service
 
@@ -199,6 +212,10 @@ Nicht migriert: `imap_session` selbst (weiter genutzt von imap_sync.py, backfill
 3. `email_detail.js` (Detail-Pane inkl. iframe-Höhe, KI-Sidebar)
 4. `spam.js` (Spam-Block-Flow)
 5. `sse.js` (EventSource + Reconnect, kann von vielen Modulen genutzt werden)
+
+**Phase 1 ✅ (früher):** `webhooks.js` rausgezogen.
+
+**Phase 2 (offen):** `compose.js`, `email_detail.js`, `spam.js`, `sse.js`. Tückisch wegen geteiltem `state`-Objekt, globalen Event-Listenern, render-Funktionen die kreuz und quer aufrufen. Saubere Trennung erfordert Module-Pattern (ES Modules oder IIFE) und explizite API-Boundaries. ~4–8 h.
 
 ### C5 — Eine einzige Config/Auth-Strategie
 
