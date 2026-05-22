@@ -188,6 +188,19 @@ async function openEmail(email, itemEl) {
       });
       cleanup.observe(document.body, { childList: true, subtree: true });
 
+      // S5 (2026-05-23): Tracking-Schutz — externe Bilder block-by-default.
+      // VOR CID-Replace ausführen, damit cid:-URLs unangetastet bleiben und
+      // nur http(s)://-URLs neutralisiert werden. data-blocked-src speichert die
+      // Original-URL für Live-DOM-Swap bei „Bilder laden".
+      let blockedImagesCount = 0;
+      htmlToRender = htmlToRender.replace(
+        /<img\b([^>]*?)\bsrc=(["'])(https?:\/\/[^"']+)\2([^>]*)>/gi,
+        (_m, before, q, url, after) => {
+          blockedImagesCount++;
+          return `<img${before}src="data:image/gif;base64,R0lGODlhAQABAAAAACw="${after} data-blocked-src=${q}${url}${q}>`;
+        }
+      );
+
       // cid:-Referenzen durch Backend-Proxy ersetzen — URLs vorher signieren (parallel)
       const cids = [...new Set([...htmlToRender.matchAll(/src=["']cid:([^"']+)["']/gi)].map(m => m[1]))];
       if (cids.length) {
@@ -204,6 +217,31 @@ async function openEmail(email, itemEl) {
       iframe.srcdoc = _withZoom(htmlToRender);
       body.innerHTML = '';
       body.style.display = 'flex';
+
+      // Banner für Tracking-Schutz, wenn externe Bilder blockiert wurden
+      if (blockedImagesCount > 0) {
+        const banner = document.createElement('div');
+        banner.style.cssText = 'padding:8px 12px;background:#fff4e5;border:1px solid #f4c478;border-radius:6px;margin-bottom:8px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:12px';
+        banner.innerHTML = `<span>🛡️ ${blockedImagesCount} externe(s) Bild(er) blockiert (Tracking-Schutz). CID-Inlines sind sichtbar.</span>`;
+        const loadBtn = document.createElement('button');
+        loadBtn.className = 'action-btn';
+        loadBtn.textContent = 'Bilder laden';
+        loadBtn.onclick = () => {
+          try {
+            const doc = iframe.contentDocument;
+            if (doc) {
+              doc.querySelectorAll('img[data-blocked-src]').forEach(img => {
+                img.src = img.getAttribute('data-blocked-src') || '';
+                img.removeAttribute('data-blocked-src');
+              });
+            }
+          } catch (_) { /* same-origin sollte gehen wg. allow-same-origin */ }
+          banner.remove();
+        };
+        banner.appendChild(loadBtn);
+        body.appendChild(banner);
+      }
+
       body.appendChild(iframe);
     } else {
       _activeIframe = null;

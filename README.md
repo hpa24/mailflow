@@ -480,3 +480,22 @@ Test-Plan:
 1. UI: Datei < 25 MB anhängen → muss funktionieren wie vorher
 2. UI: Datei > 25 MB versuchen → 413, kein RAM-Spike im Container (Beobachtung: `docker stats <backend>`)
 3. CLI-Stress: `curl -F file=@/dev/zero ...` mit 100 MB streamen → muss 413 zurückgeben, ohne dass das Backend-RAM-Profil hochschießt
+
+## S5: Remote-Bilder block-by-default 2026-05-23
+
+HTML-Mails wurden bisher im sandboxed Iframe komplett gerendert — externe Bilder (Tracking-Pixel, Marketing-Banner) wurden direkt vom Absender-Server nachgeladen und verrieten dabei IP/UA/Öffnungszeitpunkt. CID-Inlines liefen schon vorher über den signierten Backend-Proxy.
+
+Fix in `frontend/js/email_detail.js` (rein client-seitig, kein Backend-Touch):
+
+1. **VOR** dem CID-Replace ein Regex über `<img...src="http(s)://...">` — Original-URL wandert in `data-blocked-src`, `src` wird durch ein 43-Byte-Transparent-GIF-Data-URI ersetzt. cid:-URLs sind durch die `https?://`-Eingrenzung nicht betroffen und durchlaufen den normalen CID-Pfad.
+2. Wenn mindestens ein Bild geblockt wurde: gelbes Banner über dem Iframe mit Schild-Emoji, Counter und „Bilder laden"-Button.
+3. Klick auf „Bilder laden": Live-DOM-Swap im `iframe.contentDocument` (durch `allow-same-origin` möglich) — `img.src = img.dataset.blockedSrc`, Banner entfernt. Kein Re-Render des Iframes → kein Flackern, Scroll-Position bleibt.
+
+Bewusste V1-Einschränkung: nach einem Zoom-Wechsel rendert `inbox.js:21` den Iframe via `_activeIframeBaseHtml` neu, das die geblockte Variante enthält — Bilder sind dann wieder versteckt und müssen erneut geladen werden. Akzeptabel, da Zoom-Wechsel selten ist; sauberer Fix wäre, beim Klick `_activeIframeBaseHtml` mit der unblockierten Variante zu überschreiben (verlangt aber zweiten Snapshot vor dem Blocking).
+
+Weiter nicht abgedeckt (Phase 2 falls nötig): CSS `background-image: url(...)`, `<source srcset>`, `<picture>`-Tags. Tracking-Pixel der echten Welt nutzen fast immer `<img src>`, deshalb erstmal verzichtbar.
+
+Test-Plan:
+1. Mail mit Tracking-Pixel öffnen (z.B. Newsletter mit `<img src="https://...">`) → Banner erscheint, Bilder sind Platzhalter
+2. „Bilder laden" klicken → Bilder erscheinen, Banner verschwindet
+3. Mail mit `cid:`-Inline-Bildern öffnen → Banner erscheint **nicht** (CID läuft separat), Inline-Bilder sind sofort sichtbar
