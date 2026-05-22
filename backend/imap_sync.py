@@ -482,18 +482,29 @@ async def _cleanup_deleted_folders(account_id: str, existing_imap_paths: set[str
 
 
 async def _delete_emails_for_folder(account_id: str, folder_name: str) -> None:
-    result = await pb_client.pb_get(
-        "/api/collections/emails/records",
-        params={"filter": f'account={pb_client.pb_quote(account_id)} && folder={pb_client.pb_quote(folder_name)}',
-                "perPage": 500},
-    )
-    for email in result.get("items", []):
-        try:
-            await pb_client.pb_delete(
-                f"/api/collections/emails/records/{email['id']}"
-            )
-        except Exception:
-            pass
+    filter_expr = f'account={pb_client.pb_quote(account_id)} && folder={pb_client.pb_quote(folder_name)}'
+    total_deleted = 0
+    while True:
+        result = await pb_client.pb_get(
+            "/api/collections/emails/records",
+            params={"filter": filter_expr, "perPage": 500, "page": 1, "fields": "id"},
+        )
+        items = result.get("items", [])
+        if not items:
+            break
+        deleted_this_batch = 0
+        for email in items:
+            try:
+                await pb_client.pb_delete(
+                    f"/api/collections/emails/records/{email['id']}"
+                )
+                deleted_this_batch += 1
+            except Exception as e:
+                logger.warning(f"Could not delete email {email.get('id')} in '{folder_name}': {e}")
+        total_deleted += deleted_this_batch
+        if deleted_this_batch == 0:
+            break
+    logger.info(f"Deleted {total_deleted} email record(s) for account={account_id} folder='{folder_name}'")
 
 
 async def _compute_thread_id(message_id: str, in_reply_to: str) -> str:

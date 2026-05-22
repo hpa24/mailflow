@@ -2,6 +2,138 @@
 
 **Quelle:** GPT-Codereview vom 2026-05-20 (zusammen mit Stefan). Ergänzend zu den vier sofortigen Security-Fixes (Commits `e137884`, `e4659bf`, `940b24b`, `182241d` am 2026-05-20).
 
+
+## Offen nach großem Review-Check am 2026-05-22
+
+> [!important] Neuer Arbeitsblock
+> Diese Liste ist die konsolidierte Resteliste nach dem ersten großen Review-Check am 2026-05-22. Viele ursprüngliche Reviewpunkte sind erledigt; die folgenden Punkte sind die **übrig gebliebenen, noch umzusetzenden Reste**. Der ältere Plan darunter bleibt als Historie/Referenz erhalten.
+
+### R1 — UIDVALIDITY-Cleanup vollständig paginieren ✅ (2026-05-22)
+
+**Umsetzung:** `_delete_emails_for_folder` in `backend/imap_sync.py:484` löscht jetzt iterativ: `page=1, perPage=500, fields=id` laden → Batch löschen → neu laden bis `items` leer. Safeguard gegen Endlosschleife: wenn ein Batch komplett scheitert (`deleted_this_batch == 0`), Abbruch. `except Exception: pass` ersetzt durch `logger.warning(...)` mit Email-ID + Folder. Finaler `logger.info` mit Gesamtzahl pro `(account, folder)`. Smoke folgt beim nächsten echten UIDVALIDITY-Wechsel.
+
+### R2 — Webhook-Endpoints auf Pydantic-Request-Modelle umstellen
+
+**Status:** Pydantic-Migration ist fast vollständig erledigt; Webhooks sind Rest.
+
+**Betroffene Stelle:** `backend/routers/webhooks.py`
+
+Aktuelle `data: dict`-Endpoint-Signaturen:
+- `webhook_send(slug, request, data: dict)` — `POST /webhooks/{slug}/send`, auth per `X-Webhook-Key`, rate-limited. Payload: `to`, `subject`, `body`, `body_html`, `reply_to`, `cc`.
+- `webhooks_create(data: dict, token=...)` — UI-CRUD, auth per PB-Bearer. Pflicht: `name`, `slug`, `smtp_server`, `from_account`; optional: `default_to`, `from_name_override`, `allow_to_override`, `allow_reply_to`, `allow_cc`, `is_active`.
+- `webhooks_update(webhook_id, data: dict, token=...)` — PATCH-Semantik; `rotate_api_key: true` erzeugt neuen `whk_...`-Key.
+
+**Fix-Ziel:**
+1. Modelle ergänzen: `WebhookSendRequest`, `WebhookCreateRequest`, `WebhookUpdateRequest`.
+2. Bestehendes Verhalten erhalten:
+   - Slug-Regex `^[a-z0-9-]+$` weiter erzwingen.
+   - Create-Pflichtfelder mit klarer Fehlermeldung.
+   - Update mit `model_dump(exclude_unset=True)`.
+   - `rotate_api_key` im Update-Modell optional, aber nicht als PB-Feld patchen; stattdessen wie bisher neuen `api_key` generieren.
+   - Webhook-Send: leere `body` + leere `body_html` weiterhin ablehnen; `to`, `reply_to`, `cc` abhängig von Webhook-Toggles behandeln.
+3. Checks: `rg "data: dict" backend/routers` darf keine Webhook-Endpoint-Treffer mehr liefern; Syntax-/Import-Check.
+
+### R3 — IMAP-Service-Reste zentralisieren
+
+**Status:** `services/imap.py` mit `imap_session(...)`, `run_blocking(...)` und `ImapService` existiert; Reststreuung offen.
+
+**Bereits zentralisiert:** `append_draft`, `fetch_attachment`, `fetch_inline`, `set_read`, `set_answered`, `bulk_set_read`, `move_to_spam`, `move`, `trash`, `fetch_uids_with_msgids`.
+
+**Restpunkte:**
+1. `backend/smtp_sender.py`
+   - eigene Funktion `_imap_append_sent(acc, msg_bytes)` für Sent-Append.
+   - `send_email(...)` ruft sie best-effort per `loop.run_in_executor(None, _imap_append_sent, acc, msg_bytes)` auf.
+2. `backend/idle_manager.py`
+   - direkte `IMAPClient(...)`-Login-/IDLE-Logik.
+   - IDLE darf wegen langlebiger Verbindung separat bleiben, aber Login/Cleanup sollte entweder `imap_session` nutzen oder bewusst dokumentieren, warum nicht.
+3. `imap_sync.py` und `backfill.py`
+   - nutzen bereits `imap_session`; kein zwingender Umbau, nur Doppelungen bei Gelegenheit prüfen.
+
+**Fix-Ziel:**
+- `ImapService.append_sent(msg_bytes)` ergänzen (Sent-Ordner via `find_imap_folder(... [b"\\Sent"] ... )`, `flags=[b"\\Seen"]`, `msg_time=datetime.now(timezone.utc)`).
+- `_imap_append_sent` entfernen oder zu dünnem Wrapper machen; `send_email(...)` soll `ImapService(acc).append_sent` im Executor starten.
+- `idle_manager.py` prüfen und entweder auf `imap_session(acc)` umstellen oder die Ausnahme kommentieren.
+- Checks: `rg -n "IMAPClient|imap_session|_imap_append_sent|append_sent" backend/smtp_sender.py backend/idle_manager.py backend/services/imap.py`.
+
+### R4 — Veraltetes `embed-search-test.html` an Admin-Key-Middleware anpassen oder löschen
+
+**Status:** `/admin/*` ist sicher auf `X-Admin-Key` + `ADMIN_API_KEY` umgestellt; altes Test-HTML nutzt noch Query-Key.
+
+**Betroffene Stelle:** `embed-search-test.html`
+
+Aktuell sinngemäß:
+
+```js
+fetch(`${url}/admin/embed-search?key=${encodeURIComponent(key)}&limit=${limit}&q=${encodeURIComponent(q)}`)
+```
+
+**Problem:** `?key=` wird für `/admin/*` nicht mehr akzeptiert. Das Testtool ist kaputt/verwirrend und dokumentiert ein altes Auth-Muster.
+
+**Fix-Ziel — eine Variante wählen:**
+1. **Anpassen:**
+   ```js
+   fetch(`${url}/admin/embed-search?limit=${limit}&q=${encodeURIComponent(q)}`, {
+     headers: { 'X-Admin-Key': key }
+   })
+   ```
+   UI-Text von „API Key“ auf „Admin Key (`X-Admin-Key`)“ ändern; keine Keys in URL/LocalStorage/Beispielen speichern.
+2. **Oder löschen**, falls das Testtool nicht mehr gebraucht wird; danach prüfen, ob Doku darauf verweist.
+
+**Wichtig:** Nicht die `/admin/*`-Middleware abschwächen. Checks: `rg "\?key=|X-Admin-Key|embed-search" embed-search-test.html backend/routers/admin.py backend/main.py`.
+
+### R5 — Fresh-PocketBase-Schema-Lücken in `pb_setup.py` schließen
+
+**Status:** `pb_setup.py` ist weitgehend Manifest; Fresh-Install hat aber noch Lücken, weil `existing` am Anfang leer ist.
+
+**Problem:** `_ensure_collection(...)` legt Collections im selben Lauf an, aber spätere `if "..." in existing:`-Migrationsblöcke greifen nur für Collections, die **vor** dem Lauf existierten. Frische PB-Instanzen können dadurch unvollständig bleiben.
+
+**Konkret gefundene Lücken:**
+1. `contacts.groups`
+   - nicht in `_contacts_schema()` definiert.
+   - wird nur via `_add_missing_fields(... "contacts" ...)` mit Relation auf `contact_groups_id` ergänzt.
+2. `contacts.unsubscribed`
+   - nicht in `_contacts_schema()` definiert.
+   - wird nur im gleichen Missing-Fields-Block ergänzt.
+3. `emails.webhook`
+   - Relation auf `webhooks`, daher nicht in `_emails_schema(accounts_id)`.
+   - wird nur ergänzt, wenn `"emails" in existing and "webhooks" in existing`.
+
+**Fix-Ziel:**
+- Fresh-Install und bestehende Instanz müssen denselben Endzustand erreichen.
+- Einfacher Ansatz: `_ensure_collection` oder Caller aktualisiert `existing[schema["name"]] = collection_id` nach jeder Anlage. Danach greifen die bestehenden Missing-Fields-Blöcke im selben Lauf.
+- `contacts.groups`/`contacts.unsubscribed` auch bei frischer Collection ergänzen.
+- `emails.webhook` nach Anlage von `webhooks` ergänzen (Relation braucht `webhooks_id`).
+- Nicht destruktiv arbeiten; nur additive Felder/Rules/Indexes patchen.
+- Checks: `rg -n "groups|unsubscribed|webhook|_add_missing_fields|existing\[" backend/pb_setup.py`; optional frische PB-Instanz starten und Felder kontrollieren.
+
+### R6 — Guardrail-Test/Linter für PocketBase-Filter-Escaping ergänzen
+
+**Status:** Code nutzt weitgehend `pb_client.pb_quote(...)`; Guardrail gegen Regression fehlt.
+
+**Problem:** Neue direkte Filter-Interpolation wie `params={"filter": f'email="{email}"'}` könnte wieder Sonderzeichen-Bugs oder Filter-Injection ermöglichen.
+
+**Fix-Ziel:** kleines statisches Script ergänzen, z.B. `backend/tests/check_pb_filters.py` oder `scripts/check_pb_filters.py`.
+
+**Pragmatischer Ansatz:**
+1. Scan `backend/**/*.py` nach verdächtigen Filter-f-Strings:
+   - Zeilen mit `"filter"`, `params["filter"]`, `filter_expr`, `history_filter`
+   - und f-String mit `{...}`
+   - ohne `pb_quote` in derselben Zeile/kurzer Nähe.
+2. Whitelist/Ignore für legitime Fälle:
+   - statische Bool-Filter: `is_new=true`, `bounced=true`, `is_done!=true`, `has_attachments=true`, `folder="Sent"`.
+   - zusammengesetzte Filter aus bereits gequoteten Teilen (`" && ".join(filters)`, `history_filter`, `filter_expr`) per Inline-Kommentar `# pb-filter-safe` oder Allowlist.
+3. Exit-Code `1`, wenn neue verdächtige Treffer auftauchen.
+4. Optional README/Plan-Hinweis: neue PB-Filter immer mit `pb_client.pb_quote(...)`; Script laufen lassen.
+
+**Checks:**
+```bash
+python3 backend/tests/check_pb_filters.py   # oder scripts/check_pb_filters.py
+rg -n 'filter.*f' backend --glob '*.py'
+rg -n 'params\["filter"\]' backend --glob '*.py'
+```
+
+---
+
 ## Status (Stand 2026-05-22 abend)
 
 **Erledigt, live, smoke-getestet:**

@@ -16,13 +16,20 @@ Auth-Pattern, PocketBase-Rules und n8n-Tokens folgen dem zentralen Modell in `~/
 
 ## Refactoring 2026-04-21
 
-### API-Key-Schutz
+### Auth ohne Frontend-API-Key
 
-Der API-Key wird nicht mehr im Frontend-Code gespeichert. Stattdessen:
+Der frühere globale Frontend-API-Key ist entfernt. Das Frontend bekommt keinen Backend-Key mehr ausgeliefert — weder per `/config.js` noch per statischer `/js/config.js`.
 
-- `backend/main.py` liefert `GET /config.js` — validiert den PocketBase-Token aus dem `Authorization`-Header gegen PocketBase auth-refresh. Nur eingeloggte User erhalten den echten Key, alle anderen bekommen einen leeren String.
-- `frontend/js/api.js` lädt den Key lazy beim ersten API-Call via `_loadApiKey()` — schickt den PB-Token aus `localStorage['mf_auth']` mit. Das Ergebnis wird als Promise gecacht, sodass der Key nur einmal abgerufen wird.
-- `/config.js` ist in der Auth-Middleware von der API-Key-Prüfung ausgenommen (Henne-Ei-Problem).
+- `frontend/js/api.js` sendet bei normalen API-Requests ausschließlich den PocketBase-User-Token als `Authorization: Bearer <pb_token>`.
+- `backend/main.py` validiert diesen Bearer-Token in der Auth-Middleware gegen PocketBase.
+- Browser-APIs ohne Custom-Header (`EventSource`, `<img>`, Download-Links) nutzen kurzlebige signierte URLs: `POST /sign` erzeugt ein HMAC-Token für genau den Pfad, danach wird `?token=...` verwendet.
+- Externe Integrationen nutzen eigene getrennte Keys: Webhooks per `X-Webhook-Key`, Kontakt-Import optional per `X-Import-Key`, Admin-Endpunkte per `X-Admin-Key`.
+
+#### Bewusste Admin-Token-Ausnahme: `PATCH /accounts/{id}`
+
+`PATCH /accounts/{id}` bleibt absichtlich im Backend-Admin-Kontext (`pb_client.pb_patch`, nicht `pb_patch_as`). Grund: Die `accounts`-Collection enthält sensible IMAP-/SMTP-Credentials. Eine offene PocketBase-`updateRule` für eingeloggte User würde direkte PB-Patches auf Credential-Felder ermöglichen. Stattdessen erzwingt der Backend-Endpoint eine Whitelist über `UpdateAccountRequest` und erlaubt nur ungefährliche UI-Felder wie `name`, `from_name`, `signature`, `color_tag`, `reply_to_email`.
+
+Damit ist dieser Endpoint keine vergessene A11-Migration, sondern eine dokumentierte Ausnahme: Browser-Auth per PB-Bearer am Backend, aber DB-Write als Admin mit enger Backend-Whitelist.
 
 ### Blockierende IMAP-Operationen in Executor ausgelagert
 
@@ -80,7 +87,7 @@ Externe Workflows (Xano, Webseiten-Kontaktformulare, Buchungssysteme) lösen den
 
 ### Endpoint
 
-**`POST /webhooks/{slug}/send`** — von der globalen Frontend-API-Key-Middleware ausgenommen, validiert eigenen Key per `X-Webhook-Key`-Header (`secrets.compare_digest`). Payload-Felder: `to`, `subject`, `body` und/oder `body_html`, optional `reply_to`, `cc`. Override-Felder werden nur akzeptiert wenn der entsprechende Toggle im Webhook aktiv ist (`allow_to_override`, `allow_reply_to`, `allow_cc`) — sonst kommt der Wert aus der Webhook-Konfig (`default_to`) oder bleibt leer. `to` darf payload-seitig nur überschrieben werden wenn das Feld nicht leer ist, sonst greift `default_to`.
+**`POST /webhooks/{slug}/send`** — von der globalen Bearer-/Signed-URL-Auth ausgenommen, validiert eigenen Key per `X-Webhook-Key`-Header (`secrets.compare_digest`). Payload-Felder: `to`, `subject`, `body` und/oder `body_html`, optional `reply_to`, `cc`. Override-Felder werden nur akzeptiert wenn der entsprechende Toggle im Webhook aktiv ist (`allow_to_override`, `allow_reply_to`, `allow_cc`) — sonst kommt der Wert aus der Webhook-Konfig (`default_to`) oder bleibt leer. `to` darf payload-seitig nur überschrieben werden wenn das Feld nicht leer ist, sonst greift `default_to`.
 
 Bei `is_active=false` oder unbekanntem Slug wird bewusst `401 Unauthorized` zurückgegeben (kein 404), damit Slug-Existenz nicht durch Fehlercodes leakt.
 

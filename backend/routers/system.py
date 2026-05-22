@@ -70,7 +70,7 @@ async def sign_url(payload: SignRequest):
     """Gibt einen kurzlebigen signierten URL-Token für genau diesen path zurück.
     Frontend nutzt das für SSE-EventSource, Inline-Bilder und Attachment-Downloads —
     Stellen, an denen keine Authorization-Header möglich sind.
-    Die Route selbst hängt an der Auth-Middleware (PB-Bearer oder Legacy-Key).
+    Die Route selbst hängt an der Auth-Middleware (PB-Bearer).
     """
     if not settings.SIGN_SECRET:
         raise HTTPException(status_code=503, detail="SIGN_SECRET nicht konfiguriert")
