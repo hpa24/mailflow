@@ -635,7 +635,7 @@ async def bulk_send_endpoint(payload: BulkSendRequest,
         jobs.append({"job_id": job_id, "to": raw})
 
     try:
-        acc = await pb_client.pb_get_as(token, f"/api/collections/accounts/records/{from_account}")
+        acc = await pb_client.pb_get(f"/api/collections/accounts/records/{from_account}")
         from_email = acc.get("from_email") or ""
     except Exception:
         from_email = ""
@@ -705,7 +705,7 @@ async def create_draft(payload: CreateDraftRequest,
     account_id = payload.from_account
 
     try:
-        acc = await pb_client.pb_get_as(token, f"/api/collections/accounts/records/{account_id}")
+        acc = await pb_client.pb_get(f"/api/collections/accounts/records/{account_id}")
         from_email = acc.get("from_email", "")
         from_name = acc.get("from_name", "")
     except Exception:
@@ -746,31 +746,52 @@ async def sync_draft_to_imap(draft_id: str, token: str = Depends(pb_user_auth.ge
     if not account_id:
         raise HTTPException(status_code=400, detail="Kein Account am Entwurf")
 
-    acc = await pb_client.pb_get_as(token, f"/api/collections/accounts/records/{account_id}")
+    acc = await pb_client.pb_get(f"/api/collections/accounts/records/{account_id}")
+
+    body_text = draft.get("body_plain") or ""
+    body_html = draft.get("body_html") or ""
 
     msg = MIMEMultipart("mixed")
-    body_text = draft.get("body_plain") or ""
-    msg.attach(MIMEText(body_text, "plain", "utf-8"))
+    if body_html:
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(body_text, "plain", "utf-8"))
+        alt.attach(MIMEText(body_html, "html", "utf-8"))
+        msg.attach(alt)
+    else:
+        msg.attach(MIMEText(body_text, "plain", "utf-8"))
 
     from_email = acc.get("from_email", "")
     from_name  = acc.get("from_name", "")
     to_emails  = draft.get("to_emails") or []
     to_str     = ", ".join(to_emails) if isinstance(to_emails, list) else str(to_emails)
 
+    # Message-ID nach erstem Sync in PB persistieren, damit Folge-Syncs
+    # dieselbe ID nutzen und append_draft die Vorgängerversion ersetzt.
+    existing_msgid = draft.get("message_id") or ""
+    message_id = existing_msgid or email.utils.make_msgid()
+
     msg["From"]       = email.utils.formataddr((from_name, from_email)) if from_name else from_email
     msg["To"]         = to_str
     msg["Subject"]    = draft.get("subject") or ""
     msg["Date"]       = email.utils.formatdate(localtime=True)
-    msg["Message-ID"] = draft.get("message_id") or email.utils.make_msgid()
+    msg["Message-ID"] = message_id
 
     msg_bytes = msg.as_bytes()
-    message_id = draft.get("message_id") or msg["Message-ID"]
 
     try:
         await asyncio.to_thread(ImapService(acc).append_draft, msg_bytes, message_id)
     except Exception as exc:
         logger.error("IMAP Draft-APPEND fehlgeschlagen: %s", exc)
         raise HTTPException(status_code=502, detail=f"IMAP-Fehler: {exc}")
+
+    if not existing_msgid:
+        try:
+            await pb_client.pb_patch_as(
+                token, f"/api/collections/emails/records/{draft_id}",
+                {"message_id": message_id},
+            )
+        except Exception as exc:
+            logger.warning("Message-ID konnte nicht in PB persistiert werden: %s", exc)
 
     return {"synced": True}
 

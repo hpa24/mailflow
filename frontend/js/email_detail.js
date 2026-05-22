@@ -259,10 +259,10 @@ async function openEmail(email, itemEl) {
       btnSync.onclick = async () => {
         const origText = btnSync.textContent;
         btnSync.disabled = true;
-        btnSync.textContent = 'Synchronisiert…';
+        btnSync.textContent = 'Wird gesichert…';
         try {
           await api.syncDraft(email.id);
-          btnSync.textContent = 'Synchronisiert ✓';
+          btnSync.textContent = 'Liegt auf Server ✓';
           setTimeout(() => { btnSync.textContent = origText; btnSync.disabled = false; }, 2000);
         } catch (e) {
           btnSync.textContent = 'Fehler: ' + e.message;

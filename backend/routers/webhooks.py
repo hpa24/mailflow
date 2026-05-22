@@ -135,8 +135,9 @@ async def webhook_send(slug: str, request: Request, req: WebhookSendRequest):
 
 @router.get("/webhooks")
 async def webhooks_list(token: str = Depends(pb_user_auth.get_user_token)):
-    data = await pb_client.pb_get_as(
-        token,
+    # S1 (2026-05-23): webhooks-Rules sind dicht (`api_key`-Feld). Admin-Token,
+    # Authz via Depends(get_user_token).
+    data = await pb_client.pb_get(
         "/api/collections/webhooks/records",
         params={"perPage": 200, "sort": "-created"},
     )
@@ -201,7 +202,7 @@ async def webhooks_create(req: WebhookCreateRequest,
         "is_active": req.is_active,
         "api_key": "whk_" + _secrets.token_urlsafe(32),
     }
-    return await pb_client.pb_post_as(token, "/api/collections/webhooks/records", record)
+    return await pb_client.pb_post("/api/collections/webhooks/records", record)
 
 
 @router.get("/webhooks/{webhook_id}/logs")
@@ -251,10 +252,10 @@ async def webhooks_update(webhook_id: str, req: WebhookUpdateRequest,
     patch = req.model_dump(exclude_unset=True, exclude={"rotate_api_key"})
     if req.rotate_api_key:
         patch["api_key"] = "whk_" + _secrets.token_urlsafe(32)
-    return await pb_client.pb_patch_as(token, f"/api/collections/webhooks/records/{webhook_id}", patch)
+    return await pb_client.pb_patch(f"/api/collections/webhooks/records/{webhook_id}", patch)
 
 
 @router.delete("/webhooks/{webhook_id}")
 async def webhooks_delete(webhook_id: str, token: str = Depends(pb_user_auth.get_user_token)):
-    await pb_client.pb_delete_as(token, f"/api/collections/webhooks/records/{webhook_id}")
+    await pb_client.pb_delete(f"/api/collections/webhooks/records/{webhook_id}")
     return {"status": "deleted"}

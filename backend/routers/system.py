@@ -162,10 +162,10 @@ _SEND_DAILY_LIMIT = 10000
 
 @router.get("/accounts")
 async def get_accounts(token: str = Depends(pb_user_auth.get_user_token)):
-    # A11 Phase 2 — Pilot: ruft PB mit User-Token statt Admin-Token auf.
-    # PB-Rule `@request.auth.id != ""` auf accounts erlaubt Read für eingeloggte User.
-    return await pb_client.pb_get_as(token, "/api/collections/accounts/records",
-                                     params={"perPage": 100, "fields": _ACCOUNT_SAFE_FIELDS})
+    # S1 (2026-05-23): accounts-Rules sind dicht (sensible imap_pass/smtp_pass).
+    # Backend liest via Admin-Token, Authz hängt am Depends(get_user_token).
+    return await pb_client.pb_get("/api/collections/accounts/records",
+                                  params={"perPage": 100, "fields": _ACCOUNT_SAFE_FIELDS})
 
 
 @router.get("/accounts/sent-today")
@@ -184,8 +184,7 @@ async def accounts_sent_today(token: str = Depends(pb_user_auth.get_user_token))
     midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
     cutoff = midnight_local.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-    accounts_data = await pb_client.pb_get_as(
-        token,
+    accounts_data = await pb_client.pb_get(
         "/api/collections/accounts/records",
         params={"perPage": 100, "fields": "id"},
     )
@@ -228,12 +227,11 @@ async def update_account(account_id: str, payload: UpdateAccountRequest):
 
 @router.get("/smtp-servers")
 async def get_smtp_servers(token: str = Depends(pb_user_auth.get_user_token)):
-    # `fields`-Whitelist verhindert, dass `password` (und andere Credentials)
-    # ans Frontend durchgereicht werden. Backend-Versand (smtp_sender) liest
-    # als Admin direkt aus PB und braucht diesen Endpoint nicht.
-    return await pb_client.pb_get_as(token, "/api/collections/smtp_servers/records",
-                                     params={"perPage": 50, "sort": "name",
-                                             "fields": "id,name,is_default"})
+    # S1 (2026-05-23): smtp_servers-Rules sind dicht (`password`-Feld).
+    # Backend liest via Admin-Token; `fields`-Whitelist filtert zusätzlich.
+    return await pb_client.pb_get("/api/collections/smtp_servers/records",
+                                  params={"perPage": 50, "sort": "name",
+                                          "fields": "id,name,is_default"})
 
 
 # ---------------------------------------------------------------------------

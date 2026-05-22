@@ -74,11 +74,13 @@ async def setup_pocketbase_schema(token: str) -> None:
                 _field("signature", "text"),
                 _field("reply_to_email", "text"),
             ])
-            # A11 Phase 2: listRule/viewRule auf "any authenticated user" patchen,
-            # damit GET /accounts mit User-Token funktioniert (statt Admin-Bypass).
+            # S1 (2026-05-23): alle Rules dicht — siehe _accounts_schema.
             await _ensure_rules(client, headers, "accounts", existing["accounts"], {
-                "listRule": '@request.auth.id != ""',
-                "viewRule": '@request.auth.id != ""',
+                "listRule": None,
+                "viewRule": None,
+                "createRule": None,
+                "updateRule": None,
+                "deleteRule": None,
             })
 
         # A11 Phase 3a — Vorlagen-Cluster: full User-CRUD auf email_variables,
@@ -104,12 +106,25 @@ async def setup_pocketbase_schema(token: str) -> None:
         for _name in (
             "email_variables", "email_snippets", "email_templates",
             "contacts", "contact_groups",
-            "folders", "smtp_servers", "triage_rules", "spam_rules", "response_patterns",
+            "folders", "triage_rules", "spam_rules", "response_patterns",
             "emails", "attachments",
-            "bulk_sends", "webhooks", "webhook_logs",
+            "bulk_sends", "webhook_logs",
         ):
             if _name in existing:
                 await _ensure_rules(client, headers, _name, existing[_name], _cluster_rules)
+
+        # S1 (2026-05-23): smtp_servers + webhooks haben sensible Felder
+        # (password, api_key) — alle Rules dicht, Backend nutzt Admin-Token.
+        _strict_rules = {
+            "listRule": None,
+            "viewRule": None,
+            "createRule": None,
+            "updateRule": None,
+            "deleteRule": None,
+        }
+        for _name in ("smtp_servers", "webhooks"):
+            if _name in existing:
+                await _ensure_rules(client, headers, _name, existing[_name], _strict_rules)
         if "emails" in existing:
             await _add_missing_fields(client, headers, "emails", existing["emails"], [
                 _field("reply_to", "text"),
@@ -348,10 +363,11 @@ def _accounts_schema() -> dict:
     return {
         "name": "accounts",
         "type": "base",
-        # listRule/viewRule: A11 Phase 2 — jeder eingeloggte User darf lesen.
-        # createRule/updateRule/deleteRule bleiben admin-only (kein User-Self-Service).
-        "listRule": '@request.auth.id != ""',
-        "viewRule": '@request.auth.id != ""',
+        # S1 (2026-05-23): alle Rules dicht. accounts hat imap_pass/smtp_pass im Klartext;
+        # direkter PB-Zugriff per User-Token würde diese leaken. Backend liest jetzt
+        # über Admin-Token (pb_get), Authz hängt am `Depends(get_user_token)` der Route.
+        "listRule": None,
+        "viewRule": None,
         "createRule": None,
         "updateRule": None,
         "deleteRule": None,
@@ -480,14 +496,13 @@ def _smtp_servers_schema() -> dict:
     return {
         "name": "smtp_servers",
         "type": "base",
-        # A11 Phase 3c — Kleinkram-Cluster. smtp_sender liest als Admin (Backend-Versand).
-        # GET /smtp-servers reicht nur id/name/is_default ans Frontend durch (fields-Whitelist
-        # in main.py), damit `password` nicht leakt.
-        "listRule": '@request.auth.id != ""',
-        "viewRule": '@request.auth.id != ""',
-        "createRule": '@request.auth.id != ""',
-        "updateRule": '@request.auth.id != ""',
-        "deleteRule": '@request.auth.id != ""',
+        # S1 (2026-05-23): alle Rules dicht. `password`-Feld würde sonst per
+        # direkter PB-API mit User-Token leakbar sein. Backend nutzt Admin-Token.
+        "listRule": None,
+        "viewRule": None,
+        "createRule": None,
+        "updateRule": None,
+        "deleteRule": None,
         "fields": [
             _field("name", "text", required=True),
             _field("host", "text", required=True),
@@ -729,13 +744,13 @@ def _webhooks_schema(smtp_servers_id: str, accounts_id: str) -> dict:
     return {
         "name": "webhooks",
         "type": "base",
-        # A11 Phase 3e — User-CRUD via UI. _webhook_by_slug nutzt Admin
-        # (externer /webhooks/{slug}/send-Pfad mit X-Webhook-Key, kein User-Token).
-        "listRule": '@request.auth.id != ""',
-        "viewRule": '@request.auth.id != ""',
-        "createRule": '@request.auth.id != ""',
-        "updateRule": '@request.auth.id != ""',
-        "deleteRule": '@request.auth.id != ""',
+        # S1 (2026-05-23): alle Rules dicht. `api_key` würde sonst per direkter
+        # PB-API mit User-Token leakbar sein. Backend nutzt Admin-Token.
+        "listRule": None,
+        "viewRule": None,
+        "createRule": None,
+        "updateRule": None,
+        "deleteRule": None,
         "indexes": [
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_webhooks_slug ON webhooks (slug)",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_webhooks_api_key ON webhooks (api_key)",

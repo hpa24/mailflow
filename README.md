@@ -409,3 +409,34 @@ python3 scripts/check_pb_filters.py   # exit 0 = clean, 1 = verdächtige Treffer
 Implizit sicher (nicht geflaggt): Konstante Filter ohne Platzhalter, f-Strings mit nur Konstanten, Filter aus `" && ".join(…)` oder vorgequoteten Variablen-Referenzen, Werte die direkt `pb_quote(...)` einbinden. Für die schmalen Restfälle, in denen ein interpolierter Wert nachweislich sicher ist (Integer, separat gequotete Variable, etc.), liegt ein Inline-Kommentar `# pb-filter-safe` in oder über der Zeile — der Linter respektiert das.
 
 Initialer Lauf hat zwei Stellen gefunden, beide nachweislich sicher (`backend/imap_sync.py:585` — UID-Integer aus IMAP-Search; `backend/routers/contacts.py:42` — vorgequotete Variable `qq`); beide jetzt mit Marker. Neue Filter sollten denselben Marker nicht ohne saubere Begründung im Kommentar verdienen.
+
+## Draft-Sync: HTML-Body + Idempotenz 2026-05-22
+
+`sync_draft_to_imap` (`backend/routers/mail.py`) baut den IMAP-Draft jetzt als `multipart/alternative` (plain + html), wenn `body_html` am Draft hängt — analog zur Aufbau-Logik in `smtp_sender.send_email`. Vorher landete nur `body_plain` im IMAP-Drafts-Ordner, HTML-fähige Mail-Clients zeigten dadurch eine Textversion ohne Formatierung.
+
+Idempotenz: Die `Message-ID` wird beim ersten Sync per `email.utils.make_msgid()` erzeugt **und sofort per PATCH zurück in das PB-`emails`-Record geschrieben**. Folge-Klicks lesen dieselbe ID aus PB, `ImapService.append_draft` (`backend/services/imap.py:179`) sucht im Drafts-Ordner per `HEADER Message-ID` nach der Vorgängerversion und löscht sie vor dem APPEND — kein Duplikat. Vor dem Fix wurde bei jedem Klick eine neue `make_msgid()` generiert (PB hatte das Feld nie persistent), wodurch die Dedup-Logik im `ImapService` ins Leere lief.
+
+Bewusst nicht angefasst: Anhänge im Draft-Sync. Drafts haben in der App aktuell gar keinen Anhangs-Pfad (`CreateDraftRequest`/`UpdateDraftRequest` ohne `attachment_ids`, `_temp_uploads` ist eine In-Memory-Map nur für `/emails/send`). Wer Anhänge in IMAP-Drafts sehen will, braucht zuvor persistente Storage für Draft-Anhänge.
+
+## S1: PB-Rules dicht für sensible Collections 2026-05-23
+
+PB war öffentlich erreichbar (`mailflow-pb.barres.de`, vom Frontend für Login direkt angesprochen). Bisherige Rules `@request.auth.id != ""` auf `accounts`, `smtp_servers`, `webhooks` hätten einem gestohlenen User-Token erlaubt, per direkter PB-API folgende Klartext-Geheimnisse zu lesen: `accounts.imap_pass`, `accounts.smtp_pass`, `smtp_servers.password`, `webhooks.api_key`. Mailflow ist effektiv Single-User (nur Stefan), aber ein geleaktes Bearer-Token hätte die Backend-Field-Whitelist umgehen können.
+
+Fix: Alle Rules (`listRule`/`viewRule`/`createRule`/`updateRule`/`deleteRule`) dieser drei Collections auf `None` — direkter PB-Zugriff mit User-Token ist komplett blockiert. Backend liest/schreibt diese Collections jetzt via Admin-Token (`pb_get` statt `pb_get_as` etc.); Authz hängt am `Depends(pb_user_auth.get_user_token)` der jeweiligen Route (Single-User: „eingeloggt = berechtigt").
+
+Schema + Migration in `backend/pb_setup.py`: `_accounts_schema`, `_smtp_servers_schema`, `_webhooks_schema` mit Rules=None. Bestehende PB-Instanzen patchen via `_ensure_rules` (separate Aufrufe für `accounts`, sowie eine neue `_strict_rules`-Loop für `smtp_servers`/`webhooks`). Beide Collections sind aus der pauschalen `_cluster_rules`-Loop entfernt.
+
+Geänderte Routen-Reads (User-Token → Admin-Token):
+- `routers/mail.py`: `bulk_send`-Vorbereitung (`from_email`-Lookup), `create_draft`, `sync_draft_to_imap`
+- `routers/system.py`: `GET /accounts`, `GET /accounts/sent-today` (nur der accounts-Loop, der innere emails-Read bleibt User-Token), `GET /smtp-servers`
+- `routers/webhooks.py`: `GET /webhooks`, `POST /webhooks`, `PATCH /webhooks/{id}`, `DELETE /webhooks/{id}`
+
+Nicht angefasst — bewusst:
+- `emails`, `attachments`, `folders`, Vorlagen, Kontakte etc. bleiben in der `_cluster_rules`-Loop mit `@request.auth.id != ""`. Da liegen keine Klartext-Secrets; Reads via direkter PB-API sind kein Daten-Leak im engeren Sinn.
+- `GET /webhooks` gibt weiter `api_key` mit zurück — die UI braucht den Wert. Wenn das später UI-seitig auf "nur bei Create/Rotate sichtbar" umgestellt wird, kann hier eine `fields`-Whitelist nachgezogen werden.
+
+Test-Plan nach Deployment:
+1. Login funktioniert (auth-with-password ist eine PB-Spezial-Route, nicht von Collection-Rules betroffen)
+2. `GET /accounts`, `/smtp-servers`, `/webhooks` liefern weiter Daten (über Backend)
+3. Mailversand + Draft-Sync funktionieren (brauchen `imap_pass`/`smtp_pass`)
+4. Direkter Test: `curl -H "Authorization: Bearer <user-token>" https://mailflow-pb.barres.de/api/collections/accounts/records` → erwartet 403/404, nicht mehr 200
