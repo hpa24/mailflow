@@ -181,9 +181,11 @@ async def _auth_middleware(request: Request, call_next):
         if await pb_user_auth.validate(pb_token):
             return await call_next(request)
 
-    # Signierte URL für Endpoints ohne Header-Möglichkeit (SSE/Inline/Attachments)
+    # Signierte URL für Endpoints ohne Header-Möglichkeit (SSE/Inline/Attachments).
+    # S3 (2026-05-23): verify bindet jetzt auch die HTTP-Methode — Tokens
+    # können nicht mehr für andere Methoden umgewidmet werden.
     sig_token = request.query_params.get("token") or ""
-    if sig_token and signed_url.verify(sig_token, path):
+    if sig_token and signed_url.verify(sig_token, path, request.method):
         return await call_next(request)
 
     return JSONResponse(

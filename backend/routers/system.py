@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re as _re
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -55,6 +56,7 @@ async def health():
 class SignRequest(BaseModel):
     path: str
     ttl: int = 300
+    method: str = "GET"
 
 
 class UpdateAccountRequest(BaseModel):
@@ -65,9 +67,21 @@ class UpdateAccountRequest(BaseModel):
     reply_to_email: str | None = None
 
 
+# S3 (2026-05-23): /sign signiert nur noch Pfade aus dieser Allowlist und nur
+# für GET. Vorher konnte jeder PB-Bearer einen Token für beliebigen Pfad +
+# (durch die method-lose Verify-Logik) effektiv jede Methode bekommen, was
+# Endpoints wie /attachments/upload (POST, ohne eigene User-Auth) ungewollt
+# über signed URLs erreichbar gemacht hätte.
+_SIGNABLE_GET_PATHS = (
+    _re.compile(r"^/events$"),
+    _re.compile(r"^/attachments/[a-zA-Z0-9]+/download$"),
+    _re.compile(r"^/emails/[a-zA-Z0-9]+/inline$"),
+)
+
+
 @router.post("/sign")
 async def sign_url(payload: SignRequest):
-    """Gibt einen kurzlebigen signierten URL-Token für genau diesen path zurück.
+    """Gibt einen kurzlebigen signierten URL-Token für genau diesen path+method zurück.
     Frontend nutzt das für SSE-EventSource, Inline-Bilder und Attachment-Downloads —
     Stellen, an denen keine Authorization-Header möglich sind.
     Die Route selbst hängt an der Auth-Middleware (PB-Bearer).
@@ -76,7 +90,12 @@ async def sign_url(payload: SignRequest):
         raise HTTPException(status_code=503, detail="SIGN_SECRET nicht konfiguriert")
     if not payload.path.startswith("/"):
         raise HTTPException(status_code=400, detail="path muss mit / beginnen")
-    token, exp = signed_url.sign(payload.path, payload.ttl)
+    method = (payload.method or "GET").upper()
+    if method != "GET":
+        raise HTTPException(status_code=400, detail="nur GET signierbar")
+    if not any(p.match(payload.path) for p in _SIGNABLE_GET_PATHS):
+        raise HTTPException(status_code=400, detail="path nicht signierbar")
+    token, exp = signed_url.sign(payload.path, payload.ttl, method=method)
     return {"token": token, "exp": exp}
 
 

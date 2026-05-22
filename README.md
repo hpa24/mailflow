@@ -440,3 +440,24 @@ Test-Plan nach Deployment:
 2. `GET /accounts`, `/smtp-servers`, `/webhooks` liefern weiter Daten (über Backend)
 3. Mailversand + Draft-Sync funktionieren (brauchen `imap_pass`/`smtp_pass`)
 4. Direkter Test: `curl -H "Authorization: Bearer <user-token>" https://mailflow-pb.barres.de/api/collections/accounts/records` → erwartet 403/404, nicht mehr 200
+
+## S3: /sign-Allowlist + Methodenbindung 2026-05-23
+
+Vorher signierte `/sign` jeden Pfad mit `path.startswith("/")` — ein gestohlener oder umgewidmeter PB-Bearer hätte über `/sign` Tokens für beliebige Routen generieren können. `signed_url.verify` prüfte zudem nur den Pfad, nicht die HTTP-Methode. Praktischer Worst-Case: signierter Token für `/attachments/upload` mit anschließendem POST hätte den (User-Auth-losen) Upload-Endpoint erreicht, ohne dass die Auth-Middleware den Bearer mitprüft.
+
+Fix: `signed_url`-Payload um `m`-Feld (HTTP-Methode) erweitert (`{"p":..., "e":..., "m":"GET"}`). `verify(token, path, method)` prüft alle drei. `/sign` akzeptiert nur noch GET und nur Pfade aus einer expliziten Allowlist (drei Regex-Pattern, deckt die drei Frontend-Caller in `frontend/js/api.js` ab):
+
+- `^/events$` — SSE-EventSource
+- `^/attachments/[a-zA-Z0-9]+/download$` — Anhang-Download
+- `^/emails/[a-zA-Z0-9]+/inline$` — Inline-Bild
+
+`SignRequest` hat jetzt ein optionales `method`-Feld (Default `"GET"`); andere Methoden werden mit 400 abgelehnt. Auth-Middleware-Branch in `backend/main.py:184` ruft `signed_url.verify(sig_token, path, request.method)` — Tokens für andere Methoden als die signierte fallen damit auf den Unauthorized-Pfad.
+
+Migration: bestehende Tokens (Format ohne `m`-Feld) sind ab Deploy ungültig. Frontend signiert beim nächsten User-Klick neu (Token-TTL ohnehin 5–10 Min). Laufende EventSource-Verbindungen re-connecten beim ersten Token-Refresh (TTL 10 Min).
+
+Test-Plan:
+1. UI: Inline-Bild in HTML-Mail anzeigen → muss laden (Frontend signiert frisch nach Deploy)
+2. UI: Anhang aus Mail-Detail herunterladen → muss laden
+3. SSE: nach Login muss `/events?token=...` connecten (im Network-Tab sichtbar)
+4. Negative: `POST /sign {"path":"/attachments/upload"}` → erwartet 400 „path nicht signierbar"
+5. Negative: `POST /sign {"path":"/events","method":"POST"}` → erwartet 400 „nur GET signierbar"
