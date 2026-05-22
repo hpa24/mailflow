@@ -476,7 +476,13 @@ Fix (Defense-in-Depth, zwei Stufen):
 
 Erst nach dem Loop wird `b"".join(chunks)` in `_temp_uploads` abgelegt. Bei einer regulär unter dem Limit liegenden Datei (z.B. 5 MB) ist der RAM-Footprint praktisch identisch zu vorher — die Patches kosten nichts im Happy-Path.
 
-**Folge-TODO (Ops):** Body-Limit am Reverse-Proxy (Caddy/Coolify) setzen, ideal auf ~30 MB (= `MAX_UPLOAD_SIZE` + Multipart-Overhead). Aktuell liefert Caddy default je nach Coolify-Version unterschiedliche Limits; ein expliziter `request_body { max_size 30MB }`-Block im Service-Label oder Coolify-Konfig macht das deterministisch. Damit greift der Schutz schon am Edge — der Backend-Patch bleibt als Defense-in-Depth.
+**Reverse-Proxy-Body-Limit deterministisch setzen (S4-Rest, 2026-05-23):** Caddy hatte beim P4-Verifikations-Test schon einen impliziten Default greifen lassen (50-MB-Lie-Test → 502). Damit das nicht von der Coolify-Version abhängt, in der Coolify-UI bei der `mailflow-backend`-Application unter **Configuration → Advanced → Custom Caddy Directives** (Stelle kann je nach Coolify-Version variieren) folgende Zeile eintragen:
+
+```
+request_body max_size 30MB
+```
+
+30 MB = `MAX_UPLOAD_SIZE` (25 MB) + Multipart-Overhead-Reserve. Caddy lehnt zu große Bodies dann mit 413 *vor* dem Erreichen des Backends ab; der Backend-Patch aus S4 bleibt als Defense-in-Depth (Content-Length-Check + Chunked-Read). Nach dem Setzen kurz mit `curl -X POST -H "Content-Length: 52428800" ...` testen — sollte schnell mit 413 zurückkommen statt mit 502 (Mismatch).
 
 Test-Plan:
 1. UI: Datei < 25 MB anhängen → muss funktionieren wie vorher
