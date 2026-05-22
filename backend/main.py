@@ -17,6 +17,7 @@ from slowapi.errors import RateLimitExceeded
 
 from rate_limit import limiter
 from routers import admin as admin_router
+from routers import bulk as bulk_router
 from routers import contacts as contacts_router
 from routers import templates as templates_router
 from routers import webhooks as webhooks_router
@@ -445,6 +446,7 @@ app = FastAPI(title="Mailflow API", lifespan=lifespan)
 
 app.state.limiter = limiter
 app.include_router(admin_router.router)
+app.include_router(bulk_router.router)
 app.include_router(contacts_router.router)
 app.include_router(templates_router.router)
 app.include_router(webhooks_router.router)
@@ -2710,35 +2712,8 @@ async def _imap_set_answered(email: dict) -> None:
 # =========================================================================
 
 
-# ── Aussendungs-Historie (bulk_sends) ──────────────────────────
-
-
-@app.get("/bulk-sends")
-async def bulk_sends_list(limit: int = 200, token: str = Depends(pb_user_auth.get_user_token)):
-    """Liste der Aussendungen, neueste zuerst. Liefert Metadaten ohne
-    `recipients`-Array (Performance) — Detail via GET /bulk-sends/{id}."""
-    data = await pb_client.pb_get_as(
-        token,
-        "/api/collections/bulk_sends/records",
-        params={
-            "perPage": max(1, min(500, limit)),
-            "sort": "-sent_at",
-            "fields": "id,subject,from_account,from_account_email,smtp_server,sent_at,delay_seconds,total_count,sent_count,error_count,bounced_count,created,updated",
-        },
-    )
-    return data.get("items", [])
-
-
-@app.get("/bulk-sends/{bulk_id}")
-async def bulk_sends_get(bulk_id: str, token: str = Depends(pb_user_auth.get_user_token)):
-    """Detail einer Aussendung inkl. recipients-Array."""
-    return await pb_client.pb_get_as(token, f"/api/collections/bulk_sends/records/{bulk_id}")
-
-
-@app.delete("/bulk-sends/{bulk_id}")
-async def bulk_sends_delete(bulk_id: str, token: str = Depends(pb_user_auth.get_user_token)):
-    await pb_client.pb_delete_as(token, f"/api/collections/bulk_sends/records/{bulk_id}")
-    return {"status": "deleted"}
+# /bulk-sends/* CRUD → routers/bulk.py
+# (Bulk-Worker-Loop, Locks, Attachments-Cache bleiben hier — siehe lifespan)
 
 
 # /contact-groups/* + /contacts/bounced + /contacts/{id}/clear-bounce
