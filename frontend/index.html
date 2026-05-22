@@ -7,7 +7,7 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0a84ff">
-  <link rel="stylesheet" href="css/main.css?v=20260520-3d">
+  <link rel="stylesheet" href="css/main.css?v=20260522-zoom">
   <script src="js/auth.js"></script>
   <script>auth.requireAuth();</script>
 </head>
@@ -110,7 +110,11 @@
           </div>
 
           <div id="detail-actions" style="display:none">
-            <button id="btn-zoom" class="action-btn" title="Inhalt vergrößern/verkleinern">125%</button>
+            <button id="btn-zoom" class="action-btn zoom-control" title="Zoom: + vergrößern · Wert = 100% · - verkleinern" type="button">
+              <span class="zoom-control-segment" data-zoom-action="in" aria-label="Vergrößern">+</span>
+              <span class="zoom-control-value" data-zoom-action="reset" aria-label="Auf 100 Prozent zurücksetzen">125%</span>
+              <span class="zoom-control-segment" data-zoom-action="out" aria-label="Verkleinern">−</span>
+            </button>
             <button class="action-btn" id="btn-edit-draft" style="display:none">Bearbeiten</button>
             <button class="action-btn primary" id="btn-send-draft" style="display:none">Senden</button>
             <button class="action-btn" id="btn-sync-draft" style="display:none">Synchronisieren</button>
@@ -748,7 +752,7 @@ Body (JSON):
   <script src="js/compose_templates.js?v=20260519-tpl6"></script>
   <script src="js/webhooks.js?v=20260520-c4"></script>
   <script src="js/diagnose.js?v=20260522-1"></script>
-  <script src="js/inbox.js?v=20260522-favicon"></script>
+  <script src="js/inbox.js?v=20260522-zoom"></script>
 </body>
 </html>
 

@@ -757,6 +757,35 @@ flex: 0 0 175px;
   color: #ffffff;
 }
 .action-btn:hover { background: #48484a; }
+
+.zoom-control {
+  display: inline-grid;
+  grid-template-columns: 1fr 1.5fr 1fr;
+  align-items: stretch;
+  overflow: hidden;
+  padding: 0;
+}
+.zoom-control-segment,
+.zoom-control-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  user-select: none;
+}
+.zoom-control-segment {
+  font-size: 17px;
+  font-weight: 700;
+}
+.zoom-control-value {
+  border-left: 1px solid rgba(255,255,255,0.18);
+  border-right: 1px solid rgba(255,255,255,0.18);
+}
+.zoom-control-segment:hover,
+.zoom-control-value:hover {
+  background: rgba(255,255,255,0.08);
+}
+
 .action-btn.primary { background: var(--accent); color: white; }
 .action-btn.primary:hover { opacity: 0.85; }
 .action-btn.danger { background: var(--danger); color: white; }

@@ -15,8 +15,8 @@ function _withZoom(html) {
 }
 
 function _applyZoom() {
-  const btn = document.getElementById('btn-zoom');
-  if (btn) btn.textContent = Math.round(_iframeZoom * 100) + '%';
+  const label = document.querySelector('#btn-zoom .zoom-control-value');
+  if (label) label.textContent = Math.round(_iframeZoom * 100) + '%';
   if (_activeIframe && _activeIframeBaseHtml) {
     _activeIframe.srcdoc = _withZoom(_activeIframeBaseHtml);
   } else {
@@ -1549,8 +1549,7 @@ async function openEmail(email, itemEl) {
   _activeIframeBaseHtml = null;
   _iframeZoom = DEFAULT_ZOOM;
   body.style.zoom = '';
-  const _zoomBtn = document.getElementById('btn-zoom');
-  if (_zoomBtn) _zoomBtn.textContent = Math.round(DEFAULT_ZOOM * 100) + '%';
+  _applyZoom();
 
   empty.style.display = 'none';
   header.style.display = 'block';
@@ -3181,9 +3180,19 @@ document.getElementById('btn-sync').addEventListener('click', async () => {
 });
 
 // ── Zoom ──────────────────────────────────────────────────────
-document.getElementById('btn-zoom').addEventListener('click', () => {
+document.getElementById('btn-zoom').addEventListener('click', (e) => {
+  const action = e.target.closest('[data-zoom-action]')?.dataset.zoomAction;
   const idx = ZOOM_LEVELS.indexOf(_iframeZoom);
-  _iframeZoom = ZOOM_LEVELS[(idx + 1) % ZOOM_LEVELS.length];
+  const safeIdx = idx >= 0 ? idx : ZOOM_LEVELS.indexOf(DEFAULT_ZOOM);
+
+  if (action === 'in') {
+    _iframeZoom = ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, safeIdx + 1)];
+  } else if (action === 'out') {
+    _iframeZoom = ZOOM_LEVELS[Math.max(0, safeIdx - 1)];
+  } else {
+    _iframeZoom = 1.0;
+  }
+
   _applyZoom();
 });
 
