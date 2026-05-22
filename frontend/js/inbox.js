@@ -828,7 +828,7 @@ function _updateFaviconBadge(total) {
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <rect width="32" height="32" rx="7" fill="#0a84ff"/>
-  <text x="16" y="${textY}" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="${fontSize}" font-weight="500" fill="white">${label}</text>
+  <text x="16" y="${textY}" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="${fontSize}" font-weight="300" fill="white">${label}</text>
 </svg>`.trim();
   link.href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
