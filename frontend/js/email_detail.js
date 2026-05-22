@@ -9,6 +9,77 @@
 // openKiAnalyzeSidebar, closeKiAnalyzeSidebar, _runKiSuggest, deleteEmail,
 // _adjustFolderCount, showTab, escHtml).
 
+// S5 Phase 2 (2026-05-23): blockiert externe Inhalte im HTML-Body (img src,
+// srcset auf img/source, inline style url(), <style>-CSS, protocol-relative).
+// Signierte CID-URLs (apiOrigin) sind weißgelistet. Counter ist eine grobe
+// Schätzung — img-src zählt pro Vorkommen, srcset/style/<style> jeweils einmal.
+function _blockRemoteContent(html, apiOrigin) {
+  let count = 0;
+  const isExternal = (raw) => {
+    const u = (raw || '').trim();
+    if (!u) return false;
+    if (u.startsWith('cid:') || u.startsWith('data:') ||
+        u.startsWith('about:') || u.startsWith('mailto:') ||
+        u.startsWith('#') || u.startsWith('tel:')) return false;
+    if (apiOrigin && u.startsWith(apiOrigin)) return false;
+    if (u.startsWith('//')) return true;            // protocol-relative
+    if (/^https?:\/\//i.test(u)) return true;
+    return false;                                    // relative URLs ignorieren
+  };
+
+  // <img src="..."> — transparent gif als Placeholder
+  html = html.replace(
+    /<img\b([^>]*?)\bsrc=(["'])([^"']+)\2([^>]*)>/gi,
+    (m, before, _q, url, after) => {
+      if (!isExternal(url)) return m;
+      count++;
+      return `<img${before}src="data:image/gif;base64,R0lGODlhAQABAAAAACw="${after}>`;
+    }
+  );
+
+  // srcset auf <img>/<source> — komplettes Attribut entfernen, fällt auf src zurück
+  html = html.replace(
+    /\bsrcset=(["'])([^"']+)\1/gi,
+    (m, _q, srcset) => {
+      const candidates = srcset.split(',').map(s => s.trim()).filter(Boolean);
+      const hasExternal = candidates.some(c => isExternal(c.split(/\s+/)[0]));
+      if (!hasExternal) return m;
+      count++;
+      return '';
+    }
+  );
+
+  // Inline-style mit url(...) — URLs durch about:blank ersetzen
+  html = html.replace(
+    /\bstyle=(["'])([^"']*url\s*\([^)]*\)[^"']*)\1/gi,
+    (m, q, style) => {
+      let blocked = false;
+      const newStyle = style.replace(/url\(\s*(["']?)([^)"']+)\1\s*\)/gi, (mm, _qq, url) => {
+        if (!isExternal(url)) return mm;
+        blocked = true;
+        return 'url(about:blank)';
+      });
+      if (!blocked) return m;
+      count++;
+      return `style=${q}${newStyle}${q}`;
+    }
+  );
+
+  // <style>...</style> — alle url() im CSS-Block durch about:blank
+  html = html.replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (m, open, css, close) => {
+    let blocked = false;
+    const newCss = css.replace(/url\(\s*(["']?)([^)"']+)\1\s*\)/gi, (mm, _q, url) => {
+      if (!isExternal(url)) return mm;
+      blocked = true;
+      return 'url(about:blank)';
+    });
+    if (blocked) count++;
+    return open + newCss + close;
+  });
+
+  return { html, count };
+}
+
 async function openEmail(email, itemEl) {
   state.activeEmailId = email.id;
   document.querySelectorAll('.email-item').forEach(el => el.classList.remove('active'));
@@ -27,6 +98,7 @@ async function openEmail(email, itemEl) {
   // Zoom-State für neue E-Mail zurücksetzen (Default 125%)
   _activeIframe = null;
   _activeIframeBaseHtml = null;
+  _activeIframeOriginalHtml = null;
   _iframeZoom = DEFAULT_ZOOM;
   body.style.zoom = '';
   _applyZoom();
@@ -188,19 +260,6 @@ async function openEmail(email, itemEl) {
       });
       cleanup.observe(document.body, { childList: true, subtree: true });
 
-      // S5 (2026-05-23): Tracking-Schutz — externe Bilder block-by-default.
-      // VOR CID-Replace ausführen, damit cid:-URLs unangetastet bleiben und
-      // nur http(s)://-URLs neutralisiert werden. data-blocked-src speichert die
-      // Original-URL für Live-DOM-Swap bei „Bilder laden".
-      let blockedImagesCount = 0;
-      htmlToRender = htmlToRender.replace(
-        /<img\b([^>]*?)\bsrc=(["'])(https?:\/\/[^"']+)\2([^>]*)>/gi,
-        (_m, before, q, url, after) => {
-          blockedImagesCount++;
-          return `<img${before}src="data:image/gif;base64,R0lGODlhAQABAAAAACw="${after} data-blocked-src=${q}${url}${q}>`;
-        }
-      );
-
       // cid:-Referenzen durch Backend-Proxy ersetzen — URLs vorher signieren (parallel)
       const cids = [...new Set([...htmlToRender.matchAll(/src=["']cid:([^"']+)["']/gi)].map(m => m[1]))];
       if (cids.length) {
@@ -212,30 +271,38 @@ async function openEmail(email, itemEl) {
           signedByCid[cid] ? `src="${signedByCid[cid]}"` : m
         );
       }
+
+      // S5 Phase 2 (2026-05-23): Tracking-Schutz — neben <img src> jetzt auch
+      // srcset, inline style url(), <style>-CSS und protocol-relative URLs.
+      // Signierte CID-URLs (API-Origin) sind weißgelistet und durchlaufen normal.
+      // Block läuft NACH CID-Replace; Original-Snapshot für vollständigen
+      // Re-Render beim „Bilder laden"-Klick.
+      const originalHtmlBeforeBlock = htmlToRender;
+      const blockResult = _blockRemoteContent(htmlToRender, API);
+      htmlToRender = blockResult.html;
+      const blockedCount = blockResult.count;
+
       _activeIframe = iframe;
       _activeIframeBaseHtml = htmlToRender;
+      _activeIframeOriginalHtml = originalHtmlBeforeBlock;
       iframe.srcdoc = _withZoom(htmlToRender);
       body.innerHTML = '';
       body.style.display = 'flex';
 
-      // Banner für Tracking-Schutz, wenn externe Bilder blockiert wurden
-      if (blockedImagesCount > 0) {
+      // Banner für Tracking-Schutz, wenn externe Inhalte blockiert wurden
+      if (blockedCount > 0) {
         const banner = document.createElement('div');
         banner.style.cssText = 'padding:8px 12px;background:#fff4e5;border:1px solid #f4c478;border-radius:6px;margin-bottom:8px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:12px';
-        banner.innerHTML = `<span>🛡️ ${blockedImagesCount} externe(s) Bild(er) blockiert (Tracking-Schutz). CID-Inlines sind sichtbar.</span>`;
+        banner.innerHTML = `<span>🛡️ Externe Inhalte blockiert (Tracking-Schutz). CID-Inlines sind sichtbar.</span>`;
         const loadBtn = document.createElement('button');
         loadBtn.className = 'action-btn';
         loadBtn.textContent = 'Bilder laden';
         loadBtn.onclick = () => {
-          try {
-            const doc = iframe.contentDocument;
-            if (doc) {
-              doc.querySelectorAll('img[data-blocked-src]').forEach(img => {
-                img.src = img.getAttribute('data-blocked-src') || '';
-                img.removeAttribute('data-blocked-src');
-              });
-            }
-          } catch (_) { /* same-origin sollte gehen wg. allow-same-origin */ }
+          // Vollständiger Re-Render aus dem unblocked-Snapshot — deckt auch
+          // CSS-Hintergründe, srcset und <style>-Tags ab, die per DOM-Swap
+          // nicht einzeln restaurierbar wären.
+          _activeIframeBaseHtml = _activeIframeOriginalHtml;
+          iframe.srcdoc = _withZoom(_activeIframeOriginalHtml);
           banner.remove();
         };
         banner.appendChild(loadBtn);
@@ -246,6 +313,7 @@ async function openEmail(email, itemEl) {
     } else {
       _activeIframe = null;
       _activeIframeBaseHtml = null;
+      _activeIframeOriginalHtml = null;
       body.style.zoom = _iframeZoom;
       body.innerHTML = text ? linkify(escHtml(text)) : '<em style="color:#999">Kein Inhalt</em>';
     }

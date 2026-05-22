@@ -493,9 +493,18 @@ Fix in `frontend/js/email_detail.js` (rein client-seitig, kein Backend-Touch):
 2. Wenn mindestens ein Bild geblockt wurde: gelbes Banner über dem Iframe mit Schild-Emoji, Counter und „Bilder laden"-Button.
 3. Klick auf „Bilder laden": Live-DOM-Swap im `iframe.contentDocument` (durch `allow-same-origin` möglich) — `img.src = img.dataset.blockedSrc`, Banner entfernt. Kein Re-Render des Iframes → kein Flackern, Scroll-Position bleibt.
 
-Bewusste V1-Einschränkung: nach einem Zoom-Wechsel rendert `inbox.js:21` den Iframe via `_activeIframeBaseHtml` neu, das die geblockte Variante enthält — Bilder sind dann wieder versteckt und müssen erneut geladen werden. Akzeptabel, da Zoom-Wechsel selten ist; sauberer Fix wäre, beim Klick `_activeIframeBaseHtml` mit der unblockierten Variante zu überschreiben (verlangt aber zweiten Snapshot vor dem Blocking).
+**Phase 2 (2026-05-23):** Block-Filter zur Funktion `_blockRemoteContent(html, apiOrigin)` ausgebaut. Deckt jetzt zusätzlich:
 
-Weiter nicht abgedeckt (Phase 2 falls nötig): CSS `background-image: url(...)`, `<source srcset>`, `<picture>`-Tags. Tracking-Pixel der echten Welt nutzen fast immer `<img src>`, deshalb erstmal verzichtbar.
+- `srcset` auf `<img>` und `<source>` (komplettes Attribut entfernt — Browser fällt auf `src` zurück, der schon gepatched ist)
+- Inline-`style="...url(...)..."` (z.B. `<div style="background-image:url(...)">`) — externe URLs durch `url(about:blank)`
+- `<style>...</style>`-Block-CSS — alle `url()` im CSS durch `url(about:blank)`
+- Protocol-relative URLs (`//tracker.com/...`)
+
+Signierte CID-URLs (Origin = `API`) sind weißgelistet und durchlaufen normal. Reihenfolge umgedreht: CID-Replace läuft jetzt zuerst, danach `_blockRemoteContent` über das ge-CID-replaced HTML.
+
+„Bilder laden" macht jetzt einen **vollständigen Iframe-Re-Render** aus dem `_activeIframeOriginalHtml`-Snapshot (in `inbox.js:11` neu) statt Live-DOM-Swap pro Attribut — deckt damit auch CSS-Hintergründe und `<style>`-Tags ab, die per DOM-Swap nicht einzeln restaurierbar wären. Kurze Flackerei beim Klick, dafür sauber alles in einem Rutsch.
+
+Damit auch erledigt: die V1-Limitation „nach Zoom-Wechsel sind Bilder wieder weg" — `_activeIframeBaseHtml` wird beim „Bilder laden" auf die unblocked Variante umgestellt, der Zoom-Handler liest dann von dort.
 
 Test-Plan:
 1. Mail mit Tracking-Pixel öffnen (z.B. Newsletter mit `<img src="https://...">`) → Banner erscheint, Bilder sind Platzhalter

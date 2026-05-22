@@ -7,7 +7,8 @@ const ZOOM_LEVELS = [0.75, 1.0, 1.25, 1.5];
 const DEFAULT_ZOOM = 1.25;
 let _iframeZoom = DEFAULT_ZOOM;
 let _activeIframe = null;
-let _activeIframeBaseHtml = null; // srcdoc nach CID-Ersatz, ohne Zoom-CSS
+let _activeIframeBaseHtml = null;     // srcdoc nach CID-Ersatz + Block, ohne Zoom-CSS (Quelle für Zoom-Re-Render)
+let _activeIframeOriginalHtml = null; // srcdoc nach CID-Ersatz, OHNE Block — Restore-Snapshot für „Bilder laden"
 
 function _withZoom(html) {
   const style = `<style>html,body{zoom:${_iframeZoom}}</style>`;
