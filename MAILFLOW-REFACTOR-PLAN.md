@@ -31,31 +31,9 @@ Verhaltensänderung 400 → 422 bei Pflichtfeld-/Slug-Validierung (kompatibel zu
 
 Damit ist `IMAPClient(...)`-Konstruktion nur noch an genau einer Stelle (`services/imap.py:imap_session`). Verhalten 1:1.
 
-### R4 — Veraltetes `embed-search-test.html` an Admin-Key-Middleware anpassen oder löschen
+### R4 — Veraltetes `embed-search-test.html` gelöscht ✅ (2026-05-22)
 
-**Status:** `/admin/*` ist sicher auf `X-Admin-Key` + `ADMIN_API_KEY` umgestellt; altes Test-HTML nutzt noch Query-Key.
-
-**Betroffene Stelle:** `embed-search-test.html`
-
-Aktuell sinngemäß:
-
-```js
-fetch(`${url}/admin/embed-search?key=${encodeURIComponent(key)}&limit=${limit}&q=${encodeURIComponent(q)}`)
-```
-
-**Problem:** `?key=` wird für `/admin/*` nicht mehr akzeptiert. Das Testtool ist kaputt/verwirrend und dokumentiert ein altes Auth-Muster.
-
-**Fix-Ziel — eine Variante wählen:**
-1. **Anpassen:**
-   ```js
-   fetch(`${url}/admin/embed-search?limit=${limit}&q=${encodeURIComponent(q)}`, {
-     headers: { 'X-Admin-Key': key }
-   })
-   ```
-   UI-Text von „API Key“ auf „Admin Key (`X-Admin-Key`)“ ändern; keine Keys in URL/LocalStorage/Beispielen speichern.
-2. **Oder löschen**, falls das Testtool nicht mehr gebraucht wird; danach prüfen, ob Doku darauf verweist.
-
-**Wichtig:** Nicht die `/admin/*`-Middleware abschwächen. Checks: `rg "\?key=|X-Admin-Key|embed-search" embed-search-test.html backend/routers/admin.py backend/main.py`.
+**Umsetzung:** Datei ersatzlos entfernt. Das Testtool nutzte noch `?key=`-Query und speicherte den Key im `localStorage` als `mf_api_key` — Anti-Pattern, das mit der A10-Umstellung auf `X-Admin-Key` ohnehin nicht mehr funktionierte. `/admin/embed-search` bleibt zum Debuggen per `curl -H 'X-Admin-Key: …' '<url>/admin/embed-search?q=…'` aufrufbar. Keine andere Doku oder Code-Stelle verwies auf die HTML-Datei.
 
 ### R5 — Fresh-PocketBase-Schema-Lücken in `pb_setup.py` schließen
 
