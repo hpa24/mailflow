@@ -154,66 +154,73 @@ async def sync_account(account: dict, full_import: bool = False) -> None:
         await _cleanup_deleted_folders(account_id, all_imap_paths)
 
 
+# Serialisiert Sync pro (account, folder): Scheduler + IDLE sehen sonst
+# beide last_sync_uid=N und fetchen beide UID N+1 → DuplicateRecordError.
+_folder_sync_locks: dict[tuple[str, str], asyncio.Lock] = {}
+
+
 async def _sync_folder(server: IMAPClient, account_id: str,
                        folder_name: str, full_import: bool,
                        folder_standard: dict[str, str] | None = None) -> None:
-    select_info = server.select_folder(folder_name, readonly=True)
-    current_uidvalidity = select_info.get(b"UIDVALIDITY", 0)
+    lock = _folder_sync_locks.setdefault((account_id, folder_name), asyncio.Lock())
+    async with lock:
+        select_info = server.select_folder(folder_name, readonly=True)
+        current_uidvalidity = select_info.get(b"UIDVALIDITY", 0)
 
-    # Normierter Ordnername für PocketBase (z.B. "INBOX.Drafts" → "Drafts")
-    stored_folder_name = (folder_standard or {}).get(folder_name, folder_name)
+        # Normierter Ordnername für PocketBase (z.B. "INBOX.Drafts" → "Drafts")
+        stored_folder_name = (folder_standard or {}).get(folder_name, folder_name)
 
-    # Gespeicherten Ordner-Status holen
-    folder_record = await _get_or_create_folder(account_id, folder_name, current_uidvalidity, stored_folder_name)
-    stored_uidvalidity = folder_record.get("uidvalidity", 0)
-    last_sync_uid = folder_record.get("last_sync_uid", 0)
+        # Gespeicherten Ordner-Status holen
+        folder_record = await _get_or_create_folder(account_id, folder_name, current_uidvalidity, stored_folder_name)
+        stored_uidvalidity = folder_record.get("uidvalidity", 0)
+        last_sync_uid = folder_record.get("last_sync_uid", 0)
 
-    # UIDVALIDITY-Check — Ordner wurde auf dem Server zurückgesetzt
-    if stored_uidvalidity and current_uidvalidity != stored_uidvalidity:
-        logger.warning(f"UIDVALIDITY changed for '{folder_name}' — clearing folder index")
-        await _delete_emails_for_folder(account_id, stored_folder_name)
-        last_sync_uid = 0
+        # UIDVALIDITY-Check — Ordner wurde auf dem Server zurückgesetzt
+        if stored_uidvalidity and current_uidvalidity != stored_uidvalidity:
+            logger.warning(f"UIDVALIDITY changed for '{folder_name}' — clearing folder index")
+            await _delete_emails_for_folder(account_id, stored_folder_name)
+            last_sync_uid = 0
 
-    # UIDs holen: alle (full_import) oder nur neue (inkrementell)
-    if full_import or last_sync_uid == 0:
-        uids = server.search(["ALL"])
-    else:
-        uids = server.search(["UID", f"{last_sync_uid + 1}:*"])
-        # IMAP-"N:*"-Quirk: viele Server geben die höchste existierende UID
-        # zurück, auch wenn keine ≥ N existiert. Hartfilter — sonst probieren wir
-        # pro Sync-Cycle pro Folder eine längst gespeicherte UID neu zu inserten
-        # und produzieren stilles DuplicateRecordError-Rauschen.
-        uids = [u for u in uids if u > last_sync_uid]
+        # UIDs holen: alle (full_import) oder nur neue (inkrementell)
+        if full_import or last_sync_uid == 0:
+            uids = server.search(["ALL"])
+        else:
+            uids = server.search(["UID", f"{last_sync_uid + 1}:*"])
+            # IMAP-"N:*"-Quirk: viele Server geben die höchste existierende UID
+            # zurück, auch wenn keine ≥ N existiert. Hartfilter — sonst probieren wir
+            # pro Sync-Cycle pro Folder eine längst gespeicherte UID neu zu inserten
+            # und produzieren stilles DuplicateRecordError-Rauschen.
+            uids = [u for u in uids if u > last_sync_uid]
 
-    if not uids:
-        logger.info(f"No new messages in '{folder_name}' (stored as '{stored_folder_name}')")
-        await _sync_flags_recent(server, account_id, stored_folder_name, last_sync_uid)
-        await _update_folder(folder_record["id"], current_uidvalidity, last_sync_uid,
+        if not uids:
+            logger.info(f"No new messages in '{folder_name}' (stored as '{stored_folder_name}')")
+            await _sync_flags_recent(server, account_id, stored_folder_name, last_sync_uid)
+            await _update_folder(folder_record["id"], current_uidvalidity, last_sync_uid,
+                                 unread_count=await _count_unread(account_id, stored_folder_name))
+            return
+
+        # Neueste zuerst (für Erst-Import: wichtigste E-Mails früh verfügbar)
+        uids = sorted(uids, reverse=True)
+        logger.info(f"Fetching {len(uids)} messages from '{folder_name}' (stored as '{stored_folder_name}')")
+
+        new_last_uid = last_sync_uid
+        for uid in uids:
+            try:
+                await _fetch_and_save(server, account_id, stored_folder_name, uid, current_uidvalidity)
+                if uid > new_last_uid:
+                    new_last_uid = uid
+                if full_import:
+                    _import_status["done"] += 1
+            except Exception as e:
+                logger.error(f"UID {uid} in '{folder_name}' failed: {e}")
+                _record_sync_event("fetch_error", account_id, stored_folder_name, uid, str(e))
+                if full_import:
+                    _import_status["errors"] += 1
+                continue
+
+        await _sync_flags_recent(server, account_id, stored_folder_name, new_last_uid)
+        await _update_folder(folder_record["id"], current_uidvalidity, new_last_uid,
                              unread_count=await _count_unread(account_id, stored_folder_name))
-        return
-
-    # Neueste zuerst (für Erst-Import: wichtigste E-Mails früh verfügbar)
-    uids = sorted(uids, reverse=True)
-    logger.info(f"Fetching {len(uids)} messages from '{folder_name}' (stored as '{stored_folder_name}')")
-
-    new_last_uid = last_sync_uid
-    for uid in uids:
-        try:
-            await _fetch_and_save(server, account_id, stored_folder_name, uid, current_uidvalidity)
-            if uid > new_last_uid:
-                new_last_uid = uid
-            if full_import:
-                _import_status["done"] += 1
-        except Exception as e:
-            logger.error(f"UID {uid} in '{folder_name}' failed: {e}")
-            _record_sync_event("fetch_error", account_id, stored_folder_name, uid, str(e))
-            if full_import:
-                _import_status["errors"] += 1
-            continue
-
-    await _sync_flags_recent(server, account_id, stored_folder_name, new_last_uid)
-    await _update_folder(folder_record["id"], current_uidvalidity, new_last_uid,
-                         unread_count=await _count_unread(account_id, stored_folder_name))
 
 
 async def _fetch_and_save(server: IMAPClient, account_id: str,
