@@ -2,7 +2,7 @@
 
 **Quelle:** GPT-Codereview vom 2026-05-20 (zusammen mit Stefan). Ergänzend zu den vier sofortigen Security-Fixes (Commits `e137884`, `e4659bf`, `940b24b`, `182241d` am 2026-05-20).
 
-## Status (Stand 2026-05-21 nacht)
+## Status (Stand 2026-05-22 abend)
 
 **Erledigt, live, smoke-getestet:**
 - ✅ A1 — Auth-Modell-Umbau (Commits `9b64ee3` + `77592ea`)
@@ -26,9 +26,21 @@
 - ✅ **C3 Phase 2** (2026-05-21, Commit `9e711da`) — `ImapService`-Klasse in `services/imap.py` bündelt alle 10 blocking-IMAP-Methoden, die vorher als `_imap_*_sync` in main.py lagen. main.py 3736 → 3560 Zeilen, Verhalten 1:1.
 - ✅ **B9** (2026-05-21, Commit `a2c8eea`) — Anhang/Inline gezielt via BODYSTRUCTURE statt `BODY[]`. Walker DFS-kompatibel zu `email.message.walk()`, Fallback auf alten Pfad bei fehlender/unbrauchbarer Struktur. Side-Find: Inline-Bilder waren seit A11 stillschweigend kaputt (Doppel-`?` in Signed-URL) — separat in `b340a6f` gefixt.
 - ✅ **C2 Phase 1 + Phase 2** (2026-05-21, Commits `ad0e942` + `868ef0a`) — 13 von 21 `data: dict`-Endpoints auf typisierte Pydantic-Request-Modelle umgestellt. Begleit-Handler für `RequestValidationError` flacht das Error-Array zu `{"detail": "..."}`, kompatibel zum bestehenden Frontend-Error-Handling.
+- ✅ **C1 Phase 2 komplett** (2026-05-22) — alle Mail-Endpoints aus main.py rausgezogen. main.py **3723 → 281 Zeilen (−92 %)**, übrig bleibt reiner FastAPI-Bootstrap (lifespan, middleware, exception-handler, router-includes). 7 neue Router + 1 Service-Modul:
+  - `routers/admin.py` (Commit `f4580f2`) — `/admin/*` (4 Endpoints)
+  - `routers/templates.py` (Commit `8697b19`) — `/variables`, `/snippets`, `/templates`, `/templates/render` (17)
+  - `routers/contacts.py` (Commit `1b2d178`) — `/contacts/*`, `/contact-groups/*`, `/contacts/import` (9)
+  - `routers/bulk.py` (Commit `e47bba4`) — `/bulk-sends/*` CRUD (3)
+  - `routers/system.py` (Commit `698cd30`) — Infrastruktur: health, sign, sync, events, accounts, smtp-servers, folders, xano (12)
+  - `routers/ai.py` (Commit `7ae94f4`) — categories, ai/*, triage/example, response-patterns (7)
+  - `services/mail.py` (Commit `2360747`) — Cross-cutting Helpers (state-dicts, send-pipeline, bulk-worker-loop, bounce-match, imap-aktions-helper) — Voraussetzung für 5c.2
+  - `routers/mail.py` (Commit `960cacd`) — `/search`, `/emails/*`, `/attachments/*`, `/spam-rules/*` (26)
+- ✅ **Schema-Migration** (2026-05-22, Commit `522bde6`) — `idx_emails_message_id (message_id)` UNIQUE → `idx_emails_account_folder_message_id (account, folder, message_id)` UNIQUE. Same-Mail darf jetzt in Sent (Sender) **und** INBOX (Empfänger via Alias) desselben Mailflow-Accounts liegen. Migration läuft idempotent beim Startup via `_swap_index`-Helper in `pb_setup.py`. Plus: `_fetch_and_save` schreibt bei `DuplicateRecordError` jetzt einen INFO-Log statt still zu schlucken (`imap_sync.py`).
+- ✅ **Diagnose-Tab + Boundary-Filter** (2026-05-22, Commit `0fe03cb`) — neuer Tab in der Topbar zeigt letzte ~500 Sync-Skips/Fetch-Errors aus dem Backend-Ringpuffer (`GET /diagnostics/sync-skips`). IMAP-`N:*`-Quirk gefiltert: `_sync_folder` schmeißt UIDs ≤ `last_sync_uid` nach dem search raus → keine sinnlosen FETCHes + leeres Diagnose-Panel im Normalbetrieb.
+- ✅ **SMTP-Recipient-Parser-Fix** (2026-05-22, Commit `479c82d`) — Komma im Display-Name (z.B. `Stefan Barres, HPA24 <addr>`) wurde durch naives `split(",")` zerrissen, erstes Fragment ohne `@` lief in 553 5.7.1. Fix via `email.utils.getaddresses()` + Filter auf `@`.
 
-**Offen — nächster Chat (Reihenfolge optional, alles reine Architektur/Cleanup, kein Security/Robustheits-Item mehr):**
-- **C1 Phase 2** — restliche 5 Router (Templates, Mail/IMAP, Contacts, Bulk, Admin) aus `main.py` rausziehen. Mechanisch, aber riskant wegen geteilter Helpers/Globals. ~2–3 h.
+**Offen — nächster Chat:**
+- **(b) Per-(account, folder)-Lock im Sync** — Diagnose-Tab hat im Live-Betrieb eine Race-Condition zwischen Scheduler-Sync + IDLE-Sync sichtbar gemacht (beide selektieren dieselbe Folder, beide sehen last_sync_uid=N, beide fetchen UID N+1, einer bekommt DuplicateRecordError). Lock-Dict in `imap_sync.py` einbauen. ~30 min.
 - **C2 Phase 3** — die verbleibenden 7 (komplexen) Endpoints: `update_account`, `send_email_endpoint`, `bulk_send_endpoint`, `create_draft`, `update_draft`, `contacts_import`, `templates_render`. Brauchen größere Modelle mit nested Feldern.
 - **C4 Phase 2** — restliche 4 JS-Module aus `inbox.js`: `compose.js`, `email_detail.js`, `spam.js`, `sse.js`. Frontend-Modulsplit ist tückisch (State, Event-Listener). ~4–8 h.
 - **B14 Phase 2** (optional) — Disk-Spool via `tempfile.NamedTemporaryFile` für Uploads >200 MB. Aktuell nicht akut. Bonus: würde Bulk-Resume *mit* Anhängen erlauben (siehe B15-Restriktion).
@@ -175,7 +187,7 @@ Am Ende: Admin-Token nur noch für IMAP-Sync, Bulk-Backend, Webhook-Send-Backend
 
 **Phase 1 ✅ (früher):** `routers/webhooks.py` rausgezogen.
 
-**Phase 2 (offen):** Templates, Mail/IMAP, Contacts, Bulk, Admin. 5 Router. Mechanisch, aber riskant wegen geteilter Helpers/Globals (`_get_imap_account`, `_update_folder_unread_count`, Settings, PB-Client). Reihenfolge nach Schmerz: Admin (klein, ~150 Z) → Templates (~700 Z) → Contacts → Bulk → Mail/IMAP (größter Brocken).
+**Phase 2 ✅ (2026-05-22):** Alle 5 ursprünglich geplanten Router rausgezogen — plus 2 zusätzliche aus der Zerlegung (System, AI) und 1 Service-Modul (services/mail.py als Zirkular-Import-Brecher für 5c.2). Commits: `f4580f2` (admin), `8697b19` (templates), `1b2d178` (contacts), `e47bba4` (bulk), `698cd30` (system / 5a), `7ae94f4` (ai / 5b), `2360747` (services/mail / 5c.1), `960cacd` (mail / 5c.2). main.py: 3723 → 281 Zeilen.
 
 ### C2 — Pydantic-Request-Modelle konsequent
 
