@@ -19,6 +19,7 @@ from rate_limit import limiter
 from routers import admin as admin_router
 from routers import bulk as bulk_router
 from routers import contacts as contacts_router
+from routers import system as system_router
 from routers import templates as templates_router
 from routers import webhooks as webhooks_router
 from services.imap import ImapService
@@ -38,8 +39,7 @@ from backfill import run_once_if_needed, rebuild_fts_if_needed, backfill_html_on
 from config import settings
 from fts import fts_setup, fts_search, fts_rebuild, fts_delete
 from idle_manager import idle_manager, get_sse_queues
-from imap_sync import sync_all_accounts, get_sync_status, upsert_contact
-from models import HealthResponse, SyncStatusResponse
+from imap_sync import upsert_contact
 import spam_filter
 from scheduler import start_scheduler, stop_scheduler
 from smtp_sender import send_email as smtp_send_email
@@ -448,6 +448,7 @@ app.state.limiter = limiter
 app.include_router(admin_router.router)
 app.include_router(bulk_router.router)
 app.include_router(contacts_router.router)
+app.include_router(system_router.router)
 app.include_router(templates_router.router)
 app.include_router(webhooks_router.router)
 
@@ -565,164 +566,11 @@ async def _global_exception_handler(request: Request, exc: Exception):
     )
 
 
-@app.get("/health", response_model=HealthResponse)
-async def health():
-    return HealthResponse(status="ok")
-
-
-class SignRequest(BaseModel):
-    path: str
-    ttl: int = 300
-
-
-@app.post("/sign")
-async def sign_url(payload: SignRequest):
-    """Gibt einen kurzlebigen signierten URL-Token für genau diesen path zurück.
-    Frontend nutzt das für SSE-EventSource, Inline-Bilder und Attachment-Downloads —
-    Stellen, an denen keine Authorization-Header möglich sind.
-    Die Route selbst hängt an der Auth-Middleware (PB-Bearer oder Legacy-Key).
-    """
-    if not settings.SIGN_SECRET:
-        raise HTTPException(status_code=503, detail="SIGN_SECRET nicht konfiguriert")
-    if not payload.path.startswith("/"):
-        raise HTTPException(status_code=400, detail="path muss mit / beginnen")
-    token, exp = signed_url.sign(payload.path, payload.ttl)
-    return {"token": token, "exp": exp}
-
-
-@app.post("/sync/run")
-async def sync_run(background_tasks: BackgroundTasks):
-    """Manueller Sync-Trigger für alle Accounts."""
-    background_tasks.add_task(sync_all_accounts)
-    return {"status": "sync started"}
-
-
-@app.get("/sync/status", response_model=SyncStatusResponse)
-async def sync_status():
-    return get_sync_status()
-
-
-@app.get("/events")
-async def sse_events(request: Request):
-    """Server-Sent Events — schickt 'new-mail' wenn IDLE neue Nachrichten erkennt."""
-    from fastapi.responses import StreamingResponse
-
-    queue: asyncio.Queue = asyncio.Queue(maxsize=20)
-    queues = get_sse_queues()
-    queues.append(queue)
-
-    async def stream():
-        try:
-            yield "data: {\"type\":\"connected\"}\n\n"
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=25)
-                    yield f"data: {json.dumps(event)}\n\n"
-                except asyncio.TimeoutError:
-                    yield ": heartbeat\n\n"
-        finally:
-            try:
-                queues.remove(queue)
-            except ValueError:
-                pass
-
-    return StreamingResponse(
-        stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-_ACCOUNT_SAFE_FIELDS = "id,name,from_email,from_name,signature,color_tag,reply_to_email,imap_host,imap_port,imap_user"
-
-@app.get("/accounts")
-async def get_accounts(token: str = Depends(pb_user_auth.get_user_token)):
-    # A11 Phase 2 — Pilot: ruft PB mit User-Token statt Admin-Token auf.
-    # PB-Rule `@request.auth.id != ""` auf accounts erlaubt Read für eingeloggte User.
-    return await pb_client.pb_get_as(token, "/api/collections/accounts/records",
-                                     params={"perPage": 100, "fields": _ACCOUNT_SAFE_FIELDS})
-
-
-# Tagesversand-Limit von mailbox.org. Wenn sich Stefans Tarif ändert,
-# zentral hier anpassen — Frontend liest den Wert aus der Response.
-_SEND_DAILY_LIMIT = 10000
-
-
-@app.get("/accounts/sent-today")
-async def accounts_sent_today(token: str = Depends(pb_user_auth.get_user_token)):
-    """Anzahl heute gesendete Mails pro Account aus dem Sent-Ordner.
-
-    Cutoff ist Mitternacht Europa/Berlin → UTC. PocketBase speichert
-    ``date_sent`` als UTC-Timestamp ``YYYY-MM-DD HH:MM:SS``.
-    """
-    from datetime import datetime, timezone
-    try:
-        from zoneinfo import ZoneInfo
-        now_local = datetime.now(ZoneInfo("Europe/Berlin"))
-    except Exception:
-        now_local = datetime.now(timezone.utc)
-    midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-    cutoff = midnight_local.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-    accounts_data = await pb_client.pb_get_as(
-        token,
-        "/api/collections/accounts/records",
-        params={"perPage": 100, "fields": "id"},
-    )
-    counts: dict[str, int] = {}
-    for acc in accounts_data.get("items", []):
-        aid = acc["id"]
-        cnt_data = await pb_client.pb_get_as(
-            token,
-            "/api/collections/emails/records",
-            params={
-                "filter": f'account={pb_client.pb_quote(aid)} && folder="Sent" && date_sent>={pb_client.pb_quote(cutoff)}',
-                "perPage": 1,
-                "fields": "id",
-            },
-        )
-        counts[aid] = cnt_data.get("totalItems", 0)
-    return {"counts": counts, "limit": _SEND_DAILY_LIMIT, "cutoff_utc": cutoff}
-
-
-@app.patch("/accounts/{account_id}")
-async def update_account(account_id: str, data: dict):
-    """Update account fields (name, from_name, signature, etc.)."""
-    # Only allow safe fields — never expose IMAP/SMTP credentials via this endpoint
-    allowed = {"name", "from_name", "signature", "color_tag", "reply_to_email"}
-    filtered = {k: v for k, v in data.items() if k in allowed}
-    if not filtered:
-        raise HTTPException(status_code=400, detail="No valid fields to update")
-    return await pb_client.pb_patch(
-        f"/api/collections/accounts/records/{account_id}", filtered
-    )
+# /health, /sign, /sync/*, /events, /accounts/*, /smtp-servers, /folders
+# → routers/system.py
 
 
 # /contacts/* + /contact-groups/* → routers/contacts.py
-
-
-@app.get("/smtp-servers")
-async def get_smtp_servers(token: str = Depends(pb_user_auth.get_user_token)):
-    # `fields`-Whitelist verhindert, dass `password` (und andere Credentials)
-    # ans Frontend durchgereicht werden. Backend-Versand (smtp_sender) liest
-    # als Admin direkt aus PB und braucht diesen Endpoint nicht.
-    return await pb_client.pb_get_as(token, "/api/collections/smtp_servers/records",
-                                     params={"perPage": 50, "sort": "name",
-                                             "fields": "id,name,is_default"})
-
-
-@app.get("/folders")
-async def get_folders(account: str | None = None, token: str = Depends(pb_user_auth.get_user_token)):
-    params = {"perPage": 200}
-    if account:
-        params["filter"] = f'account={pb_client.pb_quote(account)}'
-    return await pb_client.pb_get_as(token, "/api/collections/folders/records", params=params)
 
 
 @app.get("/search")
@@ -876,21 +724,7 @@ def _can_merge(existing: list, members: list) -> bool:
     return True  # Einer von beiden ist leer, also kein direkter Konflikt
 
 
-@app.get("/folders/counts")
-async def get_folder_counts(token: str = Depends(pb_user_auth.get_user_token)):
-    """Ungelesen-Zähler aller Ordner + Gesamt-Neu-Zähler (is_new=true)."""
-    folders = await pb_client.pb_get_as(
-        token,
-        "/api/collections/folders/records",
-        params={"perPage": 200, "fields": "id,account,imap_path,email_folder,unread_count"}
-    )
-    new_data = await pb_client.pb_get_as(
-        token,
-        "/api/collections/emails/records",
-        params={"filter": "is_new=true", "perPage": 1, "fields": "id"}
-    )
-    folders["new_count"] = new_data.get("totalItems", 0)
-    return folders
+# /folders/counts → routers/system.py
 
 
 @app.get("/emails/threaded")
@@ -2642,22 +2476,7 @@ async def save_response_pattern(req: SavePatternRequest, token: str = Depends(pb
     return {"ok": True}
 
 
-@app.get("/xano/user-info")
-async def xano_user_info(email: str):
-    """Holt HPA24-Userdaten aus Xano anhand der Absender-E-Mail."""
-    if not settings.XANO_API_KEY or not settings.XANO_USER_ROLES_URL:
-        return {"userdata": None}
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(
-                settings.XANO_USER_ROLES_URL,
-                params={"email": email, "key": settings.XANO_API_KEY},
-            )
-            resp.raise_for_status()
-            return resp.json()
-    except Exception as exc:
-        logger.warning("Xano-Abfrage fehlgeschlagen für %s: %s", email, exc)
-        return {"userdata": None}
+# /xano/user-info → routers/system.py
 
 
 # ---------------------------------------------------------------------------
