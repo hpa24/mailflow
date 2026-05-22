@@ -73,6 +73,12 @@ async function openEmail(email, itemEl) {
   const _inSpam = email.folder === 'Spam';
   document.getElementById('btn-spam').style.display        = (isDraft || _inSpam) ? 'none' : '';
   document.getElementById('btn-spam-block').style.display  = (isDraft || _inSpam) ? 'none' : '';
+  const detailMoreMenu = document.getElementById('detail-more-menu');
+  if (detailMoreMenu) {
+    const hasVisibleMenuItems = ['btn-forward', 'btn-toggle-read', 'btn-spam', 'btn-spam-block']
+      .some(id => document.getElementById(id)?.style.display !== 'none');
+    detailMoreMenu.style.display = hasVisibleMenuItems ? '' : 'none';
+  }
 
   // KI-Suggest-Button: nur anzeigen wenn KI-Modus aktiv und kein Draft
   const kiSuggestBtn = document.getElementById('btn-ki-suggest');

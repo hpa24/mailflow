@@ -21,7 +21,13 @@
   document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('#templates-submenu .submenu-btn').forEach(btn => {
       if (btn.disabled) return;
-      btn.addEventListener('click', () => setSection(btn.dataset.section));
+      btn.addEventListener('click', () => {
+        if (btn.dataset.tabJump && window.mfTabs) {
+          window.mfTabs.setActiveTab(btn.dataset.tabJump);
+          return;
+        }
+        setSection(btn.dataset.section);
+      });
     });
     let saved = 'variables';
     try { saved = localStorage.getItem('mf_active_section') || 'variables'; } catch (_) {}

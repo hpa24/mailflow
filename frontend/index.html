@@ -25,24 +25,27 @@
         <nav id="topbar-tabs">
           <button class="tab-btn" data-tab="inbox">Inbox</button>
           <button class="tab-btn" data-tab="templates">Vorlagen</button>
-          <button class="tab-btn" data-tab="contacts">Kontakte</button>
-          <button class="tab-btn" data-tab="diagnose" title="Sync-Auffälligkeiten">Diagnose</button>
         </nav>
         <button class="action-btn primary" id="btn-sync">E-Mails abrufen</button>
 <button class="action-btn primary" id="btn-new-email">Neue E-Mail</button>
-        <button class="action-btn" id="btn-ki-mode">KI-Modus</button>
-        <button class="action-btn" id="btn-spam-rules" title="Geblockte Absender verwalten">Blocklist<span id="spam-rules-count" class="badge-count" style="display:none">0</span></button>
-        <button class="action-btn" id="btn-webhooks" title="Externe Webhooks für Mail-Versand">Webhooks</button>
+        <div class="toolbar-spacer"></div>
         <div id="search-wrap">
           <input type="text" id="search-input" placeholder="Suchen…" autocomplete="off">
           <button id="search-clear" title="Suche beenden">✕</button>
         </div>
+        <button class="action-btn" id="btn-ki-mode">KI-Modus</button>
+        <div class="toolbar-menu" id="topbar-more-menu">
+          <button class="action-btn" id="btn-topbar-more" type="button" aria-haspopup="true" aria-expanded="false">Mehr ▾</button>
+          <div class="toolbar-menu-popover" role="menu">
+            <button class="menu-action-btn" id="btn-spam-rules" title="Geblockte Absender verwalten">Blocklist<span id="spam-rules-count" class="badge-count" style="display:none">0</span></button>
+            <button class="menu-action-btn" id="btn-webhooks" title="Externe Webhooks für Mail-Versand">Webhooks</button>
+            <button class="menu-action-btn" id="btn-logout" onclick="auth.logout()">Abmelden</button>
+          </div>
+        </div>
 
 </div>
 
-<div id="topbar-right">
-<button class="action-btn" id="btn-logout" onclick="auth.logout()">Abmelden</button>
-</div>
+<div id="topbar-right"></div>
 
     </header>
 
@@ -119,13 +122,19 @@
             <button class="action-btn primary" id="btn-send-draft" style="display:none">Senden</button>
             <button class="action-btn" id="btn-sync-draft" style="display:none">Synchronisieren</button>
             <button class="action-btn primary" id="btn-reply">Antworten</button>
-            <button class="action-btn" id="btn-forward">Weiterleiten</button>
-            <button class="action-btn" id="btn-toggle-read">Als gelesen markieren</button>
-            <button class="action-btn danger primary" id="btn-delete">Löschen</button>
-            <button class="action-btn danger" id="btn-spam">Spam</button>
-            <button class="action-btn danger" id="btn-spam-block" title="Mail als Spam markieren und Absender blockieren">+ Absender blocken</button>
-            <button id="btn-ki-suggest" class="action-btn primary" style="display:none">KI-Antwort erstellen</button>
+            <button id="btn-ki-suggest" class="action-btn primary" style="display:none">KI-Antwort</button>
             <button id="btn-ki-analyze" class="action-btn" style="display:none">KI-Analyse</button>
+            <div class="toolbar-spacer"></div>
+            <button class="action-btn danger primary" id="btn-delete">Löschen</button>
+            <div class="toolbar-menu" id="detail-more-menu">
+              <button class="action-btn" id="btn-detail-more" type="button" aria-haspopup="true" aria-expanded="false">Mehr ▾</button>
+              <div class="toolbar-menu-popover" role="menu">
+                <button class="menu-action-btn" id="btn-forward">Weiterleiten</button>
+                <button class="menu-action-btn" id="btn-toggle-read">Als gelesen markieren</button>
+                <button class="menu-action-btn danger" id="btn-spam">Spam</button>
+                <button class="menu-action-btn danger" id="btn-spam-block" title="Mail als Spam markieren und Absender blockieren">+ Absender blocken</button>
+              </div>
+            </div>
           </div>
 
 <div class="view-inner-container">
@@ -164,6 +173,7 @@
             <button class="action-btn primary" id="btn-send-inline">Senden</button>
             <button class="action-btn" id="btn-compose-cancel">Abbrechen</button>
             <button class="action-btn" id="btn-attach" title="Datei anhängen">Anhang</button>
+            <div class="toolbar-spacer"></div>
             <button class="action-btn" id="btn-from-template" title="Vorlage in diese Mail laden">Aus Vorlage</button>
             <button class="action-btn" id="btn-bulk" title="Massenversand: dieselbe Mail einzeln an viele Empfänger">Massenversand</button>
             <button class="action-btn" id="btn-test-send" title="Test-Mail an deine eingeloggte Adresse senden — {{name}}/{{email}} werden mit deinen Daten gefüllt">✉ Test senden</button>
@@ -258,7 +268,8 @@
         <button class="submenu-btn" data-section="groups">Gruppen</button>
         <button class="submenu-btn" data-section="bulk_sends">Aussendungen</button>
         <button class="submenu-btn" data-section="bounced">Bouncte</button>
-        <button class="submenu-btn" data-section="contacts" disabled>Kontakte <small>(folgt)</small></button>
+        <button class="submenu-btn" data-tab-jump="contacts">Kontakte <small>(folgt)</small></button>
+        <button class="submenu-btn" data-tab-jump="diagnose">Diagnose</button>
       </aside>
       <main id="templates-main">
         <section id="section-variables" class="templates-section">
@@ -741,6 +752,7 @@ Body (JSON):
   <script src="js/api.js?v=20260520-3c"></script>
   <script src="js/tabs.js?v=20260519-tpl6"></script>
   <script src="js/template_subnav.js?v=20260520-3c"></script>
+  <script src="js/toolbar_menus.js?v=20260522-design"></script>
   <script src="js/editor_dropdowns.js?v=20260519-tpl6"></script>
   <script src="js/delete_guard.js?v=20260519-tpl7"></script>
   <script src="js/variables.js?v=20260519-tpl7"></script>
