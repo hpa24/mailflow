@@ -326,6 +326,11 @@ async def _ensure_collection(
     resp = await client.post("/api/collections", headers=headers, json=schema)
     if resp.status_code in (200, 204):
         coll_id = resp.json()["id"]
+        # R5: in `existing` registrieren, damit spätere `if "X" in existing`-Migrations-
+        # blöcke im selben Lauf greifen (Fresh-Install muss denselben Endzustand
+        # erreichen wie eine bestehende Instanz). `_add_missing_fields`/`_ensure_rules`
+        # sind idempotent — re-anwenden auf frische Collections ist no-op.
+        existing[name] = coll_id
         logger.info(f"Created collection '{name}' (id: {coll_id})")
         return coll_id
     else:

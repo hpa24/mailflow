@@ -238,7 +238,7 @@ Nachzug zum Webhook-System (s.o.): Sent-Mails, die per `/webhooks/{slug}/send` r
 
 ### Sync-Markierung
 
-Neues Feld `emails.webhook` (relation → `webhooks`, optional, single) — per Migration in `pb_setup.py` über `_add_missing_fields()` ergänzt, greift nur wenn die `webhooks`-Collection schon existiert.
+Neues Feld `emails.webhook` (relation → `webhooks`, optional, single) — per Migration in `pb_setup.py` über `_add_missing_fields()` ergänzt. Seit R5 (2026-05-22) registriert `_ensure_collection` neu angelegte Collections sofort in `existing`, daher greift dieser Block auch bei einer frischen PB-Instanz.
 
 Befüllt wird das Feld im IMAP-Sync (`imap_sync._fetch_and_save`): für `folder == "Sent"` wird die `message_id` der eingehenden Mail in `webhook_logs` mit `status="success"` nachgeschlagen. Bei Treffer landet die Webhook-Record-ID im Feld, sonst bleibt es leer (= normaler Versand). Lookup-Helper: `_webhook_id_for_message()`. Bestehende Sent-Mails behalten ihr leeres Feld und erscheinen damit korrekt unter „Normal".
 

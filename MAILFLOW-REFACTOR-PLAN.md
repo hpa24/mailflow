@@ -35,30 +35,11 @@ Damit ist `IMAPClient(...)`-Konstruktion nur noch an genau einer Stelle (`servic
 
 **Umsetzung:** Datei ersatzlos entfernt. Das Testtool nutzte noch `?key=`-Query und speicherte den Key im `localStorage` als `mf_api_key` — Anti-Pattern, das mit der A10-Umstellung auf `X-Admin-Key` ohnehin nicht mehr funktionierte. `/admin/embed-search` bleibt zum Debuggen per `curl -H 'X-Admin-Key: …' '<url>/admin/embed-search?q=…'` aufrufbar. Keine andere Doku oder Code-Stelle verwies auf die HTML-Datei.
 
-### R5 — Fresh-PocketBase-Schema-Lücken in `pb_setup.py` schließen
+### R5 — Fresh-PocketBase-Schema-Lücken in `pb_setup.py` schließen ✅ (2026-05-22)
 
-**Status:** `pb_setup.py` ist weitgehend Manifest; Fresh-Install hat aber noch Lücken, weil `existing` am Anfang leer ist.
+**Umsetzung:** `_ensure_collection` registriert nach erfolgreicher Anlage sofort `existing[name] = coll_id`. Damit greifen alle 13 `if "X" in existing`-Migrationsblöcke (insb. `contacts → groups/unsubscribed`, `emails → webhook`) auch beim Fresh-Install im selben Lauf. Die Blöcke selbst sind seit jeher idempotent (`_add_missing_fields` vergleicht gegen die live PB-Felder, `_ensure_rules` vergleicht gegen die aktuellen Regeln, `_ensure_indexes` filtert vorhandene Indizes) — daher kein Risiko für bestehende Instanzen.
 
-**Problem:** `_ensure_collection(...)` legt Collections im selben Lauf an, aber spätere `if "..." in existing:`-Migrationsblöcke greifen nur für Collections, die **vor** dem Lauf existierten. Frische PB-Instanzen können dadurch unvollständig bleiben.
-
-**Konkret gefundene Lücken:**
-1. `contacts.groups`
-   - nicht in `_contacts_schema()` definiert.
-   - wird nur via `_add_missing_fields(... "contacts" ...)` mit Relation auf `contact_groups_id` ergänzt.
-2. `contacts.unsubscribed`
-   - nicht in `_contacts_schema()` definiert.
-   - wird nur im gleichen Missing-Fields-Block ergänzt.
-3. `emails.webhook`
-   - Relation auf `webhooks`, daher nicht in `_emails_schema(accounts_id)`.
-   - wird nur ergänzt, wenn `"emails" in existing and "webhooks" in existing`.
-
-**Fix-Ziel:**
-- Fresh-Install und bestehende Instanz müssen denselben Endzustand erreichen.
-- Einfacher Ansatz: `_ensure_collection` oder Caller aktualisiert `existing[schema["name"]] = collection_id` nach jeder Anlage. Danach greifen die bestehenden Missing-Fields-Blöcke im selben Lauf.
-- `contacts.groups`/`contacts.unsubscribed` auch bei frischer Collection ergänzen.
-- `emails.webhook` nach Anlage von `webhooks` ergänzen (Relation braucht `webhooks_id`).
-- Nicht destruktiv arbeiten; nur additive Felder/Rules/Indexes patchen.
-- Checks: `rg -n "groups|unsubscribed|webhook|_add_missing_fields|existing\[" backend/pb_setup.py`; optional frische PB-Instanz starten und Felder kontrollieren.
+Statische Verifikation per Trockenlauf-Simulation: mit leerem `existing` zu Beginn werden alle 16 Collections registriert, alle 13 `if X in existing`-Blöcke feuern. Damit erreicht Fresh-Install denselben Endzustand wie eine seit Monaten gewachsene Instanz.
 
 ### R6 — Guardrail-Test/Linter für PocketBase-Filter-Escaping ergänzen
 
