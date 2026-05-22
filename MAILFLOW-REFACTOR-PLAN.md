@@ -12,26 +12,14 @@
 
 **Umsetzung:** `_delete_emails_for_folder` in `backend/imap_sync.py:484` löscht jetzt iterativ: `page=1, perPage=500, fields=id` laden → Batch löschen → neu laden bis `items` leer. Safeguard gegen Endlosschleife: wenn ein Batch komplett scheitert (`deleted_this_batch == 0`), Abbruch. `except Exception: pass` ersetzt durch `logger.warning(...)` mit Email-ID + Folder. Finaler `logger.info` mit Gesamtzahl pro `(account, folder)`. Smoke folgt beim nächsten echten UIDVALIDITY-Wechsel.
 
-### R2 — Webhook-Endpoints auf Pydantic-Request-Modelle umstellen
+### R2 — Webhook-Endpoints auf Pydantic-Request-Modelle umstellen ✅ (2026-05-22)
 
-**Status:** Pydantic-Migration ist fast vollständig erledigt; Webhooks sind Rest.
+**Umsetzung:** Drei Modelle in `backend/routers/webhooks.py`:
+- `WebhookSendRequest` — alle Felder optional; Pflichtfeld-Checks (Empfänger/Betreff/Body) bleiben bewusst im Endpoint-Body, damit `_webhook_log` bei Validierungsfehlern weiterhin einen Audit-Eintrag schreibt.
+- `WebhookCreateRequest` — Pflichtfelder (`name`, `slug`, `smtp_server`, `from_account`) mit `field_validator`, Slug wird lowercased + per `_WEBHOOK_SLUG_RE` geprüft, optionale Strings (`default_to`, `from_name_override`) gestrippt.
+- `WebhookUpdateRequest` — alle Felder optional inkl. `rotate_api_key`; `model_dump(exclude_unset=True, exclude={"rotate_api_key"})` für PATCH-Semantik, `rotate_api_key` triggert weiterhin `api_key = "whk_…"`.
 
-**Betroffene Stelle:** `backend/routers/webhooks.py`
-
-Aktuelle `data: dict`-Endpoint-Signaturen:
-- `webhook_send(slug, request, data: dict)` — `POST /webhooks/{slug}/send`, auth per `X-Webhook-Key`, rate-limited. Payload: `to`, `subject`, `body`, `body_html`, `reply_to`, `cc`.
-- `webhooks_create(data: dict, token=...)` — UI-CRUD, auth per PB-Bearer. Pflicht: `name`, `slug`, `smtp_server`, `from_account`; optional: `default_to`, `from_name_override`, `allow_to_override`, `allow_reply_to`, `allow_cc`, `is_active`.
-- `webhooks_update(webhook_id, data: dict, token=...)` — PATCH-Semantik; `rotate_api_key: true` erzeugt neuen `whk_...`-Key.
-
-**Fix-Ziel:**
-1. Modelle ergänzen: `WebhookSendRequest`, `WebhookCreateRequest`, `WebhookUpdateRequest`.
-2. Bestehendes Verhalten erhalten:
-   - Slug-Regex `^[a-z0-9-]+$` weiter erzwingen.
-   - Create-Pflichtfelder mit klarer Fehlermeldung.
-   - Update mit `model_dump(exclude_unset=True)`.
-   - `rotate_api_key` im Update-Modell optional, aber nicht als PB-Feld patchen; stattdessen wie bisher neuen `api_key` generieren.
-   - Webhook-Send: leere `body` + leere `body_html` weiterhin ablehnen; `to`, `reply_to`, `cc` abhängig von Webhook-Toggles behandeln.
-3. Checks: `rg "data: dict" backend/routers` darf keine Webhook-Endpoint-Treffer mehr liefern; Syntax-/Import-Check.
+Verhaltensänderung 400 → 422 bei Pflichtfeld-/Slug-Validierung (kompatibel zum `RequestValidationError`-Handler, der den Body zu `{"detail":"…"}` flacht). Pydantic-Smoke-Test bestätigt: alle bisherigen Fehlermeldungen + Defaults + leere PATCH-Bodies bleiben gleich. Kein `data: dict` mehr in `backend/routers/`.
 
 ### R3 — IMAP-Service-Reste zentralisieren
 

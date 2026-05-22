@@ -9,6 +9,7 @@ import re
 import secrets as _secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, field_validator
 
 import pb_client
 import pb_user_auth
@@ -54,14 +55,27 @@ async def _webhook_log(webhook_id: str, ip: str, status: str,
         logger.error("webhook_log konnte nicht geschrieben werden: %s", exc)
 
 
+class WebhookSendRequest(BaseModel):
+    to: str | None = None
+    subject: str | None = None
+    body: str | None = None
+    body_html: str | None = None
+    reply_to: str | None = None
+    cc: str | None = None
+
+
 @router.post("/webhooks/{slug}/send")
 @limiter.limit("30/minute")
-async def webhook_send(slug: str, request: Request, data: dict):
+async def webhook_send(slug: str, request: Request, req: WebhookSendRequest):
     """Externer Mail-Versand via Webhook.
 
     Auth: Header ``X-Webhook-Key`` mit dem in der Webhook-Konfig gespeicherten
     ``api_key``. Diese Route ist von der globalen Auth-Middleware ausgenommen —
     jeder Webhook hat seinen eigenen Schlüssel.
+
+    Validierung der Pflichtfelder (Empfänger/Betreff/Body) bleibt bewusst im
+    Endpoint-Body statt im Pydantic-Modell, damit `_webhook_log` bei
+    Validierungsfehlern weiterhin einen Audit-Eintrag schreiben kann.
     """
     if not _WEBHOOK_SLUG_RE.match(slug or ""):
         raise HTTPException(status_code=400, detail="Ungültiger Slug")
@@ -77,18 +91,18 @@ async def webhook_send(slug: str, request: Request, data: dict):
 
     ip = request.client.host if request.client else ""
 
-    payload_to = (data.get("to") or "").strip()
+    payload_to = (req.to or "").strip()
     to = payload_to if (wh.get("allow_to_override") and payload_to) else (wh.get("default_to") or "").strip()
     if not to:
         await _webhook_log(wh["id"], ip, "error", "", "", error="Empfänger fehlt")
         raise HTTPException(status_code=400, detail="Empfänger fehlt")
 
-    reply_to = (data.get("reply_to") or "").strip() if wh.get("allow_reply_to") else ""
-    cc = (data.get("cc") or "").strip() if wh.get("allow_cc") else ""
+    reply_to = (req.reply_to or "").strip() if wh.get("allow_reply_to") else ""
+    cc = (req.cc or "").strip() if wh.get("allow_cc") else ""
 
-    subject = (data.get("subject") or "").strip()
-    body = data.get("body") or ""
-    body_html = data.get("body_html") or ""
+    subject = (req.subject or "").strip()
+    body = req.body or ""
+    body_html = req.body_html or ""
 
     if not subject:
         await _webhook_log(wh["id"], ip, "error", to, "", error="Betreff fehlt")
@@ -129,30 +143,62 @@ async def webhooks_list(token: str = Depends(pb_user_auth.get_user_token)):
     return data.get("items", [])
 
 
-@router.post("/webhooks")
-async def webhooks_create(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
-    name = (data.get("name") or "").strip()
-    slug = (data.get("slug") or "").strip().lower()
-    smtp_server = (data.get("smtp_server") or "").strip()
-    from_account = (data.get("from_account") or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="name fehlt")
-    if not _WEBHOOK_SLUG_RE.match(slug):
-        raise HTTPException(status_code=400, detail="slug ungültig (nur a-z, 0-9, -)")
-    if not smtp_server or not from_account:
-        raise HTTPException(status_code=400, detail="smtp_server und from_account erforderlich")
+class WebhookCreateRequest(BaseModel):
+    name: str
+    slug: str
+    smtp_server: str
+    from_account: str
+    default_to: str = ""
+    from_name_override: str = ""
+    allow_to_override: bool = True
+    allow_reply_to: bool = True
+    allow_cc: bool = False
+    is_active: bool = True
 
+    @field_validator("name")
+    @classmethod
+    def _name_nonempty(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("name fehlt")
+        return v
+
+    @field_validator("smtp_server", "from_account")
+    @classmethod
+    def _id_nonempty(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("smtp_server und from_account erforderlich")
+        return v
+
+    @field_validator("default_to", "from_name_override")
+    @classmethod
+    def _strip_optional(cls, v: str | None) -> str:
+        return (v or "").strip()
+
+    @field_validator("slug")
+    @classmethod
+    def _validate_slug(cls, v: str) -> str:
+        s = (v or "").strip().lower()
+        if not _WEBHOOK_SLUG_RE.match(s):
+            raise ValueError("slug ungültig (nur a-z, 0-9, -)")
+        return s
+
+
+@router.post("/webhooks")
+async def webhooks_create(req: WebhookCreateRequest,
+                          token: str = Depends(pb_user_auth.get_user_token)):
     record = {
-        "name": name,
-        "slug": slug,
-        "smtp_server": smtp_server,
-        "from_account": from_account,
-        "default_to": (data.get("default_to") or "").strip(),
-        "from_name_override": (data.get("from_name_override") or "").strip(),
-        "allow_to_override": bool(data.get("allow_to_override", True)),
-        "allow_reply_to": bool(data.get("allow_reply_to", True)),
-        "allow_cc": bool(data.get("allow_cc", False)),
-        "is_active": bool(data.get("is_active", True)),
+        "name": req.name,
+        "slug": req.slug,
+        "smtp_server": req.smtp_server,
+        "from_account": req.from_account,
+        "default_to": req.default_to,
+        "from_name_override": req.from_name_override,
+        "allow_to_override": req.allow_to_override,
+        "allow_reply_to": req.allow_reply_to,
+        "allow_cc": req.allow_cc,
+        "is_active": req.is_active,
         "api_key": "whk_" + _secrets.token_urlsafe(32),
     }
     return await pb_client.pb_post_as(token, "/api/collections/webhooks/records", record)
@@ -174,21 +220,36 @@ async def webhooks_logs(webhook_id: str, limit: int = 100,
     return data.get("items", [])
 
 
-@router.patch("/webhooks/{webhook_id}")
-async def webhooks_update(webhook_id: str, data: dict,
-                          token: str = Depends(pb_user_auth.get_user_token)):
-    allowed = {
-        "name", "slug", "smtp_server", "from_account", "default_to",
-        "from_name_override",
-        "allow_to_override", "allow_reply_to", "allow_cc", "is_active",
-    }
-    patch = {k: v for k, v in data.items() if k in allowed}
-    if "slug" in patch:
-        s = (patch["slug"] or "").strip().lower()
+class WebhookUpdateRequest(BaseModel):
+    name: str | None = None
+    slug: str | None = None
+    smtp_server: str | None = None
+    from_account: str | None = None
+    default_to: str | None = None
+    from_name_override: str | None = None
+    allow_to_override: bool | None = None
+    allow_reply_to: bool | None = None
+    allow_cc: bool | None = None
+    is_active: bool | None = None
+    rotate_api_key: bool | None = None
+
+    @field_validator("slug")
+    @classmethod
+    def _validate_slug(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        s = v.strip().lower()
         if not _WEBHOOK_SLUG_RE.match(s):
-            raise HTTPException(status_code=400, detail="slug ungültig")
-        patch["slug"] = s
-    if data.get("rotate_api_key"):
+            raise ValueError("slug ungültig")
+        return s
+
+
+@router.patch("/webhooks/{webhook_id}")
+async def webhooks_update(webhook_id: str, req: WebhookUpdateRequest,
+                          token: str = Depends(pb_user_auth.get_user_token)):
+    # rotate_api_key ist ein Control-Flag, kein PB-Feld — separat behandeln.
+    patch = req.model_dump(exclude_unset=True, exclude={"rotate_api_key"})
+    if req.rotate_api_key:
         patch["api_key"] = "whk_" + _secrets.token_urlsafe(32)
     return await pb_client.pb_patch_as(token, f"/api/collections/webhooks/records/{webhook_id}", patch)
 
