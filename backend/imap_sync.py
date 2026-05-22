@@ -297,7 +297,7 @@ async def _fetch_and_save(server: IMAPClient, account_id: str,
             try:
                 from bounce_parser import is_bounce, parse_dsn
                 if is_bounce(parsed, raw_bytes):
-                    from main import apply_bounce  # late import — Zirkular-Schutz
+                    from services.mail import apply_bounce  # services-Modul vermeidet Zirkular-Import mit main
                     dsn = parse_dsn(raw_bytes)
                     await apply_bounce(dsn)
             except Exception as bnc_exc:
@@ -318,7 +318,7 @@ async def _spam_classify_new_email(email: dict) -> None:
     email_id = email["id"]
 
     if action == "move":
-        from main import _imap_move_to_spam  # late import: bricht Zirkular-Abhängigkeit
+        from services.mail import _imap_move_to_spam  # services-Modul vermeidet Zirkular-Import mit main
         patch = {"folder": "Spam", "spam_rule_match": cls.get("rule_match", "")}
         try:
             new_folder, new_uid = await _imap_move_to_spam(email)
