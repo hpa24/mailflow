@@ -499,3 +499,16 @@ Test-Plan:
 1. Mail mit Tracking-Pixel öffnen (z.B. Newsletter mit `<img src="https://...">`) → Banner erscheint, Bilder sind Platzhalter
 2. „Bilder laden" klicken → Bilder erscheinen, Banner verschwindet
 3. Mail mit `cid:`-Inline-Bildern öffnen → Banner erscheint **nicht** (CID läuft separat), Inline-Bilder sind sofort sichtbar
+
+## P-Perf-1: FTS5-Operationen async 2026-05-23
+
+SQLite-FTS5 ist synchron. Vier Aufrufstellen liefen bisher direkt im async-Kontext und blockierten den Event-Loop:
+
+- `routers/mail.py:280, 282` — `fts_search` in `GET /search` (User wartet, parallel laufende Tasks wie IMAP-Sync warten mit)
+- `routers/mail.py:1292` — `fts_delete` nach `DELETE /emails/{id}`
+- `imap_sync.py:300` — `fts_insert` pro neuer Mail im Sync-Loop (Hot Path!)
+- `backfill.py:46` — `fts_rebuild` über die ganze Inbox (sekundenlanger Block bei großem Index)
+
+Alle vier auf `await asyncio.to_thread(<fn>, ...)` umgestellt. Thread-Wechsel kostet < 1ms — bei den Search/Delete-Pfaden vernachlässigbar; beim `fts_rebuild` wird der Event-Loop sekundenlang entlastet; beim `fts_insert` im IMAP-Sync läuft jetzt die Mail nicht mehr seriell hinter SQLite-Disk-I/O.
+
+Test-Plan: Suche, neue Mail empfangen, Mail löschen — alles muss funktional gleich bleiben. Im IMAP-Sync sollte beim Empfang vieler Mails der `/sync/status`-Endpoint reaktiv bleiben (vorher konnte er kurz hängen).

@@ -296,8 +296,10 @@ async def _fetch_and_save(server: IMAPClient, account_id: str,
         result = await pb_client.pb_post("/api/collections/emails/records", record)
         email_id = result["id"]
 
-        # FTS5-Index aktualisieren
-        fts_insert(
+        # FTS5-Index aktualisieren — sync SQLite in Executor, damit der
+        # async Sync-Loop bei vielen neuen Mails den Event-Loop nicht blockiert.
+        await asyncio.to_thread(
+            fts_insert,
             settings.PB_DATA_PATH,
             email_id,
             record["subject"],

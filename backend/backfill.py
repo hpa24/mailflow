@@ -4,6 +4,7 @@ Backfill-Aufgaben:
 - HTML-Inhalte nachfüllen (einmalig, Marker-Datei)
 - Embed-Backfill: alle E-Mails in Qdrant einbetten (manuell per API-Endpoint)
 """
+import asyncio
 import logging
 import os
 
@@ -43,7 +44,9 @@ async def rebuild_fts_if_needed() -> None:
             if page >= resp.get("totalPages", 1):
                 break
             page += 1
-        total = fts_rebuild(settings.PB_DATA_PATH, all_records)
+        # fts_rebuild ist bei großen Inboxen sekundenlang — in Executor
+        # auslagern, damit der Event-Loop währenddessen reagieren kann.
+        total = await asyncio.to_thread(fts_rebuild, settings.PB_DATA_PATH, all_records)
         open(FTS_MARKER_FILE, "w").close()
         logger.info(f"FTS rebuild: done — {total} records indexed")
     except Exception as e:

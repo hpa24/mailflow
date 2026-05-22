@@ -277,9 +277,12 @@ async def search_emails(q: str, account: str | None = None,
     # FTS5-Suche: Phrase bei Mehrwort, sonst Einzelwort; Fallback AND-Suche
     phrase = f'"{raw.replace(chr(34), "")}"' if " " in raw else raw
     try:
-        fts_ids = fts_search(settings.PB_DATA_PATH, phrase)
+        # P-Perf-1 (2026-05-23): SQLite-FTS5 ist synchron; im Executor laufen
+        # lassen, damit Event-Loop (IMAP-Sync, Scheduler) während der Suche
+        # nicht blockiert.
+        fts_ids = await asyncio.to_thread(fts_search, settings.PB_DATA_PATH, phrase)
         if not fts_ids and " " in raw:
-            fts_ids = fts_search(settings.PB_DATA_PATH, raw)
+            fts_ids = await asyncio.to_thread(fts_search, settings.PB_DATA_PATH, raw)
         use_fts = bool(fts_ids)
     except Exception as e:
         logger.warning(f"FTS5 search failed: {e}")
@@ -1289,7 +1292,7 @@ async def delete_email(email_id: str, token: str = Depends(pb_user_auth.get_user
     except Exception as e:
         logger.warning(f"IMAP trash failed for {email_id}: {e}")
     await pb_client.pb_delete_as(token, f"/api/collections/emails/records/{email_id}")
-    fts_delete(settings.PB_DATA_PATH, email_id)
+    await asyncio.to_thread(fts_delete, settings.PB_DATA_PATH, email_id)
     if was_unread:
         try:
             await _update_folder_unread_count(token, email["account"], source_folder)
