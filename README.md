@@ -14,6 +14,8 @@ E-Mail-Client auf Basis von FastAPI + PocketBase + Vanilla JS, deployed via Cool
 
 Auth-Pattern, PocketBase-Rules und n8n-Tokens folgen dem zentralen Modell in `~/Syncthing/Claude/Wissen/20_Apps/_shared/sicherheit.md`.
 
+**Single-User-App** (bewusste Architektur-Entscheidung): es gibt keine `user`-Relation auf `accounts`/`emails`/`smtp_servers`/`webhooks`. Authz endet beim Login (`Depends(pb_user_auth.get_user_token)`). Per-Record-/Per-Account-Authz im Backend ist deshalb nicht implementiert — siehe S1-Abschnitt unten zur konkreten Umsetzung (PB-Rules dicht, Backend nutzt Admin-Token). Falls Mailflow je Multi-User werden soll, ist das ein Datenmodell- + Authz-Refactor; nicht aktuell geplant. Details: `~/Syncthing/Claude/Wissen/20_Apps/mailflow/README.md`.
+
 ## Refactoring 2026-04-21
 
 ### Auth ohne Frontend-API-Key
