@@ -461,3 +461,22 @@ Test-Plan:
 3. SSE: nach Login muss `/events?token=...` connecten (im Network-Tab sichtbar)
 4. Negative: `POST /sign {"path":"/attachments/upload"}` → erwartet 400 „path nicht signierbar"
 5. Negative: `POST /sign {"path":"/events","method":"POST"}` → erwartet 400 „nur GET signierbar"
+
+## S4: Upload-Streaming statt Voll-Read 2026-05-23
+
+Vorher las `upload_attachment` (`backend/routers/mail.py`) den kompletten Request-Body via `await file.read()` ins RAM, *bevor* das 25-MB-Limit (`MAX_UPLOAD_SIZE`) geprüft wurde. Ein böswilliger Upload mit 500 MB hätte ohne Schutz halben Container-RAM belegt, bis FastAPI/Starlette ihn fertig gespoolt hat.
+
+Fix (Defense-in-Depth, zwei Stufen):
+
+1. **Content-Length-Vorab-Check.** Wenn der Header da ist und plausibel `> MAX_UPLOAD_SIZE` (25 MB) oder das laufende Total (`MAX_TOTAL_UPLOAD_SIZE` = 200 MB) sprengen würde, sofort 413 — vor jedem Multipart-Parsen. Ehrliche Clients (Browser, curl) setzen den Header korrekt, böswillige können lügen, daher zusätzlich:
+
+2. **Chunked Read** (64 KB). `file.read(_UPLOAD_CHUNK)`-Loop sammelt Chunks in eine Liste; sobald die laufende Summe das Hard-Limit (`min(MAX_UPLOAD_SIZE, MAX_TOTAL_UPLOAD_SIZE - initial_total)`) übersteigt, wird `chunks.clear()` aufgerufen und mit 413 abgebrochen — der bereits gepufferte Anteil wird sofort wieder freigegeben.
+
+Erst nach dem Loop wird `b"".join(chunks)` in `_temp_uploads` abgelegt. Bei einer regulär unter dem Limit liegenden Datei (z.B. 5 MB) ist der RAM-Footprint praktisch identisch zu vorher — die Patches kosten nichts im Happy-Path.
+
+**Folge-TODO (Ops):** Body-Limit am Reverse-Proxy (Caddy/Coolify) setzen, ideal auf ~30 MB (= `MAX_UPLOAD_SIZE` + Multipart-Overhead). Aktuell liefert Caddy default je nach Coolify-Version unterschiedliche Limits; ein expliziter `request_body { max_size 30MB }`-Block im Service-Label oder Coolify-Konfig macht das deterministisch. Damit greift der Schutz schon am Edge — der Backend-Patch bleibt als Defense-in-Depth.
+
+Test-Plan:
+1. UI: Datei < 25 MB anhängen → muss funktionieren wie vorher
+2. UI: Datei > 25 MB versuchen → 413, kein RAM-Spike im Container (Beobachtung: `docker stats <backend>`)
+3. CLI-Stress: `curl -F file=@/dev/zero ...` mit 100 MB streamen → muss 413 zurückgeben, ohne dass das Backend-RAM-Profil hochschießt

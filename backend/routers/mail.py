@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 from urllib.parse import quote as _url_quote
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
@@ -914,23 +914,24 @@ async def get_inline_image(email_id: str, cid: str):
     )
 
 
+_UPLOAD_CHUNK = 64 * 1024
+
+
 @router.post("/attachments/upload")
-async def upload_attachment(file: UploadFile = File(...)):
+async def upload_attachment(request: Request, file: UploadFile = File(...)):
     """Lädt eine Datei temporär in den Arbeitsspeicher.
 
     Limits: ``MAX_UPLOAD_SIZE`` pro Datei, ``MAX_TOTAL_UPLOAD_SIZE`` über alle
     aktiven Uploads. Einträge werden nach ``UPLOAD_TTL_SECONDS`` durch
     den Cleanup-Loop in services/mail.py verworfen.
+
+    S4 (2026-05-23): Body wird in 64-KB-Chunks gelesen und bei Überschreitung
+    sofort verworfen — verhindert RAM-Allokation einer kompletten Riesen-Datei,
+    bevor das Limit greift. Content-Length-Vorab-Check spart bei ehrlichen
+    Clients auch das Multipart-Spooling.
     """
-    data = await file.read()
-    size = len(data)
-    if size > MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Datei zu groß (max. {MAX_UPLOAD_SIZE // (1024 * 1024)} MB)",
-        )
-    current_total = sum(e.get("size", 0) for e in _temp_uploads.values())
-    if current_total + size > MAX_TOTAL_UPLOAD_SIZE:
+    initial_total = sum(e.get("size", 0) for e in _temp_uploads.values())
+    if initial_total >= MAX_TOTAL_UPLOAD_SIZE:
         raise HTTPException(
             status_code=413,
             detail=(
@@ -938,6 +939,54 @@ async def upload_attachment(file: UploadFile = File(...)):
                 "— bitte später erneut versuchen"
             ),
         )
+
+    # Frühabbruch via Content-Length (best-effort — Client kann lügen, daher
+    # zusätzlich der Chunk-Loop unten als Defense-in-Depth).
+    cl_header = request.headers.get("content-length")
+    if cl_header:
+        try:
+            declared = int(cl_header)
+            if declared > MAX_UPLOAD_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Datei zu groß (max. {MAX_UPLOAD_SIZE // (1024 * 1024)} MB)",
+                )
+            if initial_total + declared > MAX_TOTAL_UPLOAD_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"Upload-Speicher voll (max. {MAX_TOTAL_UPLOAD_SIZE // (1024 * 1024)} MB total) "
+                        "— bitte später erneut versuchen"
+                    ),
+                )
+        except ValueError:
+            pass
+
+    hard_limit = min(MAX_UPLOAD_SIZE, MAX_TOTAL_UPLOAD_SIZE - initial_total)
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > hard_limit:
+            chunks.clear()
+            if size > MAX_UPLOAD_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Datei zu groß (max. {MAX_UPLOAD_SIZE // (1024 * 1024)} MB)",
+                )
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Upload-Speicher voll (max. {MAX_TOTAL_UPLOAD_SIZE // (1024 * 1024)} MB total) "
+                    "— bitte später erneut versuchen"
+                ),
+            )
+        chunks.append(chunk)
+
+    data = b"".join(chunks)
     temp_id = str(_uuid_mod.uuid4())
     _temp_uploads[temp_id] = {
         "filename": file.filename or "anhang",
@@ -947,7 +996,7 @@ async def upload_attachment(file: UploadFile = File(...)):
         "created_at": time.monotonic(),
     }
     logger.info("Temporärer Upload: %s (%d bytes, total=%d)",
-                file.filename, size, current_total + size)
+                file.filename, size, initial_total + size)
     return {
         "id": temp_id,
         "filename": file.filename or "anhang",
