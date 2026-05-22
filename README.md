@@ -396,3 +396,16 @@ Alle 21 ursprünglich als `data: dict` deklarierten Endpoints sind in drei Phase
 Pattern: pro Endpoint ein `BaseModel`, manuelle Validierung wandert ins Modell (Literal-Types, Regex via `field_validator`, `min_length`). PATCH-Endpoints nutzen `Optional`-Felder + `model_dump(exclude_unset=True)`, damit die alte „nur was im Body steht, wird gepatcht"-Semantik erhalten bleibt. Name-Normalisierung pro Collection in privaten `_normalize_<x>_name`-Helpers konsolidiert. Bei `WebhookUpdateRequest` zusätzlich `exclude={"rotate_api_key"}` im `model_dump` — das Flag triggert weiterhin den neuen `whk_…`-Key, geht aber nicht als PB-Feld in den Patch.
 
 Bewusste Ausnahme bei `WebhookSendRequest`: Pflichtfeld-Checks (Empfänger/Betreff/Body) bleiben im Endpoint-Body statt im Modell, damit `_webhook_log` bei Validierungsfehlern weiterhin einen Audit-Eintrag schreibt — sonst würden externe Aufrufer mit Fehleingaben unsichtbar bleiben. Begleit-Exception-Handler für `RequestValidationError` flacht das Pydantic-Error-Array zu `{"detail": "..."}` — kompatibel zum bestehenden Frontend-Error-Handling. Verhaltensänderung 400 → 422 bei Validierungsfehlern, Body-Shape gleich.
+
+### R6 — PocketBase-Filter-Guardrail
+
+`scripts/check_pb_filters.py` scannt `backend/**/*.py` per AST und flagged Stellen, an denen ein Filter per f-String-Interpolation gebaut wird, ohne dass jeder `{…}`-Platzhalter ein direkter `pb_quote(...)`-Call ist. Verhindert künftig versehentliche Regressions wie `params={"filter": f'email="{email}"'}` — wäre potentielles Filter-Injection-Tor.
+
+Aufruf:
+```bash
+python3 scripts/check_pb_filters.py   # exit 0 = clean, 1 = verdächtige Treffer
+```
+
+Implizit sicher (nicht geflaggt): Konstante Filter ohne Platzhalter, f-Strings mit nur Konstanten, Filter aus `" && ".join(…)` oder vorgequoteten Variablen-Referenzen, Werte die direkt `pb_quote(...)` einbinden. Für die schmalen Restfälle, in denen ein interpolierter Wert nachweislich sicher ist (Integer, separat gequotete Variable, etc.), liegt ein Inline-Kommentar `# pb-filter-safe` in oder über der Zeile — der Linter respektiert das.
+
+Initialer Lauf hat zwei Stellen gefunden, beide nachweislich sicher (`backend/imap_sync.py:585` — UID-Integer aus IMAP-Search; `backend/routers/contacts.py:42` — vorgequotete Variable `qq`); beide jetzt mit Marker. Neue Filter sollten denselben Marker nicht ohne saubere Begründung im Kommentar verdienen.

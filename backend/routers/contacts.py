@@ -39,7 +39,7 @@ async def search_contacts(q: str = "", limit: int = 8, token: str = Depends(pb_u
         return {"items": []}
     qq = pb_client.pb_quote(q.strip())
     data = await pb_client.pb_get_as(token, "/api/collections/contacts/records", params={
-        "filter": f'email ~ {qq} || name ~ {qq}',
+        "filter": f'email ~ {qq} || name ~ {qq}',  # pb-filter-safe: qq stammt aus pb_quote(q.strip()) eine Zeile vorher.
         "sort": "-email_count",
         "perPage": limit,
         "fields": "id,email,name,email_count",

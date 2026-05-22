@@ -41,31 +41,21 @@ Damit ist `IMAPClient(...)`-Konstruktion nur noch an genau einer Stelle (`servic
 
 Statische Verifikation per Trockenlauf-Simulation: mit leerem `existing` zu Beginn werden alle 16 Collections registriert, alle 13 `if X in existing`-Blöcke feuern. Damit erreicht Fresh-Install denselben Endzustand wie eine seit Monaten gewachsene Instanz.
 
-### R6 — Guardrail-Test/Linter für PocketBase-Filter-Escaping ergänzen
+### R6 — Guardrail-Test/Linter für PocketBase-Filter-Escaping ✅ (2026-05-22)
 
-**Status:** Code nutzt weitgehend `pb_client.pb_quote(...)`; Guardrail gegen Regression fehlt.
+**Umsetzung:** Neues Script `scripts/check_pb_filters.py` — AST-basiert (kein Regex-Geraten). Findet `Dict`-Literals mit Key `"filter"` und `params["filter"] = …`-Zuweisungen, prüft den Value: ist es ein f-String (`JoinedStr`) mit `{…}`-Platzhaltern, muss jeder Platzhalter direkt ein `pb_quote(...)` / `pb_client.pb_quote(...)`-Call sein. Sonst Exit-Code 1.
 
-**Problem:** Neue direkte Filter-Interpolation wie `params={"filter": f'email="{email}"'}` könnte wieder Sonderzeichen-Bugs oder Filter-Injection ermöglichen.
+Implizit sicher (greift natürlich durch AST-Form, kein manuelles Whitelisting nötig):
+- Konstante Filter: `params={"filter": "is_new=true"}` — kein `JoinedStr`.
+- f-Strings nur mit Konstanten: `f"is_done!=true"` — keine `FormattedValue`-Knoten.
+- Zusammengesetzte Filter: `" && ".join(parts)` — `Call`/`BinOp`, kein `JoinedStr`.
+- Vorgequotete Variablen-Referenzen: `params={"filter": history_filter}` — `Name`, kein `JoinedStr`.
 
-**Fix-Ziel:** kleines statisches Script ergänzen, z.B. `backend/tests/check_pb_filters.py` oder `scripts/check_pb_filters.py`.
+Expliziter Marker für die schmalen Restfälle (vorgequotete Variable, Integer-Werte): `# pb-filter-safe` in oder eine Zeile vor der Value. Initial-Lauf fand zwei solcher Stellen:
+- `backend/imap_sync.py:585` — `from_uid`/`last_uid` sind ints aus dem IMAP-Search-Ergebnis.
+- `backend/routers/contacts.py:42` — Variable `qq` stammt eine Zeile vorher aus `pb_quote(q.strip())`.
 
-**Pragmatischer Ansatz:**
-1. Scan `backend/**/*.py` nach verdächtigen Filter-f-Strings:
-   - Zeilen mit `"filter"`, `params["filter"]`, `filter_expr`, `history_filter`
-   - und f-String mit `{...}`
-   - ohne `pb_quote` in derselben Zeile/kurzer Nähe.
-2. Whitelist/Ignore für legitime Fälle:
-   - statische Bool-Filter: `is_new=true`, `bounced=true`, `is_done!=true`, `has_attachments=true`, `folder="Sent"`.
-   - zusammengesetzte Filter aus bereits gequoteten Teilen (`" && ".join(filters)`, `history_filter`, `filter_expr`) per Inline-Kommentar `# pb-filter-safe` oder Allowlist.
-3. Exit-Code `1`, wenn neue verdächtige Treffer auftauchen.
-4. Optional README/Plan-Hinweis: neue PB-Filter immer mit `pb_client.pb_quote(...)`; Script laufen lassen.
-
-**Checks:**
-```bash
-python3 backend/tests/check_pb_filters.py   # oder scripts/check_pb_filters.py
-rg -n 'filter.*f' backend --glob '*.py'
-rg -n 'params\["filter"\]' backend --glob '*.py'
-```
+Beide jetzt mit Marker. Sanity-Test mit absichtlich unsicherem Code bestätigt: Dict-Literal und Subscript-Assignment ohne `pb_quote` werden geflaggt; vorgequotete f-Strings, `.join()`, statische Filter durchgelassen. Hinweis im README ergänzt mit Aufrufzeile und Wann-Marker-Setzen-Regel.
 
 ---
 

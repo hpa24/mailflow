@@ -581,6 +581,7 @@ async def _sync_flags_recent(server: IMAPClient, account_id: str,
     pb_result = await pb_client.pb_get(
         "/api/collections/emails/records",
         params={
+            # pb-filter-safe: account/folder über pb_quote; from_uid/last_uid sind ints aus dem Search-Ergebnis.
             "filter": (f'account={pb_client.pb_quote(account_id)} && folder={pb_client.pb_quote(folder_name)} '
                        f'&& imap_uid>={from_uid} && imap_uid<={last_uid}'),
             "perPage": FLAG_SYNC_WINDOW,
