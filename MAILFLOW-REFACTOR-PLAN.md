@@ -241,5 +241,5 @@ Nicht migriert: `imap_session` selbst (weiter genutzt von imap_sync.py, backfill
 ## Notizen
 
 - Bei jedem Schritt: vorher Coolify-Deploy abwarten, danach kurzen Smoke-Test (Login + eine Mail öffnen + eine senden).
-- Atomare Commits — ein logischer Schritt pro Commit, damit Coolify-Rollback einfach bleibt.
+- **Fix-forward statt Rollback:** Stefan arbeitet grundsätzlich vorwärts — bei Problemen Fehler suchen und korrigieren, nicht per `git revert` zurückrollen. Commits müssen daher nicht zwingend atomar pro Refactor-Schritt sein; saubere logische Schritte helfen aber beim Lesen der Historie und bei der Fehlersuche.
 - Bei A1: erst PB-Token-Auth einbauen + per Feature-Flag toggleable machen, dann sukzessive Endpunkte umstellen, am Ende globalen API_KEY abschalten.
