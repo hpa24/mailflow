@@ -371,7 +371,7 @@ Mehrere Schritte aus `MAILFLOW-REFACTOR-PLAN.md` an einem Tag erledigt; volle Be
 
 ### C3 Phase 2 — `ImapService`-Klasse
 
-`backend/services/imap.py` bündelt jetzt alle blocking-IMAP-Methoden in einer Klasse: `append_draft`, `fetch_attachment`, `fetch_inline`, `set_read`, `set_answered`, `bulk_set_read`, `move_to_spam`, `move`, `trash`, `fetch_uids_with_msgids` plus privater Helper `_search_by_msgid`. Die zehn `_imap_*_sync`-Funktionen in `main.py` sind weg. Async-Wrapper in `main.py` rufen `asyncio.to_thread(ImapService(acc).method, ...)`. `imap_session(acc)`-Context-Manager bleibt für die übrigen IMAP-Aufrufer (`imap_sync.py`, `backfill.py`, `smtp_sender.py`) unverändert.
+`backend/services/imap.py` bündelt jetzt alle blocking-IMAP-Methoden in einer Klasse: `append_draft`, `append_sent`, `fetch_attachment`, `fetch_inline`, `set_read`, `set_answered`, `bulk_set_read`, `move_to_spam`, `move`, `trash`, `fetch_uids_with_msgids` plus privater Helper `_search_by_msgid`. Die zehn `_imap_*_sync`-Funktionen in `main.py` sind weg. Async-Wrapper in `main.py` rufen `asyncio.to_thread(ImapService(acc).method, ...)`. `imap_session(acc)`-Context-Manager wird genutzt von `imap_sync.py`, `backfill.py` und (seit R3) `idle_manager.py`; `smtp_sender.py` ruft `ImapService(acc).append_sent` direkt.
 
 ### B9 — Anhang/Inline via BODYSTRUCTURE
 
