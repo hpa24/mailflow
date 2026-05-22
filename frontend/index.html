@@ -26,6 +26,7 @@
           <button class="tab-btn" data-tab="inbox">Inbox</button>
           <button class="tab-btn" data-tab="templates">Vorlagen</button>
           <button class="tab-btn" data-tab="contacts">Kontakte</button>
+          <button class="tab-btn" data-tab="diagnose" title="Sync-Auffälligkeiten">Diagnose</button>
         </nav>
         <button class="action-btn primary" id="btn-sync">E-Mails abrufen</button>
 <button class="action-btn primary" id="btn-new-email">Neue E-Mail</button>
@@ -477,6 +478,20 @@
       <p>Kontakte-Tab — kommt in Phase 2.</p>
     </div>
 
+    <!-- Tab: Diagnose -->
+    <div id="tab-diagnose" class="tab-pane">
+      <div id="diagnose-header">
+        <h2>Sync-Auffälligkeiten</h2>
+        <div id="diagnose-info">
+          Ringpuffer der letzten ~500 Events seit Backend-Start. <strong>duplicate</strong> =
+          Mail wurde übersprungen weil bereits unter (account, folder, message_id) gespeichert.
+          <strong>fetch_error</strong> = IMAP-Fetch oder PB-Insert schlug fehl.
+        </div>
+        <button id="diagnose-refresh" class="action-btn">Neu laden</button>
+      </div>
+      <div id="diagnose-list"></div>
+    </div>
+
   </div>
 
   <!-- Kontext-Menü -->
@@ -732,6 +747,7 @@ Body (JSON):
   <script src="js/bounced_contacts.js?v=20260520-3b"></script>
   <script src="js/compose_templates.js?v=20260519-tpl6"></script>
   <script src="js/webhooks.js?v=20260520-c4"></script>
+  <script src="js/diagnose.js?v=20260522-1"></script>
   <script src="js/inbox.js?v=20260522-favicon"></script>
 </body>
 </html>

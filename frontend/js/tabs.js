@@ -4,7 +4,7 @@
 // Verlassen gemerkt und beim Zurueckschalten wiederhergestellt.
 
 (function () {
-  const TABS = ['inbox', 'templates', 'contacts'];
+  const TABS = ['inbox', 'templates', 'contacts', 'diagnose'];
   const INBOX_ELS = ['#app', '#ki-toolbar', '#compose-mode'];
   let _inboxStates = null;
 

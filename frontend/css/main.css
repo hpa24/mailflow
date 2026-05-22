@@ -2315,9 +2315,54 @@ justify-content: center;
 }
 /* Alle Top-Level-Container in den 1fr-Row vom #layout-Grid zwingen,
    sonst rutschen sichtbare Tab-Panes in den auto-Row und kollabieren. */
-#app, #compose-mode, #tab-templates, #tab-contacts { grid-row: 3; }
+#app, #compose-mode, #tab-templates, #tab-contacts, #tab-diagnose { grid-row: 3; }
 body[data-active-tab="templates"] #tab-templates { display: grid; grid-template-columns: 220px 1fr; }
 body[data-active-tab="contacts"]  #tab-contacts  { display: flex; align-items: center; justify-content: center; }
+body[data-active-tab="diagnose"]  #tab-diagnose  { display: flex; flex-direction: column; overflow: auto; }
+
+/* Diagnose-Tab */
+#diagnose-header {
+  padding: 16px 24px 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+#diagnose-header h2 { margin: 0; font-size: 18px; }
+#diagnose-info {
+  font-size: 13px;
+  color: var(--text2);
+  max-width: 720px;
+  flex: 1;
+}
+#diagnose-list {
+  padding: 12px 24px 24px;
+  overflow-y: auto;
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.diagnose-row {
+  display: grid;
+  grid-template-columns: 160px 90px 100px 90px 1fr;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+.diagnose-row.header {
+  font-weight: 600;
+  color: var(--text2);
+  border-bottom: 2px solid var(--border);
+}
+.diagnose-row .kind-duplicate { color: #888; }
+.diagnose-row .kind-fetch_error { color: #c0392b; font-weight: 600; }
+.diagnose-row .detail { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#diagnose-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text2);
+}
 
 /* Untermenü links im Vorlagen-Tab */
 #templates-submenu {

@@ -29,7 +29,7 @@ import pb_user_auth
 import signed_url
 from config import settings
 from idle_manager import get_sse_queues
-from imap_sync import get_sync_status, sync_all_accounts
+from imap_sync import get_sync_skips, get_sync_status, sync_all_accounts
 from models import HealthResponse, SyncStatusResponse
 
 logger = logging.getLogger(__name__)
@@ -87,6 +87,18 @@ async def sync_run(background_tasks: BackgroundTasks):
 @router.get("/sync/status", response_model=SyncStatusResponse)
 async def sync_status():
     return get_sync_status()
+
+
+@router.get("/diagnostics/sync-skips")
+async def diagnostics_sync_skips(token: str = Depends(pb_user_auth.get_user_token)):
+    """Letzte ~500 Sync-Auffälligkeiten (Duplikat-Skips + Fetch-Fehler) als Ringpuffer.
+
+    Befüllt aus imap_sync._record_sync_event. Daten leben in-memory und werden bei
+    jedem Backend-Restart geleert. Diagnose-Endpoint für das Diagnose-Panel im
+    Frontend.
+    """
+    skips = get_sync_skips()
+    return {"count": len(skips), "items": skips}
 
 
 # ---------------------------------------------------------------------------

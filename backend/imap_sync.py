@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections import deque
 from datetime import datetime, timezone
 
 from imapclient import IMAPClient
@@ -13,6 +14,33 @@ from services.imap import imap_session
 logger = logging.getLogger(__name__)
 
 MAX_CONNECTIONS_PER_ACCOUNT = 4
+
+# Ringpuffer für Diagnose-Events (letzte 500 Sync-Auffälligkeiten).
+# Wird vom /diagnostics/sync-skips-Endpoint gelesen. In-Memory, wird bei
+# Backend-Restart geleert.
+_sync_skip_log: deque = deque(maxlen=500)
+
+
+def _record_sync_event(kind: str, account_id: str, folder: str, uid: int, detail: str) -> None:
+    """Trägt einen Sync-Auffälligkeit-Eintrag in den Ringpuffer ein.
+
+    kind: "duplicate" (msg-id schon in (account, folder)) | "fetch_error" (Exception)
+    """
+    _sync_skip_log.append({
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "kind": kind,
+        "account": account_id,
+        "folder": folder,
+        "uid": uid,
+        "detail": detail[:300],
+    })
+
+
+def get_sync_skips() -> list[dict]:
+    """Gibt den Inhalt des Sync-Skip-Logs zurück (neueste zuletzt). Wird vom
+    /diagnostics/sync-skips-Endpoint genutzt.
+    """
+    return list(_sync_skip_log)
 
 # IMAP-Spezial-Flags → normierte Ordnernamen (für konsistente Filterung in der UI)
 _IMAP_FLAG_TO_STANDARD: dict[bytes, str] = {
@@ -151,6 +179,11 @@ async def _sync_folder(server: IMAPClient, account_id: str,
         uids = server.search(["ALL"])
     else:
         uids = server.search(["UID", f"{last_sync_uid + 1}:*"])
+        # IMAP-"N:*"-Quirk: viele Server geben die höchste existierende UID
+        # zurück, auch wenn keine ≥ N existiert. Hartfilter — sonst probieren wir
+        # pro Sync-Cycle pro Folder eine längst gespeicherte UID neu zu inserten
+        # und produzieren stilles DuplicateRecordError-Rauschen.
+        uids = [u for u in uids if u > last_sync_uid]
 
     if not uids:
         logger.info(f"No new messages in '{folder_name}' (stored as '{stored_folder_name}')")
@@ -173,6 +206,7 @@ async def _sync_folder(server: IMAPClient, account_id: str,
                 _import_status["done"] += 1
         except Exception as e:
             logger.error(f"UID {uid} in '{folder_name}' failed: {e}")
+            _record_sync_event("fetch_error", account_id, stored_folder_name, uid, str(e))
             if full_import:
                 _import_status["errors"] += 1
             continue
@@ -311,6 +345,8 @@ async def _fetch_and_save(server: IMAPClient, account_id: str,
             "UID %s in '%s' übersprungen — message_id schon in (account, folder, message_id) gespeichert: %s",
             uid, folder_name, message_id,
         )
+        _record_sync_event("duplicate", account_id, folder_name, uid,
+                           f"message_id={message_id}")
     except Exception as e:
         raise
 
