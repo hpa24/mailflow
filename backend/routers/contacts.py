@@ -229,21 +229,38 @@ def _parse_import_line(line: str, lineno: int) -> tuple | None:
     return (email, name, groups, invalid_reason)
 
 
+class ContactsImportRequest(BaseModel):
+    """POST /contacts/import — Body. lines = Multiline-CSV, mode = add|remove."""
+    lines: str
+    mode: str = "add"
+
+    @field_validator("lines")
+    @classmethod
+    def _check_lines(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("lines fehlt")
+        return v
+
+    @field_validator("mode")
+    @classmethod
+    def _check_mode(cls, v: str) -> str:
+        v = (v or "add").lower()
+        if v not in ("add", "remove"):
+            raise ValueError("muss 'add' oder 'remove' sein")
+        return v
+
+
 @router.post("/contacts/import")
 @limiter.limit("30/minute")
-async def contacts_import(request: Request, data: dict):
+async def contacts_import(request: Request, payload: ContactsImportRequest):
     """Importiert Kontakte + Gruppen-Zuordnungen aus einer Multiline-Liste.
 
     Auth: X-Import-Key (extern, FileMaker/Xano) ODER PB-User-Bearer.
     Nutzt absichtlich den Admin-Token (`pb_client.pb_*`), weil der externe
     Import-Pfad keinen User-Token mitbringt. Bewusste A11-Ausnahme.
     """
-    lines_raw = data.get("lines") or ""
-    mode = (data.get("mode") or "add").lower()
-    if mode not in ("add", "remove"):
-        raise HTTPException(status_code=400, detail="mode muss 'add' oder 'remove' sein")
-    if not lines_raw.strip():
-        raise HTTPException(status_code=400, detail="lines fehlt")
+    lines_raw = payload.lines
+    mode = payload.mode
 
     # Parse alle Zeilen, merge nach email
     contacts_map: dict[str, dict] = {}   # email -> {name, groups (set)}

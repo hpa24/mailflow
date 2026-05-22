@@ -165,6 +165,98 @@ class MoveEmailRequest(BaseModel):
         return v
 
 
+class SendEmailRequest(BaseModel):
+    """POST /emails/send — Einzelversand."""
+    to: str = Field(..., min_length=1)
+    from_account: str = Field(..., min_length=1)
+    smtp_server: str = Field(..., min_length=1)
+    subject: str = ""
+    cc: str = ""
+    body: str = ""
+    body_html: str = ""
+    quote: str = ""
+    quote_html: str = ""
+    attachment_ids: list[str] = []
+    draft_id: str | None = None
+    in_reply_to_email_id: str | None = None
+
+    @field_validator("to", "from_account", "smtp_server")
+    @classmethod
+    def _strip_required(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("darf nicht leer sein")
+        return v
+
+    @field_validator("subject", "cc")
+    @classmethod
+    def _strip_optional(cls, v: str) -> str:
+        return (v or "").strip()
+
+
+class BulkSendRequest(BaseModel):
+    """POST /emails/bulk-send — Versand an viele Empfänger mit Zeitversatz.
+
+    Body wie /emails/send, aber statt ``to`` eine ``recipients``-Liste und ein
+    ``delay_seconds``-Abstand zwischen den Mails. Die Address-Validierung
+    (Format, Dedup, bounced/unsubscribed-Filter) liegt im Endpoint, da
+    Pydantic die Reihenfolge-erhaltende Dedup-Semantik nicht abbildet.
+    """
+    recipients: list[str] = Field(..., min_length=1)
+    from_account: str = Field(..., min_length=1)
+    smtp_server: str = Field(..., min_length=1)
+    subject: str = ""
+    body: str = ""
+    body_html: str = ""
+    attachment_ids: list[str] = []
+    delay_seconds: float = 5.0
+
+    @field_validator("from_account", "smtp_server")
+    @classmethod
+    def _strip_required(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("darf nicht leer sein")
+        return v
+
+    @field_validator("subject")
+    @classmethod
+    def _strip_subject(cls, v: str) -> str:
+        return (v or "").strip()
+
+    @field_validator("delay_seconds")
+    @classmethod
+    def _clamp_delay(cls, v: float) -> float:
+        return max(0.0, min(v, 300.0))
+
+
+class CreateDraftRequest(BaseModel):
+    """POST /emails/draft — Entwurf anlegen."""
+    from_account: str = Field(..., min_length=1)
+    to: str = ""
+    subject: str = ""
+    body: str = ""
+    body_html: str = ""
+    quote: str = ""
+
+    @field_validator("from_account")
+    @classmethod
+    def _strip_account(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("darf nicht leer sein")
+        return v
+
+
+class UpdateDraftRequest(BaseModel):
+    """PATCH /emails/draft/{draft_id} — Entwurf aktualisieren. Alle Felder optional."""
+    to: str = ""
+    subject: str = ""
+    body: str = ""
+    body_html: str = ""
+    quote: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Search (FTS5 + PocketBase-Fallback)
 # ---------------------------------------------------------------------------
@@ -415,36 +507,20 @@ async def get_emails_by_sender(account: str | None = None, folder: str | None = 
 
 
 @router.post("/emails/send")
-async def send_email_endpoint(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
+async def send_email_endpoint(payload: SendEmailRequest,
+                              token: str = Depends(pb_user_auth.get_user_token)):
     """Startet den E-Mail-Versand im Hintergrund und gibt sofort eine Job-ID zurück.
 
     Endpoint selbst macht keine direkten PB-Calls; der Background-Job (`_do_send_job`)
     nutzt bewusst weiterhin den Admin-Token, weil er über die Lebenszeit der
     User-Session hinaus laufen kann (z.B. Bulk-Send mit Sekunden-Delays).
     """
-    to           = (data.get("to") or "").strip()
-    from_account = (data.get("from_account") or "").strip()
-    smtp_server  = (data.get("smtp_server") or "").strip()
-    subject      = (data.get("subject") or "").strip()
-
-    if not to:
-        raise HTTPException(status_code=400, detail="Empfänger (to) fehlt")
-    if not from_account:
-        raise HTTPException(status_code=400, detail="Absender-Account fehlt")
-    if not smtp_server:
-        raise HTTPException(status_code=400, detail="SMTP-Server fehlt")
-
-    data["to"] = to
-    data["from_account"] = from_account
-    data["smtp_server"]  = smtp_server
-    data["subject"]      = subject
-
-    attachment_ids = data.get("attachment_ids") or []
-    attachments = [_temp_uploads[aid] for aid in attachment_ids if aid in _temp_uploads]
+    data = payload.model_dump()
+    attachments = [_temp_uploads[aid] for aid in data["attachment_ids"] if aid in _temp_uploads]
 
     job_id = str(_uuid_mod.uuid4())
-    _send_jobs[job_id] = {"status": "sending", "to": to, "subject": subject}
-    logger.info("Sendejob %s gestartet: to=%s subject=%s", job_id, to, subject)
+    _send_jobs[job_id] = {"status": "sending", "to": data["to"], "subject": data["subject"]}
+    logger.info("Sendejob %s gestartet: to=%s subject=%s", job_id, data["to"], data["subject"])
 
     asyncio.create_task(_do_send_job(job_id, data, attachments))
 
@@ -452,7 +528,8 @@ async def send_email_endpoint(data: dict, token: str = Depends(pb_user_auth.get_
 
 
 @router.post("/emails/bulk-send")
-async def bulk_send_endpoint(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
+async def bulk_send_endpoint(payload: BulkSendRequest,
+                             token: str = Depends(pb_user_auth.get_user_token)):
     """Versendet dieselbe E-Mail einzeln an viele Empfänger mit Zeitversatz.
 
     Body wie ``/emails/send``, zusätzlich:
@@ -464,15 +541,11 @@ async def bulk_send_endpoint(data: dict, token: str = Depends(pb_user_auth.get_u
     Einträge und spawned ``_do_send_job``. accounts-Read läuft im User-Kontext;
     der bulk_sends-Audit-Record und der Worker-Versand nutzen Admin-Token.
     """
-    recipients_raw = data.get("recipients") or []
-    if not isinstance(recipients_raw, list) or not recipients_raw:
-        raise HTTPException(status_code=400, detail="recipients fehlt oder leer")
-
     # Adressen normalisieren, validieren, deduplizieren (Reihenfolge erhalten)
     seen: set[str] = set()
     recipients: list[str] = []
     invalid: list[str] = []
-    for raw in recipients_raw:
+    for raw in payload.recipients:
         addr = (raw or "").strip()
         if not addr:
             continue
@@ -529,22 +602,12 @@ async def bulk_send_endpoint(data: dict, token: str = Depends(pb_user_auth.get_u
                         "unsubscribed markiert — kein Versand möglich."),
             )
 
-    from_account = (data.get("from_account") or "").strip()
-    smtp_server  = (data.get("smtp_server") or "").strip()
-    subject      = (data.get("subject") or "").strip()
-    if not from_account:
-        raise HTTPException(status_code=400, detail="Absender-Account fehlt")
-    if not smtp_server:
-        raise HTTPException(status_code=400, detail="SMTP-Server fehlt")
+    from_account = payload.from_account
+    smtp_server  = payload.smtp_server
+    subject      = payload.subject
+    delay_seconds = payload.delay_seconds
 
-    try:
-        delay_seconds = float(data.get("delay_seconds", 5.0))
-    except (TypeError, ValueError):
-        delay_seconds = 5.0
-    delay_seconds = max(0.0, min(delay_seconds, 300.0))
-
-    attachment_ids = data.get("attachment_ids") or []
-    attachments = [_temp_uploads[aid] for aid in attachment_ids if aid in _temp_uploads]
+    attachments = [_temp_uploads[aid] for aid in payload.attachment_ids if aid in _temp_uploads]
     has_attachments = bool(attachments)
 
     bulk_id = str(_uuid_mod.uuid4())
@@ -585,8 +648,8 @@ async def bulk_send_endpoint(data: dict, token: str = Depends(pb_user_auth.get_u
                 "from_account": from_account,
                 "from_account_email": from_email,
                 "smtp_server": smtp_server,
-                "body_html": data.get("body_html") or "",
-                "body_text": data.get("body") or "",
+                "body_html": payload.body_html,
+                "body_text": payload.body,
                 "sent_at": _format_pb_dt(start_at),
                 "delay_seconds": delay_seconds,
                 "recipients": pb_recipients,
@@ -634,13 +697,12 @@ async def bulk_send_endpoint(data: dict, token: str = Depends(pb_user_auth.get_u
 
 
 @router.post("/emails/draft")
-async def create_draft(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
+async def create_draft(payload: CreateDraftRequest,
+                       token: str = Depends(pb_user_auth.get_user_token)):
     """Erstellt einen neuen Entwurf in PocketBase."""
     import uuid
 
-    account_id = data.get("from_account", "")
-    if not account_id:
-        raise HTTPException(status_code=400, detail="Account fehlt")
+    account_id = payload.from_account
 
     try:
         acc = await pb_client.pb_get_as(token, f"/api/collections/accounts/records/{account_id}")
@@ -650,15 +712,10 @@ async def create_draft(data: dict, token: str = Depends(pb_user_auth.get_user_to
         from_email = ""
         from_name = ""
 
-    to = data.get("to", "")
-    subject = data.get("subject", "") or "(Kein Betreff)"
-    body = data.get("body", "")
-    body_html = data.get("body_html", "")
-    quote = data.get("quote", "")
-
-    full_body = body
-    if quote:
-        full_body += "\n\n" + quote
+    subject = payload.subject or "(Kein Betreff)"
+    full_body = payload.body
+    if payload.quote:
+        full_body += "\n\n" + payload.quote
 
     draft = {
         "account": account_id,
@@ -666,11 +723,11 @@ async def create_draft(data: dict, token: str = Depends(pb_user_auth.get_user_to
         "message_id": f"<draft-{uuid.uuid4()}@mailflow>",
         "subject": subject,
         "body_plain": full_body,
-        "body_html": body_html,
+        "body_html": payload.body_html,
         "snippet": (full_body[:120] if full_body else ""),
         "from_email": from_email,
         "from_name": from_name,
-        "to_emails": [to] if to else [],
+        "to_emails": [payload.to] if payload.to else [],
         "is_read": True,
         "date_sent": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -719,24 +776,20 @@ async def sync_draft_to_imap(draft_id: str, token: str = Depends(pb_user_auth.ge
 
 
 @router.patch("/emails/draft/{draft_id}")
-async def update_draft(draft_id: str, data: dict, token: str = Depends(pb_user_auth.get_user_token)):
+async def update_draft(draft_id: str, payload: UpdateDraftRequest,
+                       token: str = Depends(pb_user_auth.get_user_token)):
     """Aktualisiert einen bestehenden Entwurf."""
-    to = data.get("to", "")
-    subject = data.get("subject", "") or "(Kein Betreff)"
-    body = data.get("body", "")
-    body_html = data.get("body_html", "")
-    quote = data.get("quote", "")
-
-    full_body = body
-    if quote:
-        full_body += "\n\n" + quote
+    subject = payload.subject or "(Kein Betreff)"
+    full_body = payload.body
+    if payload.quote:
+        full_body += "\n\n" + payload.quote
 
     patch = {
         "subject": subject,
         "body_plain": full_body,
-        "body_html": body_html,
+        "body_html": payload.body_html,
         "snippet": (full_body[:120] if full_body else ""),
-        "to_emails": [to] if to else [],
+        "to_emails": [payload.to] if payload.to else [],
     }
     return await pb_client.pb_patch_as(
         token, f"/api/collections/emails/records/{draft_id}", patch

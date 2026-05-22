@@ -561,22 +561,25 @@ async def templates_delete(template_id: str, token: str = Depends(pb_user_auth.g
     return {"status": "deleted"}
 
 
+class TemplatesRenderRequest(BaseModel):
+    """POST /templates/render — Live-Preview Body. active_sections=None = alle aktiv."""
+    html: str = ""
+    subject: str = ""
+    active_sections: list[str] | None = None
+    contact_id: str | None = None
+
+
 @router.post("/templates/render")
-async def templates_render(data: dict, token: str = Depends(pb_user_auth.get_user_token)):
+async def templates_render(payload: TemplatesRenderRequest,
+                           token: str = Depends(pb_user_auth.get_user_token)):
     """Rendert html + subject mit Snippets, globalen Variablen und optional
     einem Kontakt. Wird vom Frontend fuer Live-Preview genutzt und spaeter
     von Compose/Bulk-Send.
-
-    Body:
-      html (str)
-      subject (str, optional)
-      active_sections (list[str], optional — None = alle aktiv)
-      contact_id (str, optional — fuer Phase-2-Rendering)
     """
-    html = data.get("html") or ""
-    subject = data.get("subject") or ""
-    active_sections = data.get("active_sections")
-    contact_id = data.get("contact_id")
+    html = payload.html
+    subject = payload.subject
+    active_sections = payload.active_sections
+    contact_id = payload.contact_id
 
     # Snippets/Variables: rendering.load_* nutzt absichtlich den Admin-Token,
     # weil dieselben Helper auch aus dem Mail-Versand-Backend (ohne User-Session)

@@ -57,6 +57,14 @@ class SignRequest(BaseModel):
     ttl: int = 300
 
 
+class UpdateAccountRequest(BaseModel):
+    name: str | None = None
+    from_name: str | None = None
+    signature: str | None = None
+    color_tag: str | None = None
+    reply_to_email: str | None = None
+
+
 @router.post("/sign")
 async def sign_url(payload: SignRequest):
     """Gibt einen kurzlebigen signierten URL-Token für genau diesen path zurück.
@@ -198,15 +206,14 @@ async def accounts_sent_today(token: str = Depends(pb_user_auth.get_user_token))
 
 
 @router.patch("/accounts/{account_id}")
-async def update_account(account_id: str, data: dict):
+async def update_account(account_id: str, payload: UpdateAccountRequest):
     """Update account fields (name, from_name, signature, etc.).
 
-    A11/C2-TODO: noch Admin-Token + dict-Payload. Steht auf der C2-Phase-3-
-    Liste für späteren Refactor zu Pydantic-Modell + User-Token.
+    A11-TODO: noch Admin-Token. User-Token-Migration steht separat auf der
+    A11-Phase-2-Liste; Whitelist (UpdateAccountRequest) verhindert seitdem
+    schon Schreibzugriff auf IMAP/SMTP-Credentials via diesen Endpoint.
     """
-    # Only allow safe fields — never expose IMAP/SMTP credentials via this endpoint
-    allowed = {"name", "from_name", "signature", "color_tag", "reply_to_email"}
-    filtered = {k: v for k, v in data.items() if k in allowed}
+    filtered = payload.model_dump(exclude_unset=True)
     if not filtered:
         raise HTTPException(status_code=400, detail="No valid fields to update")
     return await pb_client.pb_patch(
