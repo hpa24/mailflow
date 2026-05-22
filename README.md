@@ -522,3 +522,11 @@ Fix: Modul-Konstante `_EMAIL_LIST_FIELDS` definiert (`backend/routers/mail.py:69
 Body-Inhalt (`body_html`, `body_plain`, `cc_emails`, `quote*`) bleibt dem Detail-Endpoint `/emails/{id}` vorbehalten. `/search` behält sein eigenes (etwas größeres) Whitelist mit `cc_emails`, weil dort die volle Match-Vorschau gebraucht werden kann.
 
 Test-Plan: Inbox laden, scrollen, paginieren — alles muss aussehen wie vorher. Mail-Detail öffnen — HTML rendert weiter (vom Detail-Endpoint). Im DevTools-Network-Tab sollte der `/emails`-Response signifikant kleiner sein als vorher (statt z.B. 2 MB jetzt 100 KB).
+
+## P-Perf-4: sent-today parallel 2026-05-23
+
+`/accounts/sent-today` (Footer-Anzeige „X von 10000 heute") lief vorher klassisches N+1: erst eine Query für alle Account-IDs, dann pro Account *seriell* eine zweite Query mit `totalItems`-Counter. Bei Stefans 5 Accounts → 1 + 5 = 6 sequenzielle PB-Roundtrips, ca. 250ms Gesamtlatenz.
+
+Fix: pro-Account-Counts via `asyncio.gather` parallel laden — alle 5 PB-Calls laufen gleichzeitig, Gesamtlatenz ≈ langsamster Einzel-Call (~50ms). Faktor 5 Speedup ohne Schema-Änderung. Bei 100 Accounts würde der Ansatz an Verbindungs-Limits stoßen — dort wäre eine PB-seitige Aggregation oder ein eigener Counter sinnvoller, aber das ist im Single-User-/wenig-Accounts-Setup nicht relevant.
+
+Test-Plan: Footer-„Heute versendet"-Counter muss korrekt aktualisieren. Im DevTools-Network sollten die 5 PB-Calls jetzt parallel statt seriell starten (Waterfall-Block statt Treppe).

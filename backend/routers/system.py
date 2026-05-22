@@ -207,9 +207,11 @@ async def accounts_sent_today(token: str = Depends(pb_user_auth.get_user_token))
         "/api/collections/accounts/records",
         params={"perPage": 100, "fields": "id"},
     )
-    counts: dict[str, int] = {}
-    for acc in accounts_data.get("items", []):
-        aid = acc["id"]
+    # P-Perf-4 (2026-05-23): pro-Account-Counts parallel statt seriell laden.
+    # Bei 5 Accounts: ~50ms statt ~250ms (Latenzen addieren sich nicht mehr).
+    account_ids = [acc["id"] for acc in accounts_data.get("items", [])]
+
+    async def _count_for(aid: str) -> tuple[str, int]:
         cnt_data = await pb_client.pb_get_as(
             token,
             "/api/collections/emails/records",
@@ -219,7 +221,10 @@ async def accounts_sent_today(token: str = Depends(pb_user_auth.get_user_token))
                 "fields": "id",
             },
         )
-        counts[aid] = cnt_data.get("totalItems", 0)
+        return aid, cnt_data.get("totalItems", 0)
+
+    results = await asyncio.gather(*(_count_for(aid) for aid in account_ids))
+    counts: dict[str, int] = dict(results)
     return {"counts": counts, "limit": _SEND_DAILY_LIMIT, "cutoff_utc": cutoff}
 
 
