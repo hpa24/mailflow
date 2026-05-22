@@ -2585,13 +2585,17 @@ async function saveDraft() {
   if (!from_account) return;
 
   const statusEl = document.getElementById('draft-status');
+  statusEl.style.color = '';
   statusEl.textContent = 'Speichert…';
 
   try {
     const result = await api.saveDraft({ id: _draftId, to, cc, subject, body, body_html, quote, quote_html, from_account });
     if (result && result.id) _draftId = result.id;
     statusEl.textContent = 'Entwurf gespeichert';
-    setTimeout(() => { statusEl.textContent = ''; }, 2000);
+    setTimeout(() => {
+      // Nur löschen wenn seitdem keine neue Meldung (z.B. Validierungsfehler) reingeschrieben wurde
+      if (statusEl.textContent === 'Entwurf gespeichert') statusEl.textContent = '';
+    }, 2000);
   } catch (e) {
     statusEl.textContent = '';
     console.warn('saveDraft fehlgeschlagen:', e.message);
@@ -2626,6 +2630,10 @@ document.getElementById('btn-send-inline').addEventListener('click', async () =>
   if (!to || !subject) {
     statusEl.textContent = 'Bitte Empfänger und Betreff ausfüllen.';
     statusEl.style.color = 'var(--danger)';
+    // Cursor in das leere Feld setzen — der Statustext allein neben dem
+    // Senden-Button wird leicht übersehen.
+    if (!to) document.getElementById('ci-to-input')?.focus();
+    else document.getElementById('ci-subject')?.focus();
     return;
   }
 
