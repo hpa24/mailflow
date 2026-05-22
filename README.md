@@ -512,3 +512,13 @@ SQLite-FTS5 ist synchron. Vier Aufrufstellen liefen bisher direkt im async-Konte
 Alle vier auf `await asyncio.to_thread(<fn>, ...)` umgestellt. Thread-Wechsel kostet < 1ms — bei den Search/Delete-Pfaden vernachlässigbar; beim `fts_rebuild` wird der Event-Loop sekundenlang entlastet; beim `fts_insert` im IMAP-Sync läuft jetzt die Mail nicht mehr seriell hinter SQLite-Disk-I/O.
 
 Test-Plan: Suche, neue Mail empfangen, Mail löschen — alles muss funktional gleich bleiben. Im IMAP-Sync sollte beim Empfang vieler Mails der `/sync/status`-Endpoint reaktiv bleiben (vorher konnte er kurz hängen).
+
+## P-Perf-2: Listen-Endpoints schlank 2026-05-23
+
+`/emails` (das default-View für die Inbox-Liste) hat als einziger Listen-Endpoint *kein* `fields`-Whitelist gehabt — PB lieferte den kompletten Record inkl. `body_html`/`body_plain`. Marketing-Mails haben oft 100 KB+ HTML, und bei 50 Mails pro Seite waren das schnell mehrere MB Payload pro Listen-Request.
+
+Fix: Modul-Konstante `_EMAIL_LIST_FIELDS` definiert (`backend/routers/mail.py:69`) mit den 22 Feldern, die das Frontend in der Liste tatsächlich rendert (id, from/to, subject, snippet, date_sent, is_*, ai_category, has_attachments, spam_*, thread_id, in_reply_to, imap_uid). `/emails`, `/emails/threaded` und `/emails/by-sender` nutzen jetzt dieselbe Konstante — DRY-Bonus, Anpassungen passieren an einer Stelle.
+
+Body-Inhalt (`body_html`, `body_plain`, `cc_emails`, `quote*`) bleibt dem Detail-Endpoint `/emails/{id}` vorbehalten. `/search` behält sein eigenes (etwas größeres) Whitelist mit `cc_emails`, weil dort die volle Match-Vorschau gebraucht werden kann.
+
+Test-Plan: Inbox laden, scrollen, paginieren — alles muss aussehen wie vorher. Mail-Detail öffnen — HTML rendert weiter (vom Detail-Endpoint). Im DevTools-Network-Tab sollte der `/emails`-Response signifikant kleiner sein als vorher (statt z.B. 2 MB jetzt 100 KB).

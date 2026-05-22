@@ -63,6 +63,15 @@ router = APIRouter()
 MAX_UPLOAD_SIZE = 25 * 1024 * 1024            # 25 MB pro Datei
 MAX_TOTAL_UPLOAD_SIZE = 200 * 1024 * 1024     # 200 MB über alle aktiven Uploads
 
+# P-Perf-2 (2026-05-23): Listen-Endpoints liefern nur Header/Listen-Felder.
+# body_html/body_plain bleiben dem Detail-Endpoint vorbehalten — Marketing-Mails
+# haben oft 100 KB+ HTML und das addiert sich bei 100er-Paginierung schnell.
+_EMAIL_LIST_FIELDS = (
+    "id,account,folder,message_id,thread_id,in_reply_to,from_email,from_name,"
+    "reply_to,to_emails,subject,snippet,date_sent,is_read,is_flagged,is_answered,"
+    "ai_category,has_attachments,imap_uid,spam_suggested,spam_score,spam_rule_match"
+)
+
 _EMAIL_RE = re.compile(r"^[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}$")
 
 _SUBJECT_PREFIX_RE = re.compile(
@@ -360,6 +369,7 @@ async def get_emails(account: str | None = None, folder: str | None = None,
         "perPage": limit,
         "page": page,
         "sort": "-date_sent",
+        "fields": _EMAIL_LIST_FIELDS,
     }
     if filters:
         params["filter"] = " && ".join(filters)
@@ -377,16 +387,11 @@ async def get_emails_threaded(account: str | None = None, folder: str | None = N
     Threads split by Fwd: are merged when normalized subject + participants overlap."""
     filters = _email_filters(account, folder, is_read, webhook)
 
-    fields = ("id,account,folder,message_id,thread_id,in_reply_to,from_email,"
-              "from_name,reply_to,to_emails,subject,snippet,date_sent,is_read,is_flagged,"
-              "is_answered,ai_category,has_attachments,imap_uid,"
-              "spam_suggested,spam_score,spam_rule_match")
-
     params = {
         "perPage": limit,
         "page": page,
         "sort": "-date_sent",
-        "fields": fields,
+        "fields": _EMAIL_LIST_FIELDS,
     }
     if filters:
         params["filter"] = " && ".join(filters)
@@ -457,16 +462,11 @@ async def get_emails_by_sender(account: str | None = None, folder: str | None = 
     """Returns emails grouped by sender: most-recent-contact first, within group newest first."""
     filters = _email_filters(account, folder, is_read, webhook)
 
-    fields = ("id,account,folder,message_id,thread_id,in_reply_to,from_email,"
-              "from_name,reply_to,to_emails,subject,snippet,date_sent,is_read,is_flagged,"
-              "is_answered,ai_category,has_attachments,imap_uid,"
-              "spam_suggested,spam_score,spam_rule_match")
-
     params = {
         "perPage": limit,
         "page": page,
         "sort": "-date_sent",
-        "fields": fields,
+        "fields": _EMAIL_LIST_FIELDS,
     }
     if filters:
         params["filter"] = " && ".join(filters)
