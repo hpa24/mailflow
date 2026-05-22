@@ -144,7 +144,15 @@ def _send_smtp(
     use_tls = smtp_cfg.get("use_tls", False)
     use_starttls = smtp_cfg.get("use_starttls", True)
 
-    to_list = [a.strip() for a in to_addr.split(",") if a.strip()]
+    # RFC-2822-Adress-Parser statt naivem split(",") — sonst zerreißt ein
+    # Komma im Display-Name ("Nachname, Vorname <addr@host>") die Liste in
+    # ("Nachname", "Vorname <addr@host>"), und das erste Fragment ohne `@`
+    # geht ans SMTP-RCPT-TO → 5.5.2 "need fully qualified address".
+    # Filter auf `@` wirft solche Display-Name-Fragmente raus.
+    to_list = [
+        addr for _, addr in email.utils.getaddresses([to_addr])
+        if addr and "@" in addr
+    ]
 
     if use_tls:
         ctx = ssl.create_default_context()
