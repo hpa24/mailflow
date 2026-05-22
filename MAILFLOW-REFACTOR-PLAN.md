@@ -3,10 +3,10 @@
 **Quelle:** GPT-Codereview vom 2026-05-20 (zusammen mit Stefan). Ergänzend zu den vier sofortigen Security-Fixes (Commits `e137884`, `e4659bf`, `940b24b`, `182241d` am 2026-05-20).
 
 
-## Offen nach großem Review-Check am 2026-05-22
+## Review-Check 2026-05-22 — R1–R6 (alle erledigt)
 
-> [!important] Neuer Arbeitsblock
-> Diese Liste ist die konsolidierte Resteliste nach dem ersten großen Review-Check am 2026-05-22. Viele ursprüngliche Reviewpunkte sind erledigt; die folgenden Punkte sind die **übrig gebliebenen, noch umzusetzenden Reste**. Der ältere Plan darunter bleibt als Historie/Referenz erhalten.
+> [!note] Abgeschlossener Arbeitsblock
+> Konsolidierte Resteliste aus dem großen Review-Check am 2026-05-22, am selben Tag in einer Session abgearbeitet (Commits `d7f4ef8` … `d1db6ea`). Die folgenden Detail-Blöcke bleiben als Umsetzungs-Doku stehen. Der ältere Plan darunter ist Historie/Referenz.
 
 ### R1 — UIDVALIDITY-Cleanup vollständig paginieren ✅ (2026-05-22)
 
@@ -181,11 +181,9 @@ Am Ende: Admin-Token nur noch für IMAP-Sync, Bulk-Backend, Webhook-Send-Backend
 
 **A11 abgeschlossen (2026-05-20):** Alle 16 PocketBase-Collections via Code-Schema + `_ensure_rules` auf `@request.auth.id != ""` umgestellt. Frontend-Endpoints durchgehend im User-Token-Kontext (`pb_*_as`). Admin-Pfade (mit Begründung im Docstring): IMAP-Sync, Bulk-Send-Background, Webhook-Send mit X-Webhook-Key, Kontakt-Import mit X-Import-Key, Signed-URL-Endpoints, `/admin/*`.
 
-### A13 — Filter-Escape konsistent
+### A13 — Filter-Escape konsistent ✅ (2026-05-20, Commit `e2e7cff`; Guardrail-Follow-up R6 am 2026-05-22)
 
-**Problem:** PocketBase-Filter werden teils per String-Interpolation gebaut. `_pb_safe()` existiert, wird aber nicht überall genutzt. Bei Sonderzeichen in Mail-Adressen/Subjects → kaputte Filter, im schlimmsten Fall Filter-Injection mit unerwarteten Treffern.
-
-**Plan:** Alle `filter=`-Stellen auditieren (`grep -n 'filter.*"' backend/`). Eine zentrale `pb_filter(template, **kwargs)`-Funktion bauen, die Werte sicher escaped. Direkt-Interpolationen ersetzen.
+**Umsetzung:** Audit aller `filter=`-Stellen, zentrale `pb_client.pb_quote(...)`-Helper, alle Direkt-Interpolationen ersetzt. Follow-up R6 (oben) ergänzt einen statischen AST-Linter (`scripts/check_pb_filters.py`), der künftige Regressions per Exit-Code 1 abfängt.
 
 ---
 

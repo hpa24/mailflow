@@ -78,7 +78,7 @@ Details der Sub-Job-Erzeugung: nur der **erste** Sub-Job behält `draft_id` und 
 ### Bewusst nicht gebaut
 
 - **Platzhalter** (`{{name}}` etc.) — braucht zweispaltige Eingabe (Adresse + Daten), kommt später.
-- **Backend-Persistenz** der Bulk-Jobs — `_send_jobs` ist in-memory. Bei Backend-Restart mitten im Bulk gehen offene Sub-Jobs verloren. Bei 5 s × N ist das Fenster klein; bei Bedarf später in PocketBase verlagern.
+- **Bulk-Resume mit Anhängen** — seit B15 (2026-05-20) sind Empfänger persistent in PB (`bulk_sends.recipients[i].next_attempt_at` + `job_id`), `_bulk_worker_loop` im `lifespan` läuft Pending-Jobs nach Restart weiter. Anhänge bleiben aber in-memory — `_bulk_restart_cleanup` markiert daher beim Start `queued`-Empfänger von Aussendungen mit Anhängen als `error: backend_restart_with_attachments`. Lift via B14 Phase 2 (Disk-Spool für Uploads) möglich, mit 200-MB-Cap aktuell nicht akut.
 - **Progress-Bar** im Status-Panel — die Summary-Zeile reicht.
 
 ## Webhooks (externer Mail-Versand) 2026-05-15
