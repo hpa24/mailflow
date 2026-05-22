@@ -240,40 +240,7 @@ function startAutoRefresh() {
   }, 120_000);
 }
 
-function startEventSource() {
-  let es = null;
-
-  async function connect() {
-    let url;
-    try {
-      url = await apiEventSourceUrl();
-    } catch (_) {
-      setTimeout(connect, 10_000);
-      return;
-    }
-    es = new EventSource(url);
-
-    es.onmessage = async (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type === 'new-mail') {
-          await silentRefresh();
-        } else if (data.type === 'send-result') {
-          _handleSendResult(data);
-          if (data.success) scheduleSentTodayRefresh();
-        }
-      } catch (_) {}
-    };
-
-    es.onerror = () => {
-      es.close();
-      setTimeout(connect, 10_000);
-    };
-  }
-
-  connect();
-  window.addEventListener('beforeunload', () => { if (es) es.close(); }, { once: true });
-}
+// startEventSource() liegt in js/sse.js (C4 Phase 2).
 
 // ── Versand-Benachrichtigungen ───────────────────────────────
 
