@@ -4,7 +4,8 @@ const MAX_AUTO_LOAD = 1500; // Automatisch bis zu dieser Anzahl laden
 
 // ── Zoom ──────────────────────────────────────────────────────
 const ZOOM_LEVELS = [0.75, 1.0, 1.25, 1.5];
-let _iframeZoom = 1.0;
+const DEFAULT_ZOOM = 1.25;
+let _iframeZoom = DEFAULT_ZOOM;
 let _activeIframe = null;
 let _activeIframeBaseHtml = null; // srcdoc nach CID-Ersatz, ohne Zoom-CSS
 
@@ -1516,13 +1517,13 @@ async function openEmail(email, itemEl) {
   const empty = document.getElementById('detail-empty');
   const actions = document.getElementById('detail-actions');
 
-  // Zoom-State für neue E-Mail zurücksetzen
+  // Zoom-State für neue E-Mail zurücksetzen (Default 125%)
   _activeIframe = null;
   _activeIframeBaseHtml = null;
-  _iframeZoom = 1.0;
+  _iframeZoom = DEFAULT_ZOOM;
   body.style.zoom = '';
   const _zoomBtn = document.getElementById('btn-zoom');
-  if (_zoomBtn) _zoomBtn.textContent = '100%';
+  if (_zoomBtn) _zoomBtn.textContent = Math.round(DEFAULT_ZOOM * 100) + '%';
 
   empty.style.display = 'none';
   header.style.display = 'block';
