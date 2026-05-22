@@ -170,6 +170,14 @@ async def setup_pocketbase_schema(token: str) -> None:
                 "CREATE INDEX IF NOT EXISTS idx_emails_account_folder_date ON emails (account, folder, date_sent DESC)",
                 "CREATE INDEX IF NOT EXISTS idx_emails_account_folder_read_date ON emails (account, folder, is_read, date_sent DESC)",
             ])
+            # 2026-05-22: message_id-Unique war global, blockierte Self-Send via Alias
+            # (selbe Mail in Sent UND INBOX desselben Mailflow-Accounts). Migration:
+            # globalen Index dropen, durch (account, folder, message_id)-Unique ersetzen.
+            await _swap_index(
+                client, headers, "emails", existing["emails"],
+                drop="CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_message_id ON emails (message_id)",
+                add="CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_account_folder_message_id ON emails (account, folder, message_id)",
+            )
 
         # B15: has_attachments + is_done für Worker (Resume-Logik + Poll-Filter).
         if "bulk_sends" in existing:
@@ -201,6 +209,38 @@ async def _ensure_indexes(
         logger.info(f"Added {len(to_add)} index(es) to '{collection_name}'")
     else:
         logger.warning(f"Failed to add indexes to '{collection_name}': {patch.text[:300]}")
+
+
+async def _swap_index(
+    client: httpx.AsyncClient, headers: dict,
+    collection_name: str, collection_id: str, *,
+    drop: str, add: str,
+) -> None:
+    """Ersetzt einen Index durch einen anderen in einem PATCH.
+
+    Idempotent: wenn ``drop`` nicht (mehr) existiert und ``add`` schon da ist, no-op.
+    """
+    resp = await client.get(f"/api/collections/{collection_id}", headers=headers)
+    if not resp.is_success:
+        logger.warning(f"Could not fetch collection '{collection_name}': {resp.text}")
+        return
+    coll = resp.json()
+    existing = list(coll.get("indexes") or [])
+    drop_present = drop in existing
+    add_present = add in existing
+    if not drop_present and add_present:
+        return  # bereits migriert
+    new_list = [i for i in existing if i != drop]
+    if not add_present:
+        new_list.append(add)
+    if new_list == existing:
+        return
+    coll["indexes"] = new_list
+    patch = await client.patch(f"/api/collections/{collection_id}", headers=headers, json=coll)
+    if patch.is_success:
+        logger.info(f"Swapped index in '{collection_name}': dropped={drop_present}, added={not add_present}")
+    else:
+        logger.warning(f"Failed to swap index in '{collection_name}': {patch.text[:300]}")
 
 
 async def _add_missing_fields(
@@ -343,7 +383,7 @@ def _emails_schema(accounts_id: str) -> dict:
         "updateRule": '@request.auth.id != ""',
         "deleteRule": '@request.auth.id != ""',
         "indexes": [
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_message_id ON emails (message_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_account_folder_message_id ON emails (account, folder, message_id)",
             "CREATE INDEX IF NOT EXISTS idx_emails_account_uid ON emails (account, imap_uid)",
             "CREATE INDEX IF NOT EXISTS idx_emails_account_folder_date ON emails (account, folder, date_sent DESC)",
             "CREATE INDEX IF NOT EXISTS idx_emails_account_folder_read_date ON emails (account, folder, is_read, date_sent DESC)",

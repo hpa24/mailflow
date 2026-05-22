@@ -304,7 +304,13 @@ async def _fetch_and_save(server: IMAPClient, account_id: str,
                 logger.warning(f"Bounce-Handling fehlgeschlagen für UID {uid}: {bnc_exc}")
 
     except pb_client.DuplicateRecordError:
-        pass  # E-Mail bereits vorhanden — ignorieren
+        # Unique-Index-Verletzung. Nach Migration auf (account, folder, message_id)-Unique
+        # sollte das nur noch echte Re-Syncs derselben (account, folder, message_id)-
+        # Kombination treffen. Vorher schluckte das stumm Self-Sends via Alias.
+        logger.info(
+            "UID %s in '%s' übersprungen — message_id schon in (account, folder, message_id) gespeichert: %s",
+            uid, folder_name, message_id,
+        )
     except Exception as e:
         raise
 
