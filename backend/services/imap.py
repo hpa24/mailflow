@@ -213,6 +213,33 @@ class ImapService:
             logger.info("Draft in IMAP-Ordner '%s' gespeichert.", drafts_folder)
 
     # ------------------------------------------------------------------
+    # Sent-APPEND (nach erfolgreichem SMTP-Versand aufgerufen)
+    # ------------------------------------------------------------------
+    def append_sent(self, msg_bytes: bytes) -> None:
+        """Best-effort: hängt eine gesendete E-Mail in den Sent-Ordner.
+        Bei fehlenden Credentials oder fehlendem Sent-Ordner wird nichts
+        geworfen, nur geloggt — Aufrufer (smtp_sender.send_email) startet
+        diese Methode im Executor und ignoriert das Ergebnis."""
+        if not all([self.acc.get("imap_host"), self.acc.get("imap_user"), self.acc.get("imap_pass")]):
+            return
+        with imap_session(self.acc) as srv:
+            sent = find_imap_folder(
+                srv,
+                [b"\\Sent"],
+                ["Sent", "Sent Items", "Sent Messages", "INBOX.Sent"],
+            )
+            if sent:
+                srv.append(
+                    sent,
+                    msg_bytes,
+                    flags=[b"\\Seen"],
+                    msg_time=datetime.now(timezone.utc),
+                )
+                logger.info("E-Mail in Ordner '%s' gespeichert.", sent)
+            else:
+                logger.warning("Kein Sent-Ordner gefunden — APPEND übersprungen.")
+
+    # ------------------------------------------------------------------
     # Attachments / Inline (B9: gezielt per BODYSTRUCTURE + BODY[<part-id>])
     # ------------------------------------------------------------------
     def fetch_attachment(self, folder: str, imap_uid: int, part_index: int) -> bytes:

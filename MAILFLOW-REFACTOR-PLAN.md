@@ -21,27 +21,15 @@
 
 Verhaltensänderung 400 → 422 bei Pflichtfeld-/Slug-Validierung (kompatibel zum `RequestValidationError`-Handler, der den Body zu `{"detail":"…"}` flacht). Pydantic-Smoke-Test bestätigt: alle bisherigen Fehlermeldungen + Defaults + leere PATCH-Bodies bleiben gleich. Kein `data: dict` mehr in `backend/routers/`.
 
-### R3 — IMAP-Service-Reste zentralisieren
+### R3 — IMAP-Service-Reste zentralisieren ✅ (2026-05-22)
 
-**Status:** `services/imap.py` mit `imap_session(...)`, `run_blocking(...)` und `ImapService` existiert; Reststreuung offen.
+**Umsetzung:**
+- `services/imap.py`: neue `ImapService.append_sent(msg_bytes)`-Methode (Best-effort, Sent-Ordner via `find_imap_folder([b"\\Sent"], ["Sent", "Sent Items", "Sent Messages", "INBOX.Sent"])`, `flags=[b"\\Seen"]`, `msg_time=datetime.now(timezone.utc)`).
+- `smtp_sender.py`: `_imap_append_sent` ersatzlos entfernt. `send_email(...)` startet jetzt `ImapService(acc).append_sent` im Executor. Imports `find_imap_folder` und `datetime` raus — nicht mehr genutzt.
+- `idle_manager.py`: direkter `IMAPClient(...)`-Aufruf raus, `_blocking_idle(acc)` nutzt jetzt `imap_session(acc)`. Signatur von `host/port/user/password` auf einen einzigen `acc`-Parameter vereinfacht; Docstring erklärt explizit, warum die Session pro Loop-Durchlauf trotzdem neu geöffnet wird (28-min-IDLE, kein Connection-Pool).
+- `imap_sync.py` und `backfill.py` behalten `from imapclient import IMAPClient` nur als Type-Hint für Funktionsparameter; die tatsächliche Konstruktion läuft schon via `imap_session`. Kein Umbau nötig.
 
-**Bereits zentralisiert:** `append_draft`, `fetch_attachment`, `fetch_inline`, `set_read`, `set_answered`, `bulk_set_read`, `move_to_spam`, `move`, `trash`, `fetch_uids_with_msgids`.
-
-**Restpunkte:**
-1. `backend/smtp_sender.py`
-   - eigene Funktion `_imap_append_sent(acc, msg_bytes)` für Sent-Append.
-   - `send_email(...)` ruft sie best-effort per `loop.run_in_executor(None, _imap_append_sent, acc, msg_bytes)` auf.
-2. `backend/idle_manager.py`
-   - direkte `IMAPClient(...)`-Login-/IDLE-Logik.
-   - IDLE darf wegen langlebiger Verbindung separat bleiben, aber Login/Cleanup sollte entweder `imap_session` nutzen oder bewusst dokumentieren, warum nicht.
-3. `imap_sync.py` und `backfill.py`
-   - nutzen bereits `imap_session`; kein zwingender Umbau, nur Doppelungen bei Gelegenheit prüfen.
-
-**Fix-Ziel:**
-- `ImapService.append_sent(msg_bytes)` ergänzen (Sent-Ordner via `find_imap_folder(... [b"\\Sent"] ... )`, `flags=[b"\\Seen"]`, `msg_time=datetime.now(timezone.utc)`).
-- `_imap_append_sent` entfernen oder zu dünnem Wrapper machen; `send_email(...)` soll `ImapService(acc).append_sent` im Executor starten.
-- `idle_manager.py` prüfen und entweder auf `imap_session(acc)` umstellen oder die Ausnahme kommentieren.
-- Checks: `rg -n "IMAPClient|imap_session|_imap_append_sent|append_sent" backend/smtp_sender.py backend/idle_manager.py backend/services/imap.py`.
+Damit ist `IMAPClient(...)`-Konstruktion nur noch an genau einer Stelle (`services/imap.py:imap_session`). Verhalten 1:1.
 
 ### R4 — Veraltetes `embed-search-test.html` an Admin-Key-Middleware anpassen oder löschen
 

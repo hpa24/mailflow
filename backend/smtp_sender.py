@@ -4,12 +4,11 @@ import email.utils
 import logging
 import smtplib
 import ssl
-from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import pb_client
-from imap_utils import find_imap_folder
+from services.imap import ImapService
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +127,7 @@ async def send_email(
     logger.info("SMTP-Versand erfolgreich: message_id=%s", message_id)
 
     # IMAP APPEND in Sent-Ordner (best-effort, im Hintergrund)
-    loop.run_in_executor(None, _imap_append_sent, acc, msg_bytes)
+    loop.run_in_executor(None, ImapService(acc).append_sent, msg_bytes)
 
     return message_id
 
@@ -177,26 +176,5 @@ def _send_smtp(
                 logger.warning("SMTP: abgelehnte Empfänger: %s", refused)
             else:
                 logger.info("SMTP: alle Empfänger akzeptiert")
-
-
-def _imap_append_sent(acc: dict, msg_bytes: bytes) -> None:
-    """Hängt die gesendete E-Mail per IMAP APPEND in den Sent-Ordner."""
-    from services.imap import imap_session
-
-    if not all([acc.get("imap_host"), acc.get("imap_user"), acc.get("imap_pass")]):
-        return
-
-    with imap_session(acc) as srv:
-        sent = find_imap_folder(srv, [b"\\Sent"], ["Sent", "Sent Items", "Sent Messages", "INBOX.Sent"])
-        if sent:
-            srv.append(
-                sent,
-                msg_bytes,
-                flags=[b"\\Seen"],
-                msg_time=datetime.now(timezone.utc),
-            )
-            logger.info("E-Mail in Ordner '%s' gespeichert.", sent)
-        else:
-            logger.warning("Kein Sent-Ordner gefunden — APPEND übersprungen.")
 
 

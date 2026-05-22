@@ -2,7 +2,7 @@
 import asyncio
 import logging
 
-from imapclient import IMAPClient
+from services.imap import imap_session
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +74,7 @@ class IdleManager:
                 has_change = await loop.run_in_executor(
                     None,
                     _blocking_idle,
-                    acc["imap_host"],
-                    int(acc.get("imap_port") or 993),
-                    acc["imap_user"],
-                    acc["imap_pass"],
+                    acc,
                 )
                 if has_change:
                     logger.info("IDLE: Änderung erkannt für %s — starte Sync", acc["imap_user"])
@@ -96,14 +93,17 @@ class IdleManager:
                 backoff = min(backoff * 2, 300)  # Max. 5 Minuten
 
 
-def _blocking_idle(host: str, port: int, user: str, password: str) -> bool:
+def _blocking_idle(acc: dict) -> bool:
     """Blockierend: baut IMAP-Verbindung auf, wartet via IDLE auf Änderungen.
 
     Gibt True zurück wenn der Server eine Änderung gemeldet hat (neue Mail,
     gelöschte Mail etc.). Gibt False zurück bei regulärem 28-Minuten-Timeout.
+
+    Nutzt `imap_session(acc)` für Login/Cleanup — die Verbindung selbst bleibt
+    aber lange offen (28 min IDLE), darum öffnet diese Funktion die Session
+    pro Loop-Durchlauf neu (vs. Connection-Pool).
     """
-    with IMAPClient(host, port=port, ssl=True) as srv:
-        srv.login(user, password)
+    with imap_session(acc) as srv:
         srv.select_folder("INBOX", readonly=True)
         srv.idle()
         responses = srv.idle_check(timeout=28 * 60)  # 28 min — unter dem RFC-Limit von 29
