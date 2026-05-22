@@ -165,7 +165,9 @@ Am Ende: Admin-Token nur noch für IMAP-Sync, Bulk-Backend, Webhook-Send-Backend
 
 **Problem:** Anhänge bleiben in-memory, bis send/delete läuft. Browser-Crash oder Abbruch → Speicher belegt.
 
-**Plan:** Hintergrund-Task (`asyncio.create_task` beim Startup) räumt Einträge älter als 30 min auf. Globales Größen-Limit (z.B. 200 MB total). Bei sehr großen Uploads: Disk-Spool (`tempfile.NamedTemporaryFile`) statt RAM.
+**Phase 1 ✅ (2026-05-20):** Hintergrund-Sweep-Coroutine im `lifespan` räumt Einträge älter als 30 min auf, globales 200-MB-Cap. Reicht im Alltag.
+
+**Phase 2 (offen, optional):** Disk-Spool via `tempfile.NamedTemporaryFile` für sehr große Uploads, damit Bulk-Resume *mit* Anhängen funktioniert (siehe B15-Restriktion `backend_restart_with_attachments`). Aktuell mit 200-MB-Gesamtcap nicht akut.
 
 ### B15 — Bulk-Jobs persistent statt in-memory ✅ (erledigt 2026-05-20)
 
@@ -207,7 +209,7 @@ Am Ende: Admin-Token nur noch für IMAP-Sync, Bulk-Backend, Webhook-Send-Backend
 
 **Phase 2 ✅ (2026-05-21, Commit `868ef0a`):** 10 weitere Endpoints — `variables_update/rename`, `snippets_create/update/rename`, `templates_create/update`, `contact_groups_create/update`, `save_triage_example`. Update-Endpoints nutzen `Optional`-Felder + `model_dump(exclude_unset=True)` für PATCH-Semantik. Name-Normalisierung pro Collection in `_normalize_<x>_name`-Helpers konsolidiert.
 
-**Phase 3 (offen):** 7 komplexere Endpoints — `update_account`, `send_email_endpoint`, `bulk_send_endpoint`, `create_draft`, `update_draft`, `contacts_import`, `templates_render`. Brauchen größere Modelle mit nested Feldern (Recipients-Listen, Attachments-IDs, Render-Kontext etc.).
+**Phase 3 ✅ (2026-05-22, Commit `ca3230e`):** 7 komplexere Endpoints — `UpdateAccountRequest` (system.py), `SendEmailRequest`, `BulkSendRequest`, `CreateDraftRequest`, `UpdateDraftRequest` (mail.py), `ContactsImportRequest` (contacts.py), `TemplatesRenderRequest` (templates.py). Verhalten 400 → 422 bei Validierungsfehlern; Body bleibt `{"detail": "..."}` dank des `RequestValidationError`-Handlers. **Damit ist C2 komplett — alle 21 ehemaligen `data: dict`-Endpoints typisiert.**
 
 ### C3 — Zentraler IMAP-Service
 
@@ -235,7 +237,13 @@ Nicht migriert: `imap_session` selbst (weiter genutzt von imap_sync.py, backfill
 
 **Phase 1 ✅ (früher):** `webhooks.js` rausgezogen.
 
-**Phase 2 (offen):** `compose.js`, `email_detail.js`, `spam.js`, `sse.js`. Tückisch wegen geteiltem `state`-Objekt, globalen Event-Listenern, render-Funktionen die kreuz und quer aufrufen. Saubere Trennung erfordert Module-Pattern (ES Modules oder IIFE) und explizite API-Boundaries. ~4–8 h.
+**Phase 2 ✅ (2026-05-22, Commits `999b28e` / `3fa9b2d` / `0e31409` / `1c17da4` / `606b1ae` / `58a8b51`):**
+- `sse.js` (41 Z.) — `startEventSource`
+- `spam.js` (150 Z.) — `spamEmail` + Spam-Rules-Verwaltung
+- `email_detail.js` (314 Z.) — `openEmail`, sandbox-Iframe, CID-Inline, `updateReadToggle`, `linkify`, `showEmpty`
+- `compose.js` (1351 Z., 3 Sub-Commits A/B/C) — Toolbar, Send-Notifications, openCompose/closeCompose/saveDraft, Massenversand-Pipeline, Test-Send, Attachments, Drag&Drop, `makeAddressField`
+
+inbox.js: 3825 → 2031 Zeilen (−47 %). Module laden vor `inbox.js`; Cross-Modul-Calls funktionieren über shared global lexical environment klassischer Script-Tags (kein ES-Module-Setup nötig).
 
 ### C5 — Eine einzige Config/Auth-Strategie
 
