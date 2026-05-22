@@ -801,10 +801,37 @@ async function loadUnreadCounts() {
 
 function _updateDocumentTitle() {
   const total = state.newCount;
-  document.title = total > 0 ? `(${Math.min(total, 99)}) Mailflow` : 'Mailflow';
+  const capped = Math.min(total, 99);
+  document.title = total > 0 ? `(${capped}) Mailflow` : 'Mailflow';
+  _updateFaviconBadge(total);
   if ('setAppBadge' in navigator) {
     total > 0 ? navigator.setAppBadge(total) : navigator.clearAppBadge();
   }
+}
+
+function _updateFaviconBadge(total) {
+  // Chrome zeigt bei angepinnten Tabs nur das Favicon (nicht den Titel). Darum
+  // zeichnen wir den is_new-Zähler zusätzlich direkt ins Icon. Vivaldi nutzt
+  // weiterhin den Titel-Badge aus _updateDocumentTitle().
+  const link = document.querySelector('link[rel="icon"]');
+  if (!link) return;
+
+  if (!total) {
+    link.href = 'favicon.svg';
+    return;
+  }
+
+  const label = String(Math.min(total, 99));
+  const fontSize = label.length === 1 ? 13 : 10;
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#0a84ff"/>
+  <rect x="5" y="10" width="22" height="14" rx="2" fill="white"/>
+  <path d="M5 12 L16 19 L27 12" stroke="#0a84ff" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+  <circle cx="24" cy="8" r="8" fill="#5e6de8" stroke="white" stroke-width="1.5"/>
+  <text x="24" y="12" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="${fontSize}" font-weight="700" fill="white">${label}</text>
+</svg>`.trim();
+  link.href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 function _adjustFolderCount(accountId, folder, delta) {
