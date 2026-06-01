@@ -101,6 +101,7 @@
     document.getElementById('group-description-input').value = g.description || '';
     document.getElementById('group-import-textarea').value = '';
     clearImportPreview();
+    updateImportLock();
     await loadMembers(g.id);
   }
 
@@ -240,6 +241,7 @@
     document.getElementById('group-members-empty').style.display = 'none';
     document.getElementById('group-import-textarea').value = '';
     clearImportPreview();
+    updateImportLock();
     document.getElementById('group-name-input').focus();
   }
 
@@ -298,6 +300,19 @@
     if (apply) apply.disabled = true;
     const status = document.getElementById('group-import-status');
     if (status) status.textContent = '';
+  }
+
+  // Solange die Gruppe noch nicht gespeichert ist (neuer Entwurf), Import-Buttons
+  // sperren und Hinweis anzeigen. "Dann importieren" bleibt auch bei gespeicherter
+  // Gruppe gesperrt, bis "Erst prüfen" gültige Zeilen gefunden hat.
+  function updateImportLock() {
+    const saved = !!_selectedId && _draftId !== 'new';
+    const checkBtn = document.getElementById('group-import-check-btn');
+    const applyBtn = document.getElementById('group-import-apply-btn');
+    const msg = document.getElementById('group-import-locked-msg');
+    if (msg) msg.style.display = saved ? 'none' : 'block';
+    if (checkBtn) checkBtn.disabled = !saved;
+    if (!saved && applyBtn) applyBtn.disabled = true;
   }
 
   function parseImportLines(raw) {

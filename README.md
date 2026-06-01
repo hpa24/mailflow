@@ -1,3 +1,9 @@
+---
+title: Mailflow
+summary: TODO: Kurzbeschreibung ergänzen.
+tags: []
+---
+
 # Mailflow
 
 E-Mail-Client auf Basis von FastAPI + PocketBase + Vanilla JS, deployed via Coolify.
@@ -204,6 +210,8 @@ email,name,gruppen
 ### Phase 2b: Gruppen-Tab + Lösch-Schutz 2026-05-19
 
 **Gruppen-Tab** im Vorlagen-Bereich: Liste links (mit Mitglieder-Count-Badge) + Detail rechts (Name/Beschreibung editierbar, Mitglieder-Tabelle mit Einzel- und Bulk-Entfernen, Multiline-Import-Feld). Member-Entfernen läuft über `POST /contacts/import` mit `mode=remove` (kein extra Endpoint). Beim Gruppen-Delete räumt PocketBase die Relations automatisch auf (`cascadeDelete=False` auf `contacts.groups`).
+
+**Mitglieder-Import ist 2-stufig** (`js/groups.js`): Button **„Erst prüfen"** validiert die Zeilen (Vorschau gültig/ungültig), erst danach wird **„Dann importieren"** aktiv. Solange die Gruppe noch nicht gespeichert ist (neuer Entwurf), sind beide Buttons ausgegraut und der Hinweis „Gruppe erst speichern." steht über den Buttons — gesteuert von `updateImportLock()`. Disabled-Buttons haben sichtbare `:disabled`-Optik (sonst wirkt ein toter Klick wie ein Defekt).
 
 **Lösch-Schutz** für Variablen + Snippets via `GET /{var|snippet}/{id}/usage`:
 - Variable: scannt `email_templates.subject` + `html_body` + `email_snippets.html`

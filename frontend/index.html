@@ -368,9 +368,10 @@
                 <h3>Mitglieder hinzufügen</h3>
                 <p class="groups-import-hint">Format pro Zeile: <code>email,name</code> (Name optional). Diese Gruppe wird automatisch gesetzt. Mehrere Gruppen pro Zeile gehen mit <code>email,name,gruppe1;gruppe2</code>.</p>
                 <textarea id="group-import-textarea" rows="6" spellcheck="false" placeholder="anna@example.de,Anna Beispiel&#10;bob@example.com,Bob&#10;…"></textarea>
+                <div id="group-import-locked-msg" class="groups-import-locked" style="display:none">Gruppe erst speichern.</div>
                 <div class="groups-import-actions">
-                  <button class="action-btn" id="group-import-check-btn">Prüfen</button>
-                  <button class="action-btn primary" id="group-import-apply-btn" disabled>Importieren</button>
+                  <button class="action-btn" id="group-import-check-btn">Erst prüfen</button>
+                  <button class="action-btn primary" id="group-import-apply-btn" disabled>Dann importieren</button>
                   <span id="group-import-status"></span>
                 </div>
                 <div id="group-import-preview" style="display:none"></div>
