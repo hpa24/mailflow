@@ -1117,6 +1117,28 @@ min-height: 700px;
   flex-shrink: 0;
   word-wrap: break-word;
 }
+#ci-body-plain {
+  border: none;
+  outline: none;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  padding: 16px 20px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: transparent;
+  min-height: 300px;
+  flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+}
+/* Nur-Text-Modus: Formatier-Buttons ausblenden, nur den Toggle lassen */
+#compose-toolbar.plaintext-mode > :not(#tb-plaintext) { display: none; }
+#tb-plaintext.active {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border-color: var(--accent) !important;
+}
 #ci-body ul,
 #ci-body ol {
   margin: 0.6em 0;

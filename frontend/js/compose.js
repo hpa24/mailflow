@@ -240,6 +240,60 @@ function setupComposeToolbar() {
       body.focus();
     });
   });
+
+  // Nur-Text-Modus umschalten (Rich-Text ↔ schlichte Textarea)
+  const plainBtn = document.getElementById('tb-plaintext');
+  if (plainBtn) {
+    plainBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      setPlainTextMode(!_plainTextMode);
+    });
+  }
+}
+
+// ── Nur-Text-Modus (Plaintext) ───────────────────────────────
+// Aktiv: Eingabe über eine schlichte Textarea, Formatier-Buttons aus,
+// Versand mit body_html='' → echte text/plain-Mail (siehe smtp_sender.py).
+function setPlainTextMode(on) {
+  _plainTextMode = !!on;
+  const rich = document.getElementById('ci-body');
+  const plain = document.getElementById('ci-body-plain');
+  const toolbar = document.getElementById('compose-toolbar');
+  const toggle = document.getElementById('tb-plaintext');
+  if (!rich || !plain) return;
+  if (_plainTextMode) {
+    // HTML → Plaintext übernehmen, damit getippter Text nicht verloren geht
+    plain.value = rich.innerText || '';
+    rich.style.display = 'none';
+    plain.style.display = '';
+    toolbar?.classList.add('plaintext-mode');
+    toggle?.classList.add('active');
+    plain.focus();
+  } else {
+    // Plaintext → HTML zurückwandeln (Zeilenumbrüche bewahren)
+    rich.innerHTML = escHtml(plain.value || '').replace(/\n/g, '<br>');
+    plain.style.display = 'none';
+    rich.style.display = '';
+    toolbar?.classList.remove('plaintext-mode');
+    toggle?.classList.remove('active');
+    rich.focus();
+  }
+}
+
+// Liest den Body je nach Modus aus. Im Nur-Text-Modus immer body_html=''
+// → das Backend versendet eine reine text/plain-Mail.
+function readComposeBody({ trim = false, linkify = false } = {}) {
+  if (_plainTextMode) {
+    let t = document.getElementById('ci-body-plain').value || '';
+    if (trim) t = t.trim();
+    return { body: t, body_html: '' };
+  }
+  const el = document.getElementById('ci-body');
+  let body = el.innerText || '';
+  if (trim) body = body.trim();
+  let html = el.innerHTML || '';
+  if (linkify) html = _linkifyHtml(html);
+  return { body, body_html: html };
 }
 
 // ── Bestätigungs-Dialog ──────────────────────────────────────
@@ -259,7 +313,9 @@ function confirmDiscard(msg) {
 
 function composeHasContent() {
   if (document.getElementById('detail-tabs').style.display === 'none') return false;
-  const body    = document.getElementById('ci-body').innerText || '';
+  const body    = _plainTextMode
+    ? (document.getElementById('ci-body-plain').value || '')
+    : (document.getElementById('ci-body').innerText || '');
   const to      = _toField.getAddresses().join(', ');
   const subject = document.getElementById('ci-subject').value.trim();
   // Hat der Nutzer etwas eingegeben? Signatur alleine zählt nicht als Inhalt.
@@ -275,6 +331,7 @@ function composeHasContent() {
 let _draftId = null;
 let _draftTimer = null;
 let _editingDraftItemEl = null; // DOM-Element des Draft-Eintrags in der Liste (für Refresh)
+let _plainTextMode = false;     // Nur-Text-Modus: Versand als reines text/plain
 let _composeAttachments = [];   // [{id, filename, size}] — temporäre Uploads
 let _replyToEmailId = null;     // ID der E-Mail, auf die geantwortet wird (für is_answered)
 
@@ -329,6 +386,9 @@ async function openCompose({ to = '', subject = '', body = null, quote = '', quo
     replytoWarn.textContent = '';
     replytoWarn.style.display = 'none';
   }
+
+  // Editor immer im Rich-Text-Modus öffnen (Nur-Text muss bewusst gewählt werden)
+  setPlainTextMode(false);
 
   // Body: explizit übergeben (bei Draft-Bearbeitung) oder Signatur einsetzen (neue E-Mail)
   const account = state.accounts.find(a => a.id === state.activeAccount);
@@ -497,9 +557,7 @@ async function saveDraft() {
   const to          = _toField.getAddresses().join(', ');
   const cc          = _ccField.getAddresses().join(', ');
   const subject     = document.getElementById('ci-subject').value.trim();
-  const ciBody      = document.getElementById('ci-body');
-  const body        = ciBody.innerText || '';
-  const body_html   = ciBody.innerHTML || '';
+  const { body, body_html } = readComposeBody();
   const _quoteEl    = document.getElementById('ci-quote');
   const quote       = _quoteEl.textContent;
   const quote_html  = _quoteEl.dataset.quoteHtml || '';
@@ -541,9 +599,7 @@ document.getElementById('btn-send-inline').addEventListener('click', async () =>
   const to         = _toField.getAddresses().join(', ');
   const cc         = _ccField.getAddresses().join(', ');
   const subject    = document.getElementById('ci-subject').value.trim();
-  const ciBodyEl   = document.getElementById('ci-body');
-  const body       = (ciBodyEl.innerText || '').trim();
-  const body_html  = _linkifyHtml(ciBodyEl.innerHTML || '');
+  const { body, body_html } = readComposeBody({ trim: true, linkify: true });
   const _qEl       = document.getElementById('ci-quote');
   const quote      = _qEl.textContent;
   const quote_html = _qEl.dataset.quoteHtml || '';
@@ -710,9 +766,7 @@ document.getElementById('btn-test-send').addEventListener('click', async () => {
     return;
   }
   const subject   = document.getElementById('ci-subject').value.trim();
-  const ciBodyEl  = document.getElementById('ci-body');
-  const body      = (ciBodyEl.innerText || '').trim();
-  const body_html = _linkifyHtml(ciBodyEl.innerHTML || '');
+  const { body, body_html } = readComposeBody({ trim: true, linkify: true });
   const fromAccId = document.getElementById('ci-from-account').value;
   const smtpId    = document.getElementById('ci-smtp-server').value;
   const statusEl  = document.getElementById('draft-status');
@@ -842,9 +896,7 @@ document.getElementById('bulk-modal-apply').addEventListener('click', () => {
 
 async function _sendBulk() {
   const subject    = document.getElementById('ci-subject').value.trim();
-  const ciBodyEl   = document.getElementById('ci-body');
-  const body       = (ciBodyEl.innerText || '').trim();
-  const body_html  = _linkifyHtml(ciBodyEl.innerHTML || '');
+  const { body, body_html } = readComposeBody({ trim: true, linkify: true });
   const _qEl       = document.getElementById('ci-quote');
   const quote      = _qEl.textContent;
   const quote_html = _qEl.dataset.quoteHtml || '';

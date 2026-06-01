@@ -244,10 +244,12 @@
               <button class="toolbar-btn tb-emoji" data-emoji="🤞" title="Großes 🤞 einfügen">🤞</button>
               <button class="toolbar-btn tb-emoji" data-emoji="👋" title="Großes 👋 einfügen">👋</button>
             </div>
+            <button class="toolbar-btn" id="tb-plaintext" type="button" style="margin-left:auto;width:auto;padding:0 10px" title="Nur-Text-Modus: sendet reinen Plaintext ohne HTML">Nur Text</button>
           </div>
           <div id="ci-attachments" style="display:none"></div>
           <div id="ci-scroll-area">
             <div id="ci-body" contenteditable="true" data-placeholder="Nachricht schreiben…"></div>
+            <textarea id="ci-body-plain" placeholder="Nachricht schreiben (nur Text)…" style="display:none"></textarea>
             <div id="ci-quote"></div>
           </div>
           <div id="compose-drop-overlay"><span>Datei hier ablegen</span></div>
@@ -784,7 +786,7 @@ Body (JSON):
   <script src="js/spam.js?v=20260522-c4-spam"></script>
   <script src="js/email_detail.js?v=20260601-src"></script>
   <script src="js/email_source.js?v=20260601-src"></script>
-  <script src="js/compose.js?v=20260522-c4-compose-c"></script>
+  <script src="js/compose.js?v=20260601-plaintext"></script>
   <script src="js/inbox.js?v=20260522-c4-compose-c"></script>
 </body>
 </html>
