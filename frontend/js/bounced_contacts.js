@@ -48,7 +48,7 @@
         <td>${escapeHtml(c.email)}</td>
         <td>${escapeHtml(c.name || '')}</td>
         <td>${escapeHtml(formatDate(c.bounced_at))}</td>
-        <td class="bounced-reason" title="${escapeHtml(c.bounced_reason || '')}">${escapeHtml((c.bounced_reason || '').slice(0, 100))}</td>
+        <td class="bounced-reason" title="${escapeHtml(c.bounced_reason || '')}">${escapeHtml(c.bounced_reason || '')}</td>
         <td><button class="row-btn" data-action="clear" title="Bounce zurücksetzen">↺ Reset</button></td>
       `;
       tr.querySelector('[data-action="clear"]').addEventListener('click', () => clearOne(c));
