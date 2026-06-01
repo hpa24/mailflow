@@ -561,7 +561,7 @@ Fix: pro-Account-Counts via `asyncio.gather` parallel laden — alle 5 PB-Calls 
 
 Test-Plan: Footer-„Heute versendet"-Counter muss korrekt aktualisieren. Im DevTools-Network sollten die 5 PB-Calls jetzt parallel statt seriell starten (Waterfall-Block statt Treppe).
 
-## Quelltext-Ansicht & Nur-Text-Modus 2026-06-01
+## Quelltext-Ansicht & Nur-Text-Modus 2026-06-01 #plaintext
 
 Zwei Composer-/Detail-Erweiterungen plus ein kleiner Bounce-Listen-Fix.
 
