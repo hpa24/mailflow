@@ -560,3 +560,25 @@ Test-Plan: Inbox laden, scrollen, paginieren — alles muss aussehen wie vorher.
 Fix: pro-Account-Counts via `asyncio.gather` parallel laden — alle 5 PB-Calls laufen gleichzeitig, Gesamtlatenz ≈ langsamster Einzel-Call (~50ms). Faktor 5 Speedup ohne Schema-Änderung. Bei 100 Accounts würde der Ansatz an Verbindungs-Limits stoßen — dort wäre eine PB-seitige Aggregation oder ein eigener Counter sinnvoller, aber das ist im Single-User-/wenig-Accounts-Setup nicht relevant.
 
 Test-Plan: Footer-„Heute versendet"-Counter muss korrekt aktualisieren. Im DevTools-Network sollten die 5 PB-Calls jetzt parallel statt seriell starten (Waterfall-Block statt Treppe).
+
+## Quelltext-Ansicht & Nur-Text-Modus 2026-06-01
+
+Zwei Composer-/Detail-Erweiterungen plus ein kleiner Bounce-Listen-Fix.
+
+### Quelltext-Ansicht (Roh-Mail + .eml-Download)
+
+Im Detail-View → „Mehr ▾" → „Quelltext anzeigen" öffnet ein Modal mit der kompletten Roh-Mail (RFC822: alle Header inkl. Received/DKIM/SPF/DMARC/Authentication-Results + voller MIME-Body) und bietet „.eml herunterladen".
+
+Der Rohtext wird **live von IMAP** geholt, **nicht** in PocketBase gespeichert — `ImapService.fetch_raw(folder, uid)` selektiert readonly + `BODY.PEEK[]` (markiert die Mail also nicht als gelesen). Anzeige: `GET /emails/{id}/source` (Bearer) → `{source}`. Download: `GET /emails/{id}/source.eml` per signiertem URL (A11-Muster wie Attachments; Pfad ist in `_SIGNABLE_GET_PATHS` aufgenommen). Frontend: `email_source.js` (Modal) + Menüpunkt in `email_detail.js`. Sichtbar für jede Mail mit `imap_uid`.
+
+### Nur-Text-Modus im Composer
+
+Toggle „Nur Text" in der Compose-Toolbar: aktiv wird der Rich-Text-Editor (`#ci-body`, contenteditable) durch eine Monospace-Textarea (`#ci-body-plain`) ersetzt und die Formatier-Buttons via Klasse `.plaintext-mode` ausgeblendet. Versand erfolgt dann mit `body_html=''` → `smtp_sender.py` baut eine reine `text/plain`-Mail (kein HTML-Part). **Kein Backend-Change** nötig — der Plaintext-Zweig (`smtp_sender.py`, else-Pfad ohne `body_html`) existierte bereits.
+
+Zentralisiert über `readComposeBody({trim, linkify})` in `compose.js`; Senden, Test-Versand, Massenversand und Draft-Speichern lesen den Body darüber. `openCompose` setzt **immer** auf Rich-Text zurück — Nur-Text ist bewusst eine Pro-Mail-Entscheidung, kein gespeicherter Zustand. Bekannte Grenze: ein im Nur-Text gespeicherter Draft öffnet wieder im Rich-Text-Modus (Inhalt bleibt erhalten, das Flag wird nicht persistiert).
+
+### Bounce-Liste: voller Grund
+
+Die Spalte „Grund" in der Bouncte-Subview zeigt den Bounce-Text jetzt vollständig mehrzeilig statt einzeilig abgeschnitten (`#bounced-table .bounced-reason`: `white-space: normal` + `overflow-wrap: anywhere`, JS-`.slice(0,100)` in `bounced_contacts.js` entfernt). Spaltenbreite unverändert.
+
+Test-Plan: Nur-Text-Mail an sich selbst senden → in „Quelltext anzeigen" prüfen, dass nur `Content-Type: text/plain` vorkommt (kein `multipart/alternative`). `.eml`-Download öffnet/lädt die Roh-Mail. Bounce-Grund in der Liste bricht mehrzeilig um.
