@@ -119,6 +119,8 @@ window.api = {
 
   getAttachments(emailId)        { return apiGet(`/emails/${emailId}/attachments`); },
   attachmentDownloadUrl(id)      { return _signUrl(`/attachments/${id}/download`); },
+  getEmailSource(id)             { return apiFetch(`/emails/${id}/source`); },
+  emailSourceDownloadUrl(id)     { return _signUrl(`/emails/${id}/source.eml`); },
   inlineImageUrl(emailId, cid)   { return _signUrl(`/emails/${emailId}/inline`, 300, { cid }); },
   uploadAttachment(formData)     { return apiFetch('/attachments/upload', { method: 'POST', body: formData }); },
   deleteUpload(tempId)           { return apiFetch(`/attachments/upload/${tempId}`, { method: 'DELETE' }); },

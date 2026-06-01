@@ -131,6 +131,7 @@
               <div class="toolbar-menu-popover" role="menu">
                 <button class="menu-action-btn" id="btn-forward">Weiterleiten</button>
                 <button class="menu-action-btn" id="btn-toggle-read">Als gelesen markieren</button>
+                <button class="menu-action-btn" id="btn-view-source">Quelltext anzeigen</button>
                 <button class="menu-action-btn danger" id="btn-spam">Spam</button>
                 <button class="menu-action-btn danger" id="btn-spam-block" title="Mail als Spam markieren und Absender blockieren">+ Absender blocken</button>
               </div>
@@ -546,6 +547,20 @@
     </div>
   </div>
 
+  <!-- Quelltext-Ansicht Modal -->
+  <div id="source-modal-overlay" style="display:none">
+    <div id="source-modal">
+      <div id="source-modal-header">
+        <span id="source-modal-title">Quelltext</span>
+        <div class="source-modal-actions">
+          <button class="action-btn" id="source-modal-download">.eml herunterladen</button>
+          <button id="source-modal-close">✕</button>
+        </div>
+      </div>
+      <div id="source-modal-body"><pre id="source-modal-pre"></pre></div>
+    </div>
+  </div>
+
   <div id="account-modal-overlay" style="display:none">
     <div id="account-modal">
       <div id="account-modal-header">
@@ -767,7 +782,8 @@ Body (JSON):
   <script src="js/diagnose.js?v=20260522-1"></script>
   <script src="js/sse.js?v=20260522-c4-sse"></script>
   <script src="js/spam.js?v=20260522-c4-spam"></script>
-  <script src="js/email_detail.js?v=20260522-c4-detail"></script>
+  <script src="js/email_detail.js?v=20260601-src"></script>
+  <script src="js/email_source.js?v=20260601-src"></script>
   <script src="js/compose.js?v=20260522-c4-compose-c"></script>
   <script src="js/inbox.js?v=20260522-c4-compose-c"></script>
 </body>

@@ -1345,6 +1345,72 @@ min-height: 700px;
   font-size: 12px;
   color: var(--text2);
 }
+/* Quelltext-Ansicht Modal */
+#source-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#source-modal {
+  background: var(--bg2);
+  border-radius: 12px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.25);
+  width: 820px;
+  max-width: 95vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#source-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+#source-modal-title {
+  font-size: 17px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+#source-modal-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--text2);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+#source-modal-close:hover { background: var(--bg3); }
+#source-modal-body {
+  padding: 14px 20px;
+  overflow: auto;
+  flex: 1;
+  background: var(--bg);
+}
+#source-modal-pre {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .badge-count {
   display: inline-block;
   margin-left: 6px;

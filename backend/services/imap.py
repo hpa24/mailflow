@@ -313,6 +313,19 @@ class ImapService:
             )
             return payload, mime_type
 
+    def fetch_raw(self, folder: str, imap_uid: int) -> bytes:
+        """Lädt die komplette Roh-Mail (RFC822-Quelltext: alle Header + MIME-
+        Bodies). readonly-Select + BODY.PEEK[] markiert die Mail nicht als
+        gelesen. Wird live geholt — der Rohtext wird nicht in PocketBase
+        gespeichert."""
+        with imap_session(self.acc) as srv:
+            srv.select_folder(folder, readonly=True)
+            data = srv.fetch([imap_uid], [b"BODY.PEEK[]"])
+            rec = data.get(imap_uid, {}) or {}
+            raw = rec.get(b"BODY[]") or rec.get(b"BODY.PEEK[]") or b""
+            logger.info("fetch_raw: UID %s (%d B)", imap_uid, len(raw))
+            return raw
+
     # Fallback-Helfer (alter BODY[]-Pfad) für die Fälle, in denen
     # BODYSTRUCTURE nicht funktioniert.
     @staticmethod

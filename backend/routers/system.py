@@ -76,6 +76,7 @@ _SIGNABLE_GET_PATHS = (
     _re.compile(r"^/events$"),
     _re.compile(r"^/attachments/[a-zA-Z0-9]+/download$"),
     _re.compile(r"^/emails/[a-zA-Z0-9]+/inline$"),
+    _re.compile(r"^/emails/[a-zA-Z0-9]+/source\.eml$"),
 )
 
 

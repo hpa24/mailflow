@@ -132,6 +132,7 @@ async function openEmail(email, itemEl) {
   document.getElementById('btn-reply').onclick = null;
   document.getElementById('btn-forward').onclick = null;
   document.getElementById('btn-edit-draft').onclick = null;
+  document.getElementById('btn-view-source').onclick = null;
 
   const isDraft = (email.folder || '').toLowerCase().includes('draft');
 
@@ -145,9 +146,13 @@ async function openEmail(email, itemEl) {
   const _inSpam = email.folder === 'Spam';
   document.getElementById('btn-spam').style.display        = (isDraft || _inSpam) ? 'none' : '';
   document.getElementById('btn-spam-block').style.display  = (isDraft || _inSpam) ? 'none' : '';
+  // Quelltext-Ansicht: für jede Mail mit IMAP-UID verfügbar (auch Sent/Spam).
+  const viewSrcBtn = document.getElementById('btn-view-source');
+  viewSrcBtn.style.display = email.imap_uid ? '' : 'none';
+  viewSrcBtn.onclick = () => window.mfEmailSource.open(email.id, email.subject || '');
   const detailMoreMenu = document.getElementById('detail-more-menu');
   if (detailMoreMenu) {
-    const hasVisibleMenuItems = ['btn-forward', 'btn-toggle-read', 'btn-spam', 'btn-spam-block']
+    const hasVisibleMenuItems = ['btn-forward', 'btn-toggle-read', 'btn-view-source', 'btn-spam', 'btn-spam-block']
       .some(id => document.getElementById(id)?.style.display !== 'none');
     detailMoreMenu.style.display = hasVisibleMenuItems ? '' : 'none';
   }

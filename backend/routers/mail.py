@@ -880,6 +880,57 @@ async def download_attachment(attachment_id: str):
     )
 
 
+async def _fetch_email_raw(email_id: str) -> bytes:
+    """Holt die Roh-Mail (RFC822) live vom IMAP-Server für die Quelltext-
+    Ansicht und den .eml-Download. Gemeinsamer Helper beider Endpoints."""
+    email_rec = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
+    account_id = email_rec.get("account")
+    folder = email_rec.get("folder", "INBOX")
+    imap_uid = email_rec.get("imap_uid")
+
+    if not imap_uid:
+        raise HTTPException(status_code=404, detail="E-Mail hat keine IMAP-UID")
+
+    acc = await _get_imap_account(account_id)
+    if not acc:
+        raise HTTPException(status_code=404, detail="Account nicht gefunden")
+
+    try:
+        return await asyncio.to_thread(ImapService(acc).fetch_raw, folder, int(imap_uid))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Quelltext-Abruf fehlgeschlagen: %s", exc)
+        raise HTTPException(status_code=502, detail=f"IMAP-Fehler: {exc}")
+
+
+@router.get("/emails/{email_id}/source")
+async def get_email_source(email_id: str, token: str = Depends(pb_user_auth.get_user_token)):
+    """Roh-Quelltext (RFC822) einer E-Mail als Text für die Quelltext-Ansicht.
+    Wird live von IMAP geholt (nicht in PocketBase gespeichert)."""
+    raw = await _fetch_email_raw(email_id)
+    return {"source": raw.decode("utf-8", errors="replace")}
+
+
+@router.get("/emails/{email_id}/source.eml")
+async def download_email_source(email_id: str):
+    """Lädt die Roh-Mail als .eml herunter. Wie der Attachment-Download per
+    signiertem URL (A11) erreichbar — kein Bearer-Header möglich."""
+    raw = await _fetch_email_raw(email_id)
+    email_rec = await pb_client.pb_get(f"/api/collections/emails/records/{email_id}")
+    subject = (email_rec.get("subject") or "").strip()
+    safe = re.sub(r"[^\w.-]+", "_", subject)[:80].strip("_") or "mail"
+    encoded_name = _url_quote(f"{safe}.eml", safe="")
+    return Response(
+        content=raw,
+        media_type="message/rfc822",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
 @router.get("/emails/{email_id}/inline")
 async def get_inline_image(email_id: str, cid: str):
     """Gibt ein Inline-Bild (cid:-Referenz) aus einer E-Mail zurück.
