@@ -1,7 +1,12 @@
 ---
 title: Mailflow
-summary: TODO: Kurzbeschreibung ergänzen.
-tags: []
+summary: E-Mail-Client (FastAPI + PocketBase + Vanilla JS, Coolify-Deploy) mit Vorlagen, Snippets, Gruppen, Massenversand und Webhook-Schnittstelle.
+tags:
+  - app
+  - mailflow
+  - email
+  - pocketbase
+  - fastapi
 ---
 
 # Mailflow

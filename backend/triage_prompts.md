@@ -1,3 +1,9 @@
+---
+title: triage_prompts
+summary: TODO: Kurzbeschreibung ergänzen.
+tags: []
+---
+
 ## Kategorien
 kat1 | focus | Tief | Tiefgehende fachliche Fragen oder komplexe Anliegen, die volle Aufmerksamkeit erfordern
 kat2 | quick-reply | Schnell | Kurze organisatorische Fragen, Terminbestätigungen oder einfache Bestätigungen

@@ -1,3 +1,9 @@
+---
+title: "Mailflow — Vorlagen, Snippets, Variablen, Gruppenversand (Plan)"
+summary: TODO: Kurzbeschreibung ergänzen.
+tags: []
+---
+
 # Mailflow — Vorlagen, Snippets, Variablen, Gruppenversand (Plan)
 
 **Stand:** 2026-05-18
