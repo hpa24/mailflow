@@ -268,6 +268,10 @@ function setPlainTextMode(on) {
     plain.style.display = '';
     toolbar?.classList.add('plaintext-mode');
     toggle?.classList.add('active');
+    if (toggle) {
+      toggle.textContent = 'RTF';
+      toggle.title = 'Zurück zum Rich-Text-Modus (HTML mit Formatierung)';
+    }
     plain.focus();
   } else {
     // Plaintext → HTML zurückwandeln (Zeilenumbrüche bewahren)
@@ -276,6 +280,10 @@ function setPlainTextMode(on) {
     rich.style.display = '';
     toolbar?.classList.remove('plaintext-mode');
     toggle?.classList.remove('active');
+    if (toggle) {
+      toggle.textContent = 'Nur Text';
+      toggle.title = 'Nur-Text-Modus: sendet reinen Plaintext ohne HTML';
+    }
     rich.focus();
   }
 }
@@ -949,8 +957,22 @@ async function _bulkStart(recipients, snapshot) {
     _bulkTracking.byJobId.set(j.job_id, j.to);
     _bulkUpsertRow(j.to, { status: 'sending', error: null, jobId: j.job_id });
   });
+  // Rausgefilterte (bounced/unsubscribed) Adressen aus dem Tracking entfernen.
+  // Sie werden nie versendet und bekommen keinen Endstatus — blieben sie als
+  // 'queued' stehen, würde `allDone` nie wahr → _bulkFinalize() liefe nie →
+  // der Schließen-Knopf bliebe dauerhaft verborgen. Anzeige läuft über das Banner.
+  (resp.filtered_out || []).forEach(f => {
+    _bulkTracking.byAddr.delete(f.raw ?? f.email);
+  });
   _bulkRenderFilteredBanner(resp.filtered_out || []);
+  _bulkRenderList();
   _bulkUpdateSummary();
+  // Falls nach dem Rausfiltern bereits alle verbleibenden fertig sind (z. B. nur
+  // Sofort-Fehler), direkt finalisieren, damit der Schließen-Knopf erscheint.
+  if (Array.from(_bulkTracking.byAddr.values())
+        .every(r => r.status === 'success' || r.status === 'error')) {
+    _bulkFinalize();
+  }
 
   // Polling-Fallback gegen SSE-Loss bei Backend-Restart (B15).
   // SSE bleibt der primäre Realtime-Pfad; Polling holt nur verpasste
