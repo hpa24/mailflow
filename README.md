@@ -582,3 +582,19 @@ Zentralisiert über `readComposeBody({trim, linkify})` in `compose.js`; Senden, 
 Die Spalte „Grund" in der Bouncte-Subview zeigt den Bounce-Text jetzt vollständig mehrzeilig statt einzeilig abgeschnitten (`#bounced-table .bounced-reason`: `white-space: normal` + `overflow-wrap: anywhere`, JS-`.slice(0,100)` in `bounced_contacts.js` entfernt). Spaltenbreite unverändert.
 
 Test-Plan: Nur-Text-Mail an sich selbst senden → in „Quelltext anzeigen" prüfen, dass nur `Content-Type: text/plain` vorkommt (kein `multipart/alternative`). `.eml`-Download öffnet/lädt die Roh-Mail. Bounce-Grund in der Liste bricht mehrzeilig um.
+
+## Composer- & Massenversand-Fixes 2026-06-02 #plaintext #aussendung
+
+Zwei kleine UI-Fixes (nur `frontend/js/compose.js`, kein Backend-Change).
+
+### Nur-Text-Umschalter zeigt „RTF" im aktiven Zustand
+
+Der Toggle „Nur Text" wechselt im Nur-Text-Modus jetzt zusätzlich seinen Beschriftungstext auf **„RTF"** (Tooltip „Zurück zum Rich-Text-Modus") und zurück auf „Nur Text" im HTML-Modus. So ist sichtbar, dass man im Textformat ist und per Klick zurück ins Rich-Text-Format kommt. Umgesetzt in `setPlainTextMode()` (Label + `title` werden in beiden Zweigen gesetzt); die `.active`-Klasse bleibt wie gehabt.
+
+### Schließen-Knopf im Massenversand-Statusfenster bleibt erhalten
+
+Bug: Beim Massenversand mit geblockten (bounced/unsubscribed) Empfängern verschwand der Schließen-Knopf des kleinen Status-Fensters (unten rechts) dauerhaft. Ursache: Alle Empfänger werden beim Start als `queued` ins Tracking (`_bulkTracking.byAddr`) gelegt; das Backend versendet aber nur die akzeptierten (`resp.jobs`) und liefert geblockte separat als `resp.filtered_out`. Die rausgefilterten Adressen bekamen nie einen Job/Endstatus → die `allDone`-Bedingung (alle `success`/`error`) wurde nie wahr → `_bulkFinalize()` (blendet den Knopf wieder ein) lief nie.
+
+Fix in `_bulkStart()`: rausgefilterte Adressen werden direkt aus `_bulkTracking.byAddr` entfernt (Schlüssel `f.raw`, Fallback `f.email` — das Backend liefert beide Felder). Sie erscheinen weiterhin im Warn-Banner. Zusätzlich wird nach dem Filtern geprüft, ob bereits alle verbleibenden fertig sind, und ggf. sofort `_bulkFinalize()` aufgerufen. (Der Fall „alle Empfänger geblockt" war schon vorher abgedeckt: Backend antwortet 400 → catch-Zweig markiert alle als `error` → finalisiert.)
+
+Test-Plan: Massenversand mit mindestens einer geblockten Adresse starten → Status-Fenster zeigt nach Abschluss den Schließen-Knopf, geblockte Adresse steht im Banner. Nur-Text-Toggle klicken → Button wird „RTF", erneut klicken → „Nur Text".
