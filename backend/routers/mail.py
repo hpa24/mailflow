@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 from urllib.parse import quote as _url_quote
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
@@ -1327,7 +1328,15 @@ async def move_email(email_id: str, req: MoveEmailRequest, token: str = Depends(
 @router.delete("/emails/{email_id}")
 async def delete_email(email_id: str, token: str = Depends(pb_user_auth.get_user_token)):
     """Löscht E-Mail in PocketBase und verschiebt sie auf dem IMAP-Server in den Papierkorb."""
-    email = await pb_client.pb_get_as(token, f"/api/collections/emails/records/{email_id}")
+    try:
+        email = await pb_client.pb_get_as(token, f"/api/collections/emails/records/{email_id}")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            # Race condition: imap_sync hat den Record bereits gelöscht (Mail schon im Papierkorb).
+            logger.info("delete_email: %s bereits weg (Race mit imap_sync) — gilt als gelöscht", email_id)
+            await asyncio.to_thread(fts_delete, settings.PB_DATA_PATH, email_id)
+            return {"deleted": email_id}
+        raise
     source_folder = email.get("folder", "INBOX")
     was_unread = not email.get("is_read", True)
     if was_unread:
@@ -1342,7 +1351,13 @@ async def delete_email(email_id: str, token: str = Depends(pb_user_auth.get_user
         await _imap_trash(email)
     except Exception as e:
         logger.warning(f"IMAP trash failed for {email_id}: {e}")
-    await pb_client.pb_delete_as(token, f"/api/collections/emails/records/{email_id}")
+    try:
+        await pb_client.pb_delete_as(token, f"/api/collections/emails/records/{email_id}")
+    except httpx.HTTPStatusError as e:
+        # Race condition: imap_sync hat den Record zwischenzeitlich gelöscht → 404 = bereits erledigt.
+        if e.response.status_code != 404:
+            raise
+        logger.info("delete_email: %s schon gelöscht (Race mit imap_sync)", email_id)
     await asyncio.to_thread(fts_delete, settings.PB_DATA_PATH, email_id)
     if was_unread:
         try:
