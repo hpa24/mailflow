@@ -3516,6 +3516,7 @@ body[data-active-tab="templates"] #templates-main[data-active-section="templates
 }
 .groups-members-header h3 {
   margin: 0;
+  margin-right: auto; /* Buttons (Export, Markierte entfernen) rechts buendeln */
   font-size: 15px;
   font-weight: 600;
 }

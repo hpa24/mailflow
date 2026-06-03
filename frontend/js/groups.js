@@ -291,6 +291,31 @@
     }
   }
 
+  // ── Export (Zwischenablage) ───────────────────────────────────────────
+
+  // Kopiert alle E-Mail-Adressen der ausgewaehlten Gruppe in die Zwischenablage,
+  // eine pro Zeile — passt direkt ins Massenversand-Modal. Kontakte liegen mit
+  // Gruppenzugehoerigkeit in PocketBase (Backup dort), daher kein CSV-Download.
+  async function onExportEmails() {
+    const btn = document.getElementById('group-export-btn');
+    if (_members.length === 0) {
+      alert('Diese Gruppe hat keine Mitglieder.');
+      return;
+    }
+    const text = _members.map(m => m.email).join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      if (btn) {
+        const old = btn.textContent;
+        btn.textContent = `✓ ${_members.length} kopiert`;
+        btn.disabled = true;
+        setTimeout(() => { btn.textContent = old; btn.disabled = false; }, 2000);
+      }
+    } catch (err) {
+      alert('Kopieren fehlgeschlagen: ' + (err.message || err));
+    }
+  }
+
   // ── Import-Feld ───────────────────────────────────────────────────────
 
   function clearImportPreview() {
@@ -420,6 +445,9 @@
     if (saveBtn) saveBtn.addEventListener('click', onSave);
     const delBtn = document.getElementById('group-delete-btn');
     if (delBtn) delBtn.addEventListener('click', onDelete);
+
+    const exportBtn = document.getElementById('group-export-btn');
+    if (exportBtn) exportBtn.addEventListener('click', onExportEmails);
 
     const checkAll = document.getElementById('group-members-check-all');
     if (checkAll) checkAll.addEventListener('change', checkAllToggle);
