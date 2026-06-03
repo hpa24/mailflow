@@ -186,11 +186,17 @@
   }
 
   function updateBulkButton() {
-    const btn = document.getElementById('group-bulk-remove-btn');
-    if (!btn) return;
     const checked = document.querySelectorAll('#group-members-tbody .group-member-check:checked').length;
-    btn.style.display = checked > 0 ? '' : 'none';
-    btn.textContent = checked > 0 ? `Markierte entfernen (${checked})` : 'Markierte entfernen';
+    const btn = document.getElementById('group-bulk-remove-btn');
+    if (btn) {
+      btn.style.display = checked > 0 ? '' : 'none';
+      btn.textContent = checked > 0 ? `Markierte entfernen (${checked})` : 'Markierte entfernen';
+    }
+    // Export-Button folgt der Auswahl: markierte kopieren, sonst alle
+    const exportBtn = document.getElementById('group-export-btn');
+    if (exportBtn && !exportBtn.disabled) {
+      exportBtn.textContent = checked > 0 ? `Markierte kopieren (${checked})` : 'E-Mails kopieren';
+    }
   }
 
   async function removeMember(m) {
@@ -293,23 +299,27 @@
 
   // ── Export (Zwischenablage) ───────────────────────────────────────────
 
-  // Kopiert alle E-Mail-Adressen der ausgewaehlten Gruppe in die Zwischenablage,
-  // eine pro Zeile — passt direkt ins Massenversand-Modal. Kontakte liegen mit
-  // Gruppenzugehoerigkeit in PocketBase (Backup dort), daher kein CSV-Download.
+  // Kopiert E-Mail-Adressen der ausgewaehlten Gruppe in die Zwischenablage,
+  // eine pro Zeile — passt direkt ins Massenversand-Modal. Sind Mitglieder
+  // markiert, werden nur diese kopiert (wie bei "Markierte entfernen"), sonst
+  // alle. Kontakte liegen mit Gruppenzugehoerigkeit in PocketBase (Backup
+  // dort), daher kein CSV-Download.
   async function onExportEmails() {
     const btn = document.getElementById('group-export-btn');
     if (_members.length === 0) {
       alert('Diese Gruppe hat keine Mitglieder.');
       return;
     }
-    const text = _members.map(m => m.email).join('\n');
+    const checked = Array.from(document.querySelectorAll('#group-members-tbody .group-member-check:checked'));
+    const emails = checked.length > 0
+      ? checked.map(c => c.closest('tr').dataset.email)
+      : _members.map(m => m.email);
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(emails.join('\n'));
       if (btn) {
-        const old = btn.textContent;
-        btn.textContent = `✓ ${_members.length} kopiert`;
+        btn.textContent = `✓ ${emails.length} kopiert`;
         btn.disabled = true;
-        setTimeout(() => { btn.textContent = old; btn.disabled = false; }, 2000);
+        setTimeout(() => { btn.disabled = false; updateBulkButton(); }, 2000);
       }
     } catch (err) {
       alert('Kopieren fehlgeschlagen: ' + (err.message || err));
