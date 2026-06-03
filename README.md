@@ -598,3 +598,9 @@ Bug: Beim Massenversand mit geblockten (bounced/unsubscribed) Empfängern versch
 Fix in `_bulkStart()`: rausgefilterte Adressen werden direkt aus `_bulkTracking.byAddr` entfernt (Schlüssel `f.raw`, Fallback `f.email` — das Backend liefert beide Felder). Sie erscheinen weiterhin im Warn-Banner. Zusätzlich wird nach dem Filtern geprüft, ob bereits alle verbleibenden fertig sind, und ggf. sofort `_bulkFinalize()` aufgerufen. (Der Fall „alle Empfänger geblockt" war schon vorher abgedeckt: Backend antwortet 400 → catch-Zweig markiert alle als `error` → finalisiert.)
 
 Test-Plan: Massenversand mit mindestens einer geblockten Adresse starten → Status-Fenster zeigt nach Abschluss den Schließen-Knopf, geblockte Adresse steht im Banner. Nur-Text-Toggle klicken → Button wird „RTF", erneut klicken → „Nur Text".
+
+## imap_sync-Race: Löschen/Verschieben idempotent 2026-06-03 #imap-sync
+
+Architektur-Falle: Handler, die einen `emails`-Record löschen oder verschieben (`delete_email`, `move_email` in `routers/mail.py`), laufen parallel zum periodischen `imap_sync` (`_sync_flags_recent` in `imap_sync.py`). Sobald die Mail auf dem IMAP-Server aus dem Quellordner verschwindet (z.B. durch das `_imap_trash` des Lösch-Handlers selbst), entfernt der Sync den PocketBase-Record eigenständig. Gewinnt der Sync das Rennen, antwortet PocketBase dem Handler mit **404** — die Aktion ist aber faktisch erfolgreich (Record weg, Mail im Papierkorb).
+
+Regel: **Wer in diesen Handlern Records löscht/verschiebt, muss 404 von PocketBase als Erfolg behandeln, nicht als Fehler.** `move_email` fängt die Race auf dem `pb_patch` ab; `delete_email` behandelt seit dem 2026-06-03-Fix 404 sowohl bei `pb_get_as` als auch bei `pb_delete_as` als „bereits erledigt" (vorher → unbehandelter 404 → HTTP 500 „Interner Fehler", obwohl die Mail kurz darauf weg war). Der FTS-Index wird in beiden Pfaden trotzdem geräumt.
