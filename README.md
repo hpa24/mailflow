@@ -612,3 +612,14 @@ Neuer Button **„E-Mails kopieren"** im Mitglieder-Header der Gruppen-Verwaltun
 Rein clientseitig (`onExportEmails()` in `frontend/js/groups.js`, Button in `index.html`, Header-CSS-Anpassung in `main.css`) — die Mitgliederliste ist beim Anzeigen ohnehin geladen, kein Backend-Endpoint. Bewusst **kein CSV-Download**: Kontakte + Gruppenzuordnung liegen in der PB-Collection `contacts` und sind vom PocketBase-Backup abgedeckt.
 
 Nebenbei: fünftes Emoji **👏** in der Compose-Toolbar ergänzt (nur eine Zeile `index.html`, Wiring läuft über die Klasse `.tb-emoji`).
+
+## Security Stufe 5: alle 7 HIGH geschlossen 2026-06-04 #security
+
+Fix-Loop (Beweis → Fix → Verifikation mit demselben Beweis) über die 7 HIGH aus dem Stufe-1-Scan; Befunde + Beweis-Skripte lokal in `audit/` (gitignored).
+
+- **Deps (#1–4):** `requirements.txt` mit Security-Floors — `python-multipart>=0.0.27`, `tqdm>=4.66.3` (transitiv via openai, war nie direkt gepinnt). Real installiert waren schon saubere Versionen; die Floors schließen die Lücke dauerhaft.
+- **Backend non-root (#5/#6):** `backend/Dockerfile` → `USER appuser` (uid 10001). Prod-Bind-Mount `/root/mailflow/mailflow-backend/fts` gehört jetzt uid 10001 (einmaliges `chown` auf dem Server). Backend schreibt nur nach `/app/fts` und `/tmp` — sonst keine Schreibpfade.
+- **Frontend non-root (#7):** Coolify-App von `static`- auf `dockerfile`-Buildpack umgestellt; `frontend/Dockerfile` (Basis `nginxinc/nginx-unprivileged:alpine`, uid 101) + `frontend/nginx.conf` (`listen 8080`, Cache-Control `no-cache` für HTML/JS/CSS — **damit erstmals live**). Coolify-Stolpersteine: Static-Buildpack kann kein non-root-Image (Build-`rm` braucht root); Traefik-Zielport steckt in `custom_labels` und zieht bei `ports_exposes`-Änderung **nicht** automatisch mit (sonst 502).
+- **Lokales Docker-Setup entfernt:** `docker-compose.yml`, `nginx-templates/` gelöscht — Regel „kein lokales Docker" (s. Callout in CLAUDE/AGENTS/GEMINI.md): direkt an Repo-Dateien arbeiten, pushen, Coolify baut auf dem Server, Verifikation gegen die Live-Instanz.
+
+Test-Plan nach künftigen Deploys unverändert: Login, Mail-Detail/Suche (FTS), Anhang-Download, Frontend lädt inkl. Favicon.
