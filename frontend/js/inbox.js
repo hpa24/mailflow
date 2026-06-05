@@ -10,6 +10,24 @@ let _activeIframe = null;
 let _activeIframeBaseHtml = null;     // srcdoc nach CID-Ersatz + Block, ohne Zoom-CSS (Quelle für Zoom-Re-Render)
 let _activeIframeOriginalHtml = null; // srcdoc nach CID-Ersatz, OHNE Block — Restore-Snapshot für „Bilder laden"
 
+// ── Tombstones (2026-06-05) ──────────────────────────────────
+// IDs gerade verschobener/gelöschter/als-Spam-markierter E-Mails. Schließt die
+// Race-Condition, dass silentRefresh (SSE 'new-mail' oder 2-Min-Poll) eine
+// optimistisch entfernte Mail als „neu" oben einfügt, solange der Server
+// (IMAP-Move + PocketBase-Patch) den Vorgang noch nicht abgeschlossen hat.
+// Bei Rollback (API-Fehler) wird der Tombstone wieder entfernt.
+const _removedTombstones = new Map(); // email.id → Date.now()
+const _TOMBSTONE_TTL = 10 * 60 * 1000;
+
+function _addTombstone(id) { _removedTombstones.set(id, Date.now()); }
+function _clearTombstone(id) { _removedTombstones.delete(id); }
+function _isTombstoned(id) {
+  const t = _removedTombstones.get(id);
+  if (t === undefined) return false;
+  if (Date.now() - t > _TOMBSTONE_TTL) { _removedTombstones.delete(id); return false; }
+  return true;
+}
+
 function _withZoom(html) {
   const style = `<style>html,body{zoom:${_iframeZoom}}</style>`;
   return html.includes('</head>') ? html.replace('</head>', style + '</head>') : style + html;
@@ -355,7 +373,8 @@ async function silentRefresh() {
     const data = await fetchFn(params);
     const fresh = data.items || [];
     const knownById = Object.fromEntries(state.emails.map(e => [e.id, e]));
-    const newEmails = fresh.filter(e => !knownById[e.id]);
+    // Tombstones: gerade entfernte Mails nicht als „neu" wieder einfügen
+    const newEmails = fresh.filter(e => !knownById[e.id] && !_isTombstoned(e.id));
 
     // Flag-Änderungen auf bereits geladenen E-Mails anwenden
     fresh.forEach(e => {
@@ -1364,6 +1383,7 @@ function moveEmailsToFolder(emailIds, targetImapPath) {
     }
     document.querySelector(`.email-item[data-id="${id}"]`)?.remove();
     state.emails = state.emails.filter(e => e.id !== id);
+    _addTombstone(id);
   });
   clearSelection();
   state.lastClickedEl = null;
@@ -1381,6 +1401,7 @@ function moveEmailsToFolder(emailIds, targetImapPath) {
       const failed = emailIds.filter((_, i) => results[i].status === 'rejected');
       if (failed.length > 0) {
         const failedEmails = snapshot.filter(e => failed.includes(e.id));
+        failed.forEach(id => _clearTombstone(id));
         failedEmails.forEach(e => {
           if (!e.is_read) _adjustFolderCount(e.account, e.folder, +1);
           e.is_read = false;
@@ -1408,6 +1429,7 @@ function deleteEmail(email, itemEl) {
   }
   itemEl.remove();
   state.emails = state.emails.filter(em => em.id !== email.id);
+  _addTombstone(email.id);
   cleanupThreadStyling();
   if (next && next.dataset.id) {
     const nextEmail = state.emails.find(em => em.id === next.dataset.id);
@@ -1419,6 +1441,7 @@ function deleteEmail(email, itemEl) {
   // API im Hintergrund — kein await
   _saveToCache();
   api.deleteEmail(email.id).catch(e => {
+    _clearTombstone(email.id);
     email.is_read = wasRead;
     state.emails = [email, ...state.emails];
     renderEmails(true);
@@ -1897,7 +1920,10 @@ document.addEventListener('contextmenu', e => {
       clearSelection();
 
       // Sofort aus State und DOM entfernen
-      ids.forEach(id => { state.emails = state.emails.filter(em => em.id !== id); });
+      ids.forEach(id => {
+        state.emails = state.emails.filter(em => em.id !== id);
+        _addTombstone(id);
+      });
       renderEmails(true);
       cleanupThreadStyling();
       updateFooter();

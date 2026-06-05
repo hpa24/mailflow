@@ -16,6 +16,7 @@ function spamEmail(email, itemEl, opts = {}) {
   if (wasUnread) _adjustFolderCount(email.account, email.folder, -1);
   itemEl.remove();
   state.emails = state.emails.filter(em => em.id !== email.id);
+  _addTombstone(email.id);
   cleanupThreadStyling();
   if (next && next.dataset.id) {
     const nextEmail = state.emails.find(em => em.id === next.dataset.id);
@@ -29,6 +30,7 @@ function spamEmail(email, itemEl, opts = {}) {
   api.spamEmail(email.id, opts).then(() => {
     if (opts.blockSender || opts.blockDomain) loadSpamRulesCount();
   }).catch(e => {
+    _clearTombstone(email.id);
     state.emails = [email, ...state.emails];
     renderEmails(true);
     if (wasUnread) _adjustFolderCount(email.account, email.folder, +1);
