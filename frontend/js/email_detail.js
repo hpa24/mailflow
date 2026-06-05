@@ -315,7 +315,9 @@ async function openEmail(email, itemEl) {
       if (blockedCount > 0) {
         const banner = document.createElement('div');
         banner.style.cssText = 'padding:8px 12px;background:#fff4e5;border:1px solid #f4c478;border-radius:6px;margin-bottom:8px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:12px';
-        banner.innerHTML = `<span>🛡️ Externe Inhalte blockiert (Tracking-Schutz). CID-Inlines sind sichtbar.</span>`;
+        // CID-Hinweis nur, wenn die Mail tatsächlich eingebettete Bilder hat
+        const resolvedCidCount = cids.length - unresolvedCids.length;
+        banner.innerHTML = `<span>🛡️ Externe Bilder blockiert (Tracking-Schutz).${resolvedCidCount > 0 ? ' Eingebettete Bilder bleiben sichtbar.' : ''}</span>`;
         const loadBtn = document.createElement('button');
         loadBtn.className = 'action-btn';
         loadBtn.textContent = 'Bilder laden';
