@@ -120,12 +120,22 @@ async function openEmail(email, itemEl) {
   const _renderDetailMeta = (e) => {
     const ccList = (e.cc_emails || []).filter(Boolean);
     document.getElementById('detail-meta').innerHTML = `
-      <span style="width:60px;display:inline-block;">Von:</span> ${escHtml(e.from_name ? `${e.from_name} <${e.from_email}>` : e.from_email)}<br>
+      <span style="width:60px;display:inline-block;">Von:</span><button id="btn-copy-from" class="meta-copy-btn" title="Absender-Adresse kopieren">Copy</button> ${escHtml(e.from_name ? `${e.from_name} <${e.from_email}>` : e.from_email)}<br>
       <span style="width:60px;display:inline-block;">An:</span> ${escHtml((e.to_emails || []).join(', '))}<br>
       ${ccList.length ? `<span style="width:60px;display:inline-block;">Cc:</span> ${escHtml(ccList.join(', '))}<br>` : ''}
       <span style="width:60px;display:inline-block;">Datum:</span> ${e.date_sent ? new Date(e.date_sent).toLocaleString('de-DE') : '–'}
       ${e.is_answered ? '<br><span style="color:var(--accent);font-size:12px">↩ Beantwortet</span>' : ''}
     `;
+    // Copy-Button: kopiert nur die reine Absender-Adresse (from_email),
+    // nie den Anzeigenamen oder die spitzen Klammern.
+    const copyBtn = document.getElementById('btn-copy-from');
+    if (copyBtn) copyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(e.from_email || '');
+        copyBtn.textContent = '✓';
+        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200);
+      } catch (_) { /* Clipboard-Zugriff verweigert — still bleiben */ }
+    };
   };
   _renderDetailMeta(email);
   body.textContent = 'Lade…';

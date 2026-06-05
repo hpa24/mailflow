@@ -700,6 +700,24 @@ padding: 5px 20px;
 }
 .detail-meta strong { color: var(--text); }
 
+/* Copy-Button in der Von:-Zeile — kopiert nur die reine Absender-Adresse */
+.meta-copy-btn {
+  display: inline-block;
+  min-width: 48px;
+  margin-right: 8px;
+  padding: 1px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--text2);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  vertical-align: 1px;
+}
+.meta-copy-btn:hover { color: var(--text); border-color: var(--text2); }
+
 /* DEBUG: Thread-Info Panel (nur für Diagnose des Thread-Gruppierungs-Problems) */
 #detail-debug-thread {
   background: #fff3cd;
