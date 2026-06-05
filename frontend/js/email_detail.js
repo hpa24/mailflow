@@ -265,6 +265,13 @@ async function openEmail(email, itemEl) {
       });
       cleanup.observe(document.body, { childList: true, subtree: true });
 
+      // Konsole sauber halten (2026-06-05): <script>-Tags strippen. Ausführung
+      // wäre durch die Sandbox (kein allow-scripts) ohnehin blockiert, erzeugt
+      // aber pro Mail einen "Blocked script execution"-Konsolen-Fehler.
+      htmlToRender = htmlToRender
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
+        .replace(/<script\b[^>]*\/?>/gi, '');
+
       // cid:-Referenzen durch Backend-Proxy ersetzen — URLs vorher signieren (parallel)
       const cids = [...new Set([...htmlToRender.matchAll(/src=["']cid:([^"']+)["']/gi)].map(m => m[1]))];
       if (cids.length) {
@@ -275,6 +282,16 @@ async function openEmail(email, itemEl) {
         htmlToRender = htmlToRender.replace(/src=["']cid:([^"']+)["']/gi, (m, cid) =>
           signedByCid[cid] ? `src="${signedByCid[cid]}"` : m
         );
+      }
+
+      // Nicht auflösbare cid:-Referenzen (Signierung fehlgeschlagen oder Form
+      // vom Regex oben nicht erfasst) → transparenter Platzhalter. Verhindert
+      // net::ERR_UNKNOWN_URL_SCHEME in der Konsole; das Bild fehlt ohnehin.
+      const unresolvedCids = [...new Set([...htmlToRender.matchAll(/src=["']cid:([^"']+)["']/gi)].map(m => m[1]))];
+      if (unresolvedCids.length) {
+        console.warn('Mailflow: Inline-Bilder nicht auflösbar (cid):', unresolvedCids, '— E-Mail', full.id);
+        htmlToRender = htmlToRender.replace(/src=(["'])cid:[^"']+\1/gi,
+          'src="data:image/gif;base64,R0lGODlhAQABAAAAACw="');
       }
 
       // S5 Phase 2 (2026-05-23): Tracking-Schutz — neben <img src> jetzt auch
