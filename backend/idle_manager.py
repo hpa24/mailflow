@@ -47,6 +47,9 @@ class IdleManager:
             params={"perPage": 100},
         )
         for acc in result.get("items", []):
+            # Send-only-Accounts: keine IDLE-Dauerverbindung aufs (geteilte) Postfach
+            if acc.get("send_only"):
+                continue
             self._launch_account(acc)
 
     def _launch_account(self, acc: dict) -> None:

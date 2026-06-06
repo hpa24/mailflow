@@ -79,6 +79,11 @@ async def setup_pocketbase_schema(token: str) -> None:
                 # wird — dank R5 greift dieser Block auch bei frischer PB-Instanz.
                 _field("default_smtp_server", "relation",
                        collectionId=smtp_servers_id, maxSelect=1, cascadeDelete=False),
+                # Send-only-Account (2026-06-06): reine Absender-Identität (z. B. Alias
+                # zentrale@post.hpa24.de für Inxmail-Versand). Sync, IDLE und Backfill
+                # überspringen den Account; IMAP-Creds bleiben drin, damit der
+                # Sent-Append beim Versand weiter ins (geteilte) Postfach schreibt.
+                _field("send_only", "bool"),
             ])
             # S1 (2026-05-23): alle Rules dicht — siehe _accounts_schema.
             await _ensure_rules(client, headers, "accounts", existing["accounts"], {

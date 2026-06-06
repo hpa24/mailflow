@@ -94,6 +94,11 @@ async def sync_all_accounts() -> None:
 
 async def sync_account(account: dict, full_import: bool = False) -> None:
     """Sync einen Account. full_import=True holt alle UIDs (für Erst-Import)."""
+    # Send-only-Accounts (Alias-Identitäten) haben kein eigenes Postfach —
+    # Sync würde dasselbe IMAP-Postfach doppelt einbinden (Duplikate + Timeouts).
+    if account.get("send_only"):
+        logger.debug(f"Send-only-Account {account['id']} — Sync übersprungen")
+        return
     imap_host = account["imap_host"]
     imap_port = int(account["imap_port"] or 993)
     imap_user = account["imap_user"]

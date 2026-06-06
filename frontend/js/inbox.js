@@ -599,7 +599,9 @@ async function loadAccounts() {
     const data = await api.getAccounts();
     state.accounts = (data.items || []).sort((a, b) => a.name.localeCompare(b.name, 'de'));
     if (state.accounts.length > 0 && !state.activeAccount) {
-      state.activeAccount = state.accounts[0].id;
+      // Send-only-Accounts (reine Absender-Identitäten) nie als Start-Account wählen
+      const firstSyncing = state.accounts.find(a => !a.send_only) || state.accounts[0];
+      state.activeAccount = firstSyncing.id;
     }
     await loadAllFolders();
     renderSidebar();
@@ -943,6 +945,9 @@ function renderSidebar() {
   const sidebar = document.getElementById('sidebar-accounts');
   sidebar.innerHTML = '';
   state.accounts.forEach(account => {
+    // Send-only-Accounts haben kein eigenes Postfach — nicht in der Sidebar,
+    // aber weiterhin im Compose-Von-Dropdown wählbar.
+    if (account.send_only) return;
     const section = document.createElement('div');
     section.className = 'account-section';
     const label = document.createElement('div');

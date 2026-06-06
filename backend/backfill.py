@@ -71,6 +71,8 @@ async def _run_backfill() -> None:
         "/api/collections/accounts/records", params={"perPage": 100}
     )
     for account in accounts_resp.get("items", []):
+        if account.get("send_only"):
+            continue
         try:
             await _backfill_account(account)
         except Exception as e:
@@ -175,6 +177,8 @@ async def _run_html_backfill() -> int:
     )
     total = 0
     for account in accounts_resp.get("items", []):
+        if account.get("send_only"):
+            continue
         try:
             total += await _html_backfill_account(account, _parse_email)
         except Exception as e:
