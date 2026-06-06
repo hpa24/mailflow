@@ -173,7 +173,7 @@ async def sse_events(request: Request):
 # Accounts
 # ---------------------------------------------------------------------------
 
-_ACCOUNT_SAFE_FIELDS = "id,name,from_email,from_name,signature,color_tag,reply_to_email,imap_host,imap_port,imap_user"
+_ACCOUNT_SAFE_FIELDS = "id,name,from_email,from_name,signature,color_tag,reply_to_email,imap_host,imap_port,imap_user,default_smtp_server"
 
 # Tagesversand-Limit von mailbox.org. Wenn sich Stefans Tarif ändert,
 # zentral hier anpassen — Frontend liest den Wert aus der Response.

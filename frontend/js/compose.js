@@ -343,6 +343,25 @@ let _plainTextMode = false;     // Nur-Text-Modus: Versand als reines text/plain
 let _composeAttachments = [];   // [{id, filename, size}] — temporäre Uploads
 let _replyToEmailId = null;     // ID der E-Mail, auf die geantwortet wird (für is_answered)
 
+// SMTP-Vorwahl für einen Account: dessen default_smtp_server (Relation auf
+// accounts, 2026-06-06), sonst globaler is_default-Server, sonst erster.
+// Nur Vorwahl — das Dropdown bleibt frei wechselbar.
+function _applyAccountSmtpDefault(accountId) {
+  if (state.smtpServers.length === 0) return;
+  const acc = state.accounts.find(a => a.id === accountId);
+  const target =
+    (acc && acc.default_smtp_server &&
+      state.smtpServers.find(s => s.id === acc.default_smtp_server)) ||
+    state.smtpServers.find(s => s.is_default) ||
+    state.smtpServers[0];
+  document.getElementById('ci-smtp-server').value = target.id;
+}
+
+// Von-Account-Wechsel im offenen Compose → SMTP-Server auf dessen Default umstellen
+document.getElementById('ci-from-account').addEventListener('change', (e) => {
+  _applyAccountSmtpDefault(e.target.value);
+});
+
 async function openCompose({ to = '', subject = '', body = null, quote = '', quoteHtml = '', fromAccountId = null, existingDraftId = null, replyToEmailId = null, replyToFromEmail = null } = {}) {
   // Wenn bereits ein Entwurf mit Inhalt offen ist → nachfragen
   if (composeHasContent()) {
@@ -376,8 +395,7 @@ async function openCompose({ to = '', subject = '', body = null, quote = '', quo
     smtpSel.innerHTML = state.smtpServers.map(s =>
       `<option value="${s.id}">${escHtml(s.name)}</option>`
     ).join('');
-    const defaultSmtp = state.smtpServers.find(s => s.is_default) || state.smtpServers[0];
-    smtpSel.value = defaultSmtp.id;
+    _applyAccountSmtpDefault(fromSel.value);
   } else {
     smtpSel.innerHTML = '<option value="">— kein SMTP-Server —</option>';
   }

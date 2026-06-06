@@ -73,6 +73,12 @@ async def setup_pocketbase_schema(token: str) -> None:
             await _add_missing_fields(client, headers, "accounts", existing["accounts"], [
                 _field("signature", "text"),
                 _field("reply_to_email", "text"),
+                # Default-SMTP pro Account (2026-06-06): wird beim Compose-Öffnen
+                # vorgewählt, bleibt im Dropdown frei wechselbar. Bewusst nur hier
+                # (nicht in _accounts_schema), weil accounts vor smtp_servers angelegt
+                # wird — dank R5 greift dieser Block auch bei frischer PB-Instanz.
+                _field("default_smtp_server", "relation",
+                       collectionId=smtp_servers_id, maxSelect=1, cascadeDelete=False),
             ])
             # S1 (2026-05-23): alle Rules dicht — siehe _accounts_schema.
             await _ensure_rules(client, headers, "accounts", existing["accounts"], {
