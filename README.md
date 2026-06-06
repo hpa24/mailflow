@@ -644,3 +644,19 @@ Der Composer setzte das SMTP-Dropdown bei jedem Öffnen auf den globalen `is_def
 - **Nicht betroffen:** Der Re-Send-Workflow aus Aussendungen (`mfComposeResend`) überschreibt die Vorwahl danach wie bisher mit dem historischen SMTP-Server der Original-Aussendung.
 
 Test-Plan: Neue E-Mail → Dropdown zeigt Account-Default; Von-Account wechseln → Dropdown springt auf dessen Default; Account ohne Verknüpfung → globaler Default wie bisher.
+
+## Send-only-Accounts (Alias-Identitäten) 2026-06-06 #smtp
+
+**Architektur-Regel: 1 Account = 1 eigenes IMAP-Postfach.** Zwei Accounts mit demselben IMAP-Zugang sind nicht zulässig — der Doppel-Sync würde alle Mails duplizieren (Unique-Index ist `(account, folder, message_id)`, also pro Account) und die parallelen Verbindungen (Sync + IDLE-Dauerverbindung je Account) provozieren bei mailbox.org Connection-Timeouts. Genau so passiert am 2026-06-06: zweiter Account mit dem `zentrale@hpa24.de`-Postfach → `Errno 110` beim Sync, UI wirkte leer.
+
+Für den eigentlichen Use Case — **eine Alias-Absenderadresse** wie `zentrale@post.hpa24.de` (Inxmail-Versand), deren Antworten im Hauptpostfach landen — gibt es seit Commit `10a31f4` Send-only-Accounts:
+
+- **Schema:** `accounts.send_only` (bool, Migration in `pb_setup.py`). Gesetzt wird das Flag direkt in PocketBase.
+- **Backend:** `imap_sync.sync_account` kehrt bei `send_only` sofort um (deckt Scheduler, manuellen `/sync/run` und IDLE-Trigger ab); `idle_manager._launch_all` startet keine IDLE-Dauerverbindung; beide Backfill-Loops überspringen den Account. `_ACCOUNT_SAFE_FIELDS` liefert das Flag ans Frontend.
+- **IMAP-Creds bleiben absichtlich drin:** Der Sent-Append beim Versand (`ImapService(acc).append_sent`, kurzlebige Verbindung) schreibt weiter ins geteilte Postfach — die Sent-Kopie taucht über den Sync des Haupt-Accounts in dessen Gesendet-Ordner auf. Gleiches gilt für Draft-Sync.
+- **Frontend** (`inbox.js`): Send-only-Accounts erscheinen nicht in der Sidebar (kein Postfach = nichts anzuzeigen) und werden nie als Start-Account gewählt; im Compose-Von-Dropdown bleiben sie wählbar. Kombiniert mit `default_smtp_server` (Abschnitt oben) springt das SMTP-Dropdown bei Auswahl der Identität automatisch auf den richtigen Versandweg.
+- **Stolperstein Flag-Timing:** Der IDLE-Manager liest die Accounts nur einmal beim Boot. Wird `send_only` nachträglich gesetzt, hält die bestehende IDLE-Verbindung bis zum nächsten Backend-Restart.
+
+Aktive Nutzung: Account „HPA24 - Inxmail" (`zentrale@post.hpa24.de`, Default-SMTP Inxmail) — Live-Test 2026-06-06 bestanden.
+
+Test-Plan: Sidebar zeigt Send-only-Account nicht; Von-Dropdown im Compose enthält ihn; nach Flag-Änderung in PB Backend neu starten und im Log prüfen, dass `Syncing account …` für den Account ausbleibt.
