@@ -633,3 +633,14 @@ Test-Plan nach künftigen Deploys unverändert: Login, Mail-Detail/Suche (FTS), 
 **Konsolen-Hygiene (`a3605e2`):** `<script>`-Tags werden vor dem Iframe-Render aus Mail-HTML gestrippt (Sandbox blockierte sie ohnehin, aber mit Konsolen-Fehler); nach dem CID-Signier-Replace übrig gebliebene `cid:`-Referenzen werden durch 1px-GIF ersetzt + `console.warn` mit CID-Liste und E-Mail-ID (statt `net::ERR_UNKNOWN_URL_SCHEME`). Tracking-Banner (`67b3874`) sagt „Eingebettete Bilder bleiben sichtbar" nur noch, wenn die Mail wirklich aufgelöste CID-Inlines hat. Die trotzdem verbleibende `Blocked script execution`-Meldung kommt von Browser-Extensions → dokumentiert im Sicherheits-Abschnitt oben (#iframe-sandbox).
 
 **Copy-Button Von:-Zeile (`06d57d4`):** Kleiner Button direkt nach dem `Von:`-Label in der Detail-Ansicht, kopiert ausschließlich die reine Absender-Adresse (`from_email`, ohne Anzeigename/Klammern). ✓-Feedback 1,2 s, `min-width: 48px` gegen Layout-Springen (`.meta-copy-btn` in `main.css`).
+
+## Default-SMTP-Server pro Account 2026-06-06
+
+Der Composer setzte das SMTP-Dropdown bei jedem Öffnen auf den globalen `is_default`-Server zurück, egal welcher Von-Account gewählt war → 553 „Sender address rejected", wenn z. B. `zentrale@post.hpa24.de` über smtp.mailbox.org statt „SMTP Inxmail" rausging (2026-06-04). Jetzt hat jeder Account einen optionalen eigenen Default (Commit `5c3108c`).
+
+- **Schema:** `accounts.default_smtp_server` (Relation → `smtp_servers`, single, optional). Migration im `if "accounts" in existing:`-Block von `pb_setup.py` — bewusst **nicht** in `_accounts_schema`, weil `accounts` vor `smtp_servers` angelegt wird; dank R5 greift der Block auch bei frischer PB-Instanz. Verknüpfung pflegt Stefan direkt in PocketBase (kein UI dafür).
+- **Backend:** `_ACCOUNT_SAFE_FIELDS` in `routers/system.py` um das Feld erweitert — `GET /accounts` liefert es als Record-ID-String mit.
+- **Frontend** (`compose.js`): Helper `_applyAccountSmtpDefault(accountId)` — wählt den Default-Server des Accounts, Fallback-Kette: `default_smtp_server` → globaler `is_default` → erster Server. Läuft beim Compose-Öffnen und per Change-Handler auf `#ci-from-account` (Account-Wechsel im offenen Compose stellt das Dropdown um). Manuelle Auswahl bleibt jederzeit möglich — nur Vorwahl, kein Zwang.
+- **Nicht betroffen:** Der Re-Send-Workflow aus Aussendungen (`mfComposeResend`) überschreibt die Vorwahl danach wie bisher mit dem historischen SMTP-Server der Original-Aussendung.
+
+Test-Plan: Neue E-Mail → Dropdown zeigt Account-Default; Von-Account wechseln → Dropdown springt auf dessen Default; Account ohne Verknüpfung → globaler Default wie bisher.
