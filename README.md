@@ -634,7 +634,7 @@ Test-Plan nach künftigen Deploys unverändert: Login, Mail-Detail/Suche (FTS), 
 
 **Copy-Button Von:-Zeile (`06d57d4`):** Kleiner Button direkt nach dem `Von:`-Label in der Detail-Ansicht, kopiert ausschließlich die reine Absender-Adresse (`from_email`, ohne Anzeigename/Klammern). ✓-Feedback 1,2 s, `min-width: 48px` gegen Layout-Springen (`.meta-copy-btn` in `main.css`).
 
-## Default-SMTP-Server pro Account 2026-06-06
+## Default-SMTP-Server pro Account 2026-06-06 #smtp
 
 Der Composer setzte das SMTP-Dropdown bei jedem Öffnen auf den globalen `is_default`-Server zurück, egal welcher Von-Account gewählt war → 553 „Sender address rejected", wenn z. B. `zentrale@post.hpa24.de` über smtp.mailbox.org statt „SMTP Inxmail" rausging (2026-06-04). Jetzt hat jeder Account einen optionalen eigenen Default (Commit `5c3108c`).
 
