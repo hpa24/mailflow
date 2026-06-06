@@ -9,6 +9,16 @@ def fts_setup(db_path: str) -> None:
     conn = sqlite3.connect(db_path, timeout=10)
     try:
         conn.execute("PRAGMA journal_mode=WAL")
+        # Migration 2026-06-06: Tabelle war contentless (content='') angelegt —
+        # contentless FTS5 kann weder Spaltenwerte zurückgeben (Suche lieferte
+        # immer [] → LIKE-Fallback) noch DELETE (Rebuild schlug fehl).
+        # Alte Tabelle einmalig droppen; der Rebuild beim Start füllt sie neu.
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name='fts_emails'"
+        ).fetchone()
+        if row and "content=''" in row[0]:
+            conn.execute("DROP TABLE fts_emails")
+            logger.info("FTS5: contentless Tabelle erkannt — wird neu angelegt (Migration)")
         conn.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS fts_emails
             USING fts5(
@@ -17,7 +27,6 @@ def fts_setup(db_path: str) -> None:
                 body_plain,
                 from_email,
                 from_name,
-                content='',
                 tokenize='unicode61'
             )
         """)
