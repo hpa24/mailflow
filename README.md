@@ -660,3 +660,18 @@ Für den eigentlichen Use Case — **eine Alias-Absenderadresse** wie `zentrale@
 Aktive Nutzung: Account „HPA24 - Inxmail" (`zentrale@post.hpa24.de`, Default-SMTP Inxmail) — Live-Test 2026-06-06 bestanden.
 
 Test-Plan: Sidebar zeigt Send-only-Account nicht; Von-Dropdown im Compose enthält ihn; nach Flag-Änderung in PB Backend neu starten und im Log prüfen, dass `Syncing account …` für den Account ausbleibt.
+
+## FTS5-Suche: contentless-Tabelle war doppelt kaputt 2026-06-06 #fts #suche
+
+Die FTS5-Tabelle `fts_emails` war seit Anbeginn mit `content=''` (contentless) angelegt — das brach **zwei** Dinge gleichzeitig, wobei nur eines sichtbar war:
+
+1. **Sichtbar:** `DELETE FROM fts_emails` ist auf contentless Tabellen verboten → `FTS rebuild failed: cannot DELETE from contentless fts5 table` bei jedem Backend-Start (Rebuild-Marker liegt in `/tmp`, verschwindet mit jedem Container).
+2. **Unsichtbar:** Contentless Tabellen speichern keine Spaltenwerte — `SELECT email_id … MATCH` lieferte für **alle** 80k Zeilen `None`. `fts_search` gab dadurch immer `[]` zurück und die Suche lief in Wahrheit komplett über den PocketBase-LIKE-Fallback (`routers/mail.py`, nur Betreff/Absender, **keine Body-Treffer**). Auch `fts_delete` löschte still nie etwas (`WHERE email_id = ?` matcht nie gegen `None`).
+
+**Fix (Commit `fc2fc28`):** `content=''` entfernt → normale FTS5-Tabelle. `fts_setup` erkennt das alte contentless Schema (`content=''` im `sqlite_master`-SQL) und droppt die Tabelle einmalig; der ohnehin bei jedem Start laufende `rebuild_fts_if_needed` füllt sie neu. Live verifiziert 2026-06-06: Migration + `FTS rebuild: done — 78817 records indexed`, `MATCH` liefert echte Record-IDs.
+
+- **Kosten:** `fts.db` (Host-Volume `/root/mailflow/mailflow-backend/fts/`) speichert jetzt die Texte mit — wächst von 82 MB entsprechend an. Bewusst akzeptiert, dafür funktioniert Volltextsuche inkl. `body_plain` erstmals wirklich.
+- **Stolperstein für später:** `CREATE VIRTUAL TABLE IF NOT EXISTS` migriert **keine** bestehende Tabelle — Schema-Änderungen an `fts_emails` brauchen immer eine explizite Erkennung+DROP wie in dieser Migration.
+- **Bewusst so gelassen:** Der Rebuild läuft weiterhin bei jedem Container-Start (Marker in `/tmp`), ~80k Mails in ~1 Min im Hintergrund — hält den Index frisch und räumt Leichen auf, kein Handlungsbedarf.
+
+Test-Plan: Nach Deploy im Backend-Log `FTS rebuild: done` (statt `failed`); Suche in der UI mit einem Wort, das nur im Mail-**Body** vorkommt → Treffer (vorher unmöglich).
