@@ -675,3 +675,9 @@ Die FTS5-Tabelle `fts_emails` war seit Anbeginn mit `content=''` (contentless) a
 - **Bewusst so gelassen:** Der Rebuild läuft weiterhin bei jedem Container-Start (Marker in `/tmp`), ~80k Mails in ~1 Min im Hintergrund — hält den Index frisch und räumt Leichen auf, kein Handlungsbedarf.
 
 Test-Plan: Nach Deploy im Backend-Log `FTS rebuild: done` (statt `failed`); Suche in der UI mit einem Wort, das nur im Mail-**Body** vorkommt → Treffer (vorher unmöglich).
+
+## Vorlagen-Tab: leere Listen beim Tab-Wechsel gefixt 2026-06-07 #ui
+
+Beim Umschalten Inbox → Vorlagen blieb die Liste der aktiven Kategorie (Snippets/Vorlagen/Gruppen/…) leer; erst ein Klick auf eine **andere** Kategorie links lud sie. Ursache: Die Listen-Module laden nur bei `mf:section-changed` — der Tab-Wechsel feuert aber nur `mf:tab-changed`, und ein Klick auf die bereits aktive Kategorie bricht in `template_subnav.js` früh ab (`prev === name`). **Fix (Commit `7fecab0`):** `template_subnav.js` hört auf `mf:tab-changed` und re-emittiert beim Aktivieren des Vorlagen-Tabs `mf:section-changed` für die aktive Sektion; das zuständige Modul lädt dann (dank `_loaded`-Cache ohne Doppel-Fetch). Live verifiziert 2026-06-07.
+
+- **Event-Architektur-Regel:** Module, die Listen im Vorlagen-Tab füllen, laden bei `mf:section-changed` + Selbst-Check beim DOMContentLoaded (Muster s. `groups.js`) — die initialen Events von `tabs.js`/`template_subnav.js` verpuffen nämlich, weil sie vor der Listener-Registrierung der Module feuern (Script-Reihenfolge in `index.html`).
