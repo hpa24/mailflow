@@ -18,6 +18,16 @@
     window.dispatchEvent(new CustomEvent('mf:section-changed', { detail: { section: name } }));
   }
 
+  // Beim Umschalten auf den Vorlagen-Tab das Section-Event fuer die aktuell
+  // aktive Sektion erneut feuern, damit deren Modul seine Liste (nach)laedt —
+  // sonst bleibt sie leer, weil nur mf:section-changed die Loads ausloest.
+  window.addEventListener('mf:tab-changed', (e) => {
+    if (e.detail.tab !== 'templates') return;
+    const section = document.getElementById('templates-main')?.dataset.activeSection;
+    if (!section) return;
+    window.dispatchEvent(new CustomEvent('mf:section-changed', { detail: { section } }));
+  });
+
   document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('#templates-submenu .submenu-btn').forEach(btn => {
       if (btn.disabled) return;
