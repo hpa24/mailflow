@@ -116,6 +116,50 @@ function _linkifyHtml(html) {
   return tpl.innerHTML;
 }
 
+// ── Schriftgröße anwenden ────────────────────────────────────
+// Ersetzt das veraltete document.execCommand('fontSize', …): dieses
+// wickelt bei großer Selektion (z. B. „Alles markieren" in einer Mail
+// mit zitiertem Thread oder aus Word eingefügtem HTML) jeden Textknoten
+// einzeln in <font>-Tags und merged sie – O(n²), bei zehntausenden
+// Knoten 10–15 s bis „Seite reagiert nicht". Hier stattdessen die
+// gesamte Selektion EINMAL in einen <span style="font-size:…"> wickeln
+// (ein DOM-Move, O(n)) → auch bei 30k Knoten ~30 ms.
+function applyFontSize(px) {
+  const body = document.getElementById('ci-body');
+  body.focus();
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  // Nur eingreifen, wenn die Selektion tatsächlich im Editor liegt
+  if (!body.contains(range.commonAncestorContainer)) return;
+
+  const span = document.createElement('span');
+  span.style.fontSize = px;
+
+  if (range.collapsed) {
+    // Kein Text markiert: leeren Span am Cursor anlegen, damit der
+    // nachfolgend getippte Text die gewählte Größe bekommt.
+    span.appendChild(document.createTextNode('​')); // Zero-Width-Space
+    range.insertNode(span);
+    const caret = document.createRange();
+    caret.setStart(span.firstChild, 1);
+    caret.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(caret);
+  } else {
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+    const after = document.createRange();
+    after.selectNodeContents(span);
+    sel.removeAllRanges();
+    sel.addRange(after);
+  }
+
+  // execCommand feuerte automatisch ein 'input'-Event (→ Entwurf speichern);
+  // beim manuellen DOM-Eingriff selbst auslösen.
+  body.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 // ── Compose-Toolbar ──────────────────────────────────────────
 function setupComposeToolbar() {
   // mousedown statt click, damit der Editor nicht die Fokussierung verliert
@@ -131,11 +175,10 @@ function setupComposeToolbar() {
   });
   document.querySelectorAll('#tb-fontsize-group .tbfs').forEach(btn => {
     btn.addEventListener('mousedown', (e) => {
-      e.preventDefault(); // Fokus im Editor behalten
+      e.preventDefault(); // Fokus + Selektion im Editor behalten
     });
-    btn.addEventListener('click', (e) => {
-      document.execCommand('fontSize', false, btn.dataset.size);
-      document.getElementById('ci-body').focus();
+    btn.addEventListener('click', () => {
+      applyFontSize(btn.dataset.size + 'px');
       document.querySelectorAll('#tb-fontsize-group .tbfs').forEach(b => b.classList.remove('tbfs-active'));
       btn.classList.add('tbfs-active');
     });
