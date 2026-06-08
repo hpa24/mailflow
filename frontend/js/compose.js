@@ -147,8 +147,30 @@ function applyFontSize(px) {
     sel.removeAllRanges();
     sel.addRange(caret);
   } else {
-    span.appendChild(range.extractContents());
+    const frag = range.extractContents();
+    // Vorhandene font-size-Angaben in der Auswahl entfernen und dabei leer
+    // gewordene (attributlose) <span>-Hüllen auflösen. Sonst (a) würden innere
+    // Größen die neue überstimmen → Klick wirkt auf Teilen nicht, und (b) jeder
+    // erneute Klick legte eine weitere <span>-Ebene drumherum (Bloat).
+    frag.querySelectorAll('span').forEach(el => {
+      el.style.fontSize = '';
+      if (!el.getAttribute('style')) el.removeAttribute('style');
+      if (el.attributes.length === 0) {
+        while (el.firstChild) el.parentNode.insertBefore(el.firstChild, el);
+        el.remove();
+      }
+    });
+    span.appendChild(frag);
     range.insertNode(span);
+    // Reine font-size-Eltern-Spans auflösen, die jetzt nur noch unseren Span
+    // enthalten (verhindert Verschachtelung bei „Alles markieren" + Umschalten).
+    let parent = span.parentNode;
+    while (parent && parent !== body && parent.tagName === 'SPAN'
+           && parent.childNodes.length === 1
+           && parent.style.length === 1 && parent.style.fontSize) {
+      parent.parentNode.replaceChild(span, parent);
+      parent = span.parentNode;
+    }
     const after = document.createRange();
     after.selectNodeContents(span);
     sel.removeAllRanges();
