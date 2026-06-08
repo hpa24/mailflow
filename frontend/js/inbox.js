@@ -363,6 +363,13 @@ async function silentRefresh() {
     const params = { page: 1, limit: PAGE_SIZE };
     if (state.activeAccount) params.account = state.activeAccount;
     if (state.activeFolder)  params.folder  = state.activeFolder;
+    // Sent-Filter (Webhook/Normal) ist server-seitig — wie in loadEmails. Ohne
+    // ihn zöge der Poll alle Sendungen rein und verseuchte die gefilterte Liste
+    // samt Cache (Webhook-Filter „springt nicht mehr an" nach Alle→Webhook).
+    if (state.activeFolder === 'Sent') {
+      if (state.sentFilter === 'webhook') params.webhook = 'true';
+      if (state.sentFilter === 'normal')  params.webhook = 'false';
+    }
 
     const fetchFn = isFlatFolder()
       ? fetchFlatEmails
