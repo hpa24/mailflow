@@ -1552,8 +1552,15 @@ margin-bottom:5px;
 .account-label:hover .account-settings-btn { opacity: 1; }
 .account-settings-btn:hover { background: var(--bg3); color: var(--text); }
 
+.account-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .account-sent-counter {
-  margin-left: auto;
+  flex-shrink: 0;
   font-size: 11px;
   font-weight: 500;
   color: var(--text2);

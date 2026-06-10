@@ -932,7 +932,7 @@ async function refreshSentToday() {
       const aid = el.dataset.account;
       const c = state.sentToday.counts[aid] || 0;
       const lim = state.sentToday.limit;
-      el.textContent = `${c}/${lim.toLocaleString('de-DE')}`;
+      el.textContent = `${c}`;
       el.classList.toggle('warn', c >= lim * 0.8);
       el.classList.toggle('over', c >= lim);
     });
@@ -962,8 +962,8 @@ function renderSidebar() {
     const sent = state.sentToday.counts[account.id] || 0;
     const limit = state.sentToday.limit || 10000;
     label.innerHTML = `
-      <span>${account.name || account.from_email}</span>
-      <span class="account-sent-counter" title="Heute versendet (Mailbox.org-Tageslimit ${limit.toLocaleString('de-DE')})" data-account="${account.id}">${sent}/${limit.toLocaleString('de-DE')}</span>
+      <span class="account-name">${account.name || account.from_email}</span>
+      <span class="account-sent-counter" title="Heute versendet ${sent} von ${limit.toLocaleString('de-DE')} (Mailbox.org-Tageslimit)" data-account="${account.id}">${sent}</span>
       <button class="account-settings-btn" title="Einstellungen">⚙</button>
     `;
     label.querySelector('.account-settings-btn').addEventListener('click', (e) => {
