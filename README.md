@@ -692,3 +692,13 @@ Die Größen-Buttons (S/M/L/XL) ließen den Tab **sekundenlang hängen** bis zum
 - **Cursor ohne Auswahl:** leerer Span mit Zero-Width-Space am Cursor, damit nachfolgend getippter Text die Größe bekommt. `applyFontSize` feuert manuell ein `input`-Event (execCommand tat das automatisch → Entwurf-Speichern bleibt intakt).
 - **Was beim Empfänger ankommt:** Versendet wird nur `ci-body.innerHTML` (`readComposeBody`), das Backend (`smtp_sender.py`) hängt höchstens das Zitat-`<blockquote>` an — **kein** `<html>/<style>`-Wrapper, **kein** `line-height`. Die CSS-Regel `#ci-body { line-height: 1.2 }` ist reine Schreib-Ansicht und reist **nicht** mit; der Empfänger-Client nutzt seinen Default (`normal`, ≈1.15–1.2). Ein fester line-height beim Empfänger müsste inline gewrappt werden (bewusst **nicht** umgesetzt, 2026-06-08).
 - **Notiz für später:** Es gibt **keinen Paste-Sanitizer** im Composer — eingefügtes Word-/Web-HTML behält allen Ballast (das war der Auslöser der O(n²)-Last). Der Hänger ist gefixt; sauberes Einfügen (Ballast beim Paste strippen) wäre ein sinnvoller Folgeschritt, kein Muss.
+
+## Sidebar-Versandzähler: nur Anzahl, rechtsbündig 2026-06-10 #ui
+
+Der Tagesversand-Zähler im Postfach-Kopf der Sidebar (`account-sent-counter`) zeigte `gesendet/Limit` (z. B. `0/10.000`). Mit `white-space: nowrap` trieb das die Mindestbreite der Spalte hoch und der Postfach-Name konnte nicht kürzen → **horizontale Scrollbar** in der linken Spalte.
+
+**Fix (`inbox.js` + `main.css`):**
+- Zähler zeigt nur noch die **reine Anzahl** (`${sent}`), das `/Limit` entfällt — sowohl beim initialen Rendern (`renderSidebar`) als auch im Live-Update (`refreshSentToday`). Die Limit-Info (`Heute versendet X von 10.000 …`) wandert in den **Hover-Tooltip**.
+- Postfach-Name bekommt Klasse `.account-name` mit `flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap` → nimmt den flexiblen Platz, **kürzt lange Namen mit `…`** statt die Spalte zu sprengen.
+- DOM-Reihenfolge im `account-label`: **Name → ⚙-Button → Zähler**. Damit sitzt die Anzahl bündig am rechten Rand (16px Label-Padding), der Zahnrad-Button direkt links davon — vorher stand der (bis Hover unsichtbare) Button rechts und ließ Leerraum neben der Zahl.
+- Warn-/Over-Farben (`.warn` ab 80 %, `.over` ab Limit) bleiben funktional erhalten; sie hängen weiter am Limit, nur die Textanzeige ist reduziert.
