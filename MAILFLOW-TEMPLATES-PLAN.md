@@ -94,7 +94,7 @@ Gruppen: `dritte_gruppe`, `gross_geschrieben`, `kurs_a`, `kurs_b`, `test_gruppe`
 
 - **Push-Strategie**: direkt nach `main`, kein Staging. Pro Push eine kohärente Einheit, niemals broken halfway. Backend-Schema-Migrationen sind idempotent (via `_ensure_collection` + `_add_missing_fields`).
 - **Cachebust** für JS/CSS: Versions-Param `?v=YYYYMMDD-tplN` in `index.html` bei jedem Frontend-Push hochzählen.
-- **Auth lokal**: `~/Syncthing/Claude/_Web-Apps/mailflow/.env` enthält `API_KEY` als `API_KEY=...` für Curl/Node-Tests aus dem Terminal (`.env` ist `.gitignore`d).
+- **Auth lokal**: `~/Syncthing/Claude/Output/Web-Apps/mailflow/.env` enthält `API_KEY` als `API_KEY=...` für Curl/Node-Tests aus dem Terminal (`.env` ist `.gitignore`d).
 - **Tab-Pane-Layout**: alle Top-Level-Container brauchen `grid-row: 3` im `#layout`-Grid, sonst kollabieren sie im Auto-Placement.
 
 ---
