@@ -963,8 +963,8 @@ function renderSidebar() {
     const limit = state.sentToday.limit || 10000;
     label.innerHTML = `
       <span class="account-name">${account.name || account.from_email}</span>
-      <span class="account-sent-counter" title="Heute versendet ${sent} von ${limit.toLocaleString('de-DE')} (Mailbox.org-Tageslimit)" data-account="${account.id}">${sent}</span>
       <button class="account-settings-btn" title="Einstellungen">⚙</button>
+      <span class="account-sent-counter" title="Heute versendet ${sent} von ${limit.toLocaleString('de-DE')} (Mailbox.org-Tageslimit)" data-account="${account.id}">${sent}</span>
     `;
     label.querySelector('.account-settings-btn').addEventListener('click', (e) => {
       e.stopPropagation();
