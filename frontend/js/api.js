@@ -106,6 +106,7 @@ window.api = {
   setCategory(id, cat){ return apiJson(`/emails/${id}/category`, 'PATCH', { ai_category: cat }); },
 
   sendEmail(data)           { return apiJson('/emails/send', 'POST', data); },
+  sendStatus(jobId)         { return apiFetch(`/emails/send-status/${encodeURIComponent(jobId)}`); },
   bulkSendEmail(data)       { return apiJson('/emails/bulk-send', 'POST', data); },
   saveTriageExample(emailId, category) { return apiJson('/triage/example', 'POST', {email_id: emailId, category}); },
   updateAccount(id, data)   { return apiJson(`/accounts/${id}`, 'PATCH', data); },

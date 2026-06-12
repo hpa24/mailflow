@@ -473,6 +473,7 @@ async def _do_send_job(job_id: str, data: dict, attachments: list) -> None:
     except Exception as exc:
         logger.error("SMTP-Versand fehlgeschlagen (job=%s): %s", job_id, exc)
         _send_jobs[job_id]["status"] = "error"
+        _send_jobs[job_id]["error"] = str(exc)[:500]
         if bulk_send_id:
             asyncio.create_task(_bulk_record_recipient_result(
                 bulk_send_id, to, status="error", error=str(exc)[:500],

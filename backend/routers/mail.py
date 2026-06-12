@@ -531,6 +531,22 @@ async def send_email_endpoint(payload: SendEmailRequest,
     return {"job_id": job_id, "status": "sending"}
 
 
+@router.get("/emails/send-status/{job_id}")
+async def send_status_endpoint(job_id: str,
+                               token: str = Depends(pb_user_auth.get_user_token)):
+    """Status eines Sendejobs — Polling-Fallback für verlorene send-result-SSE-Events.
+
+    `_send_jobs` lebt in-memory: nach einem Backend-Restart sind laufende
+    Job-IDs weg → 404. Das Frontend zeigt dann „Status unbekannt" an.
+    """
+    job = _send_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Unbekannte Job-ID")
+    return {"job_id": job_id, "status": job.get("status"),
+            "to": job.get("to", ""), "subject": job.get("subject", ""),
+            "error": job.get("error")}
+
+
 @router.post("/emails/bulk-send")
 async def bulk_send_endpoint(payload: BulkSendRequest,
                              token: str = Depends(pb_user_auth.get_user_token)):

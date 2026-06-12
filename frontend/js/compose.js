@@ -63,6 +63,53 @@ function _handleSendResult(data) {
   }
 }
 
+// Polling-Fallback: deckt verlorene send-result-SSE-Events ab (halbtote
+// Verbindung nach Mac-Schlaf, Backend-Restart, Reconnect-Lücke). Fragt den
+// Job-Status ab, solange die Notif-Zeile noch auf „pending" steht — kommt
+// das SSE-Event vorher an, beendet sich das Polling von selbst.
+function _pollSendJob(jobId, to, subject) {
+  const MAX_ATTEMPTS = 30;  // 30 × 10 s = 5 min, danach „Status unbekannt"
+  let attempts = 0;
+
+  const giveUp = (msg) => {
+    _handleSendResult({ job_id: jobId, success: false, to, subject, error: msg });
+  };
+
+  const tick = async () => {
+    const el = _sendNotifContainer.querySelector(`[data-job-id="${jobId}"]`);
+    if (!el || !el.classList.contains('pending')) return;  // SSE war schneller
+    attempts++;
+    try {
+      const job = await api.sendStatus(jobId);
+      if (job.status === 'done') {
+        _handleSendResult({ job_id: jobId, success: true,
+                            to: job.to, subject: job.subject });
+        return;
+      }
+      if (job.status === 'error') {
+        _handleSendResult({ job_id: jobId, success: false,
+                            to: job.to, subject: job.subject,
+                            error: job.error || 'Versand fehlgeschlagen' });
+        return;
+      }
+      // status === 'sending' → weiter warten
+    } catch (e) {
+      if (String(e.message).includes('Unbekannte Job-ID')) {
+        giveUp('Status unbekannt (Backend neu gestartet?) — Gesendet-Ordner prüfen');
+        return;
+      }
+      // Netzwerk-/Auth-Fehler: einfach beim nächsten Tick erneut versuchen
+    }
+    if (attempts >= MAX_ATTEMPTS) {
+      giveUp('Keine Statusmeldung erhalten — Gesendet-Ordner prüfen');
+      return;
+    }
+    setTimeout(tick, 10_000);
+  };
+
+  setTimeout(tick, 8_000);
+}
+
 // URLs in Textknoten zu klickbaren <a>-Tags machen. Bestehende <a> bleiben unangetastet.
 function _linkifyHtml(html) {
   if (!html) return html;
@@ -732,9 +779,11 @@ document.getElementById('btn-send-inline').addEventListener('click', async () =>
       attachment_ids, in_reply_to_email_id: sentReplyToId,
       draft_id: draftIdToDelete,
     });
-    // Notification-Zeile anlegen (SSE-Event aktualisiert sie später)
+    // Notification-Zeile anlegen (SSE-Event aktualisiert sie später;
+    // Polling-Fallback greift, falls das Event verloren geht)
     if (res && res.job_id) {
       _addSendNotif(res.job_id, to, subject);
+      _pollSendJob(res.job_id, to, subject);
     }
   } catch (e) {
     // Validierungsfehler vom Backend (400/502) — sofort als Fehler anzeigen

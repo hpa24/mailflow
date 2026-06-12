@@ -151,7 +151,10 @@ async def sse_events(request: Request):
                     event = await asyncio.wait_for(queue.get(), timeout=25)
                     yield f"data: {json.dumps(event)}\n\n"
                 except asyncio.TimeoutError:
-                    yield ": heartbeat\n\n"
+                    # Echtes Event statt SSE-Kommentar: Kommentare sind für die
+                    # EventSource-API unsichtbar — der Client braucht sichtbare
+                    # Pings für seinen Halbtot-Watchdog (sse.js).
+                    yield "data: {\"type\":\"ping\"}\n\n"
         finally:
             try:
                 queues.remove(queue)
