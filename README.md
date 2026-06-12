@@ -13,7 +13,7 @@ tags:
 
 E-Mail-Client auf Basis von FastAPI + PocketBase + Vanilla JS, deployed via Coolify.
 
-**Dokumentation:** `~/Syncthing/Claude/Wissen/20_Apps/mailflow/`
+**Dokumentation:** `~/Syncthing/Claude/Wissen/25_Fields/mailflow/`
 
 | Datei | Inhalt |
 |---|---|
@@ -23,9 +23,9 @@ E-Mail-Client auf Basis von FastAPI + PocketBase + Vanilla JS, deployed via Cool
 
 ## Sicherheit
 
-Auth-Pattern, PocketBase-Rules und n8n-Tokens folgen dem zentralen Modell in `~/Syncthing/Claude/Wissen/20_Apps/_shared/sicherheit.md`.
+Auth-Pattern, PocketBase-Rules und n8n-Tokens folgen dem zentralen Modell in `~/Syncthing/Claude/Wissen/10_Kontext/_shared/sicherheit.md`.
 
-**Single-User-App** (bewusste Architektur-Entscheidung): es gibt keine `user`-Relation auf `accounts`/`emails`/`smtp_servers`/`webhooks`. Authz endet beim Login (`Depends(pb_user_auth.get_user_token)`). Per-Record-/Per-Account-Authz im Backend ist deshalb nicht implementiert — siehe S1-Abschnitt unten zur konkreten Umsetzung (PB-Rules dicht, Backend nutzt Admin-Token). Falls Mailflow je Multi-User werden soll, ist das ein Datenmodell- + Authz-Refactor; nicht aktuell geplant. Details: `~/Syncthing/Claude/Wissen/20_Apps/mailflow/README.md`.
+**Single-User-App** (bewusste Architektur-Entscheidung): es gibt keine `user`-Relation auf `accounts`/`emails`/`smtp_servers`/`webhooks`. Authz endet beim Login (`Depends(pb_user_auth.get_user_token)`). Per-Record-/Per-Account-Authz im Backend ist deshalb nicht implementiert — siehe S1-Abschnitt unten zur konkreten Umsetzung (PB-Rules dicht, Backend nutzt Admin-Token). Falls Mailflow je Multi-User werden soll, ist das ein Datenmodell- + Authz-Refactor; nicht aktuell geplant. Details: `~/Syncthing/Claude/Wissen/25_Fields/mailflow/README.md`.
 
 **Bekannte harmlose Konsolen-Meldung** (untersucht 2026-06-05) #iframe-sandbox: `Blocked script execution in 'about:srcdoc' …` beim Öffnen einer E-Mail stammt **nicht aus Mailflow**, sondern von Browser-Extensions (z. B. Google Übersetzer), die in jedes Frame ein Script injizieren — die Sandbox des Mail-iframes (bewusst ohne `allow-scripts`) blockiert das. Tritt auch bei Mails ohne jedes `<script>`-Tag auf; app-seitig nicht abstellbar, kein Handlungsbedarf. `<script>`-Tags aus Mail-HTML werden seitdem zusätzlich vor dem Render gestrippt; nicht auflösbare `cid:`-Referenzen werden durch Platzhalter ersetzt und als `console.warn` mit E-Mail-ID geloggt (statt `net::ERR_UNKNOWN_URL_SCHEME`).
 
@@ -702,3 +702,14 @@ Der Tagesversand-Zähler im Postfach-Kopf der Sidebar (`account-sent-counter`) z
 - Postfach-Name bekommt Klasse `.account-name` mit `flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap` → nimmt den flexiblen Platz, **kürzt lange Namen mit `…`** statt die Spalte zu sprengen.
 - DOM-Reihenfolge im `account-label`: **Name → ⚙-Button → Zähler**. Damit sitzt die Anzahl bündig am rechten Rand (16px Label-Padding), der Zahnrad-Button direkt links davon — vorher stand der (bis Hover unsichtbare) Button rechts und ließ Leerraum neben der Zahl.
 - Warn-/Over-Farben (`.warn` ab 80 %, `.over` ab Limit) bleiben funktional erhalten; sie hängen weiter am Limit, nur die Textanzeige ist reduziert.
+
+## Hängende „Wird gesendet…"-Anzeigen: halbtote SSE-Verbindung 2026-06-12 #sse
+
+**Symptom:** ⏳-Zeilen („Wird gesendet an …") blieben dauerhaft oben stehen, obwohl die Mails längst versendet waren und in „Gesendet" lagen.
+
+**Ursache:** Das `send-result`-Ergebnis kommt per SSE (`/events`) zurück. Nach Mac-Schlaf oder Backend-Restart (z. B. nächtlicher Container-Neustart ~03:01 im Umfeld des Netcup-Snapshots) kann die TCP-Verbindung **beidseitig halb-offen** hängen: `EventSource` feuert nie `onerror`, die Reconnect-Logik greift nicht, Events verpuffen. Der Server-Heartbeat (alle 25 s) war ein SSE-*Kommentar* (`: heartbeat`) — für die `EventSource`-API unsichtbar, der Client konnte die tote Leitung also gar nicht erkennen. Befund 2026-06-12: über 10 h nur zwei `/events`-Verbindungen, alle Sendejobs serverseitig sauber abgeschlossen.
+
+**Fix (Commit `226f216`), drei Schichten:**
+- **Heartbeat sichtbar** (`routers/system.py`): `/events` schickt statt des Kommentars ein echtes ``{"type":"ping"}``-Event.
+- **Watchdog + Aufwach-Trigger** (`js/sse.js`): kommt > 65 s (`SSE_STALE_MS`, = 2 verpasste Pings) keine Nachricht, wird die Verbindung neu aufgebaut; `visibilitychange` (Tab wird sichtbar) und `online` prüfen sofort statt auf den Watchdog zu warten. Guard-Flags verhindern Doppel-Connects.
+- **Polling-Fallback** (`js/compose.js` + neuer `GET /emails/send-status/{job_id}` in `routers/mail.py`): solange eine Notif-Zeile auf `pending` steht, fragt das Frontend ab 8 s nach dem Senden alle 10 s den Job-Status ab — deckt auch Events ab, die genau in eine Reconnect-Lücke fallen (SSE hat kein Replay). Nach 5 min ohne Antwort oder bei unbekannter Job-ID (Backend-Restart, `_send_jobs` ist in-memory) wird die Zeile zu einem dismissbaren Hinweis „Status unbekannt — Gesendet-Ordner prüfen" statt ewig zu hängen. `services/mail.py` speichert den Fehlertext dafür jetzt in `_send_jobs` mit.
