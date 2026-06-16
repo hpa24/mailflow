@@ -1650,7 +1650,9 @@ margin-bottom:5px;
 .event-ico { flex: 0 0 18px; width: 18px; text-align: center; font-size: 14px; }
 .event-loc { font-size: 14px; color: var(--text2); }
 .event-org { font-size: 13px; color: var(--text2); word-break: break-all; }
-.event-join {
+/* a.event-join + #detail-body-Prefix: schlägt `#detail-body a { color: accent }`,
+   sonst wäre die Schrift blau auf blau (unsichtbar). */
+#detail-body a.event-join {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1664,7 +1666,12 @@ margin-bottom:5px;
   text-decoration: none;
   transition: background 0.15s;
 }
-.event-join:hover { background: var(--bg8); }
+#detail-body a.event-join:hover {
+  background: var(--bg8);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: underline;
+}
 .event-join-ico { font-size: 12px; }
 .event-meta { margin-top: 10px; font-size: 12px; color: var(--text2); }
 
