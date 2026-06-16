@@ -1724,11 +1724,11 @@ async function loadAttachments(email) {
   const el = document.getElementById('detail-attachments');
   el.style.display = 'none';
   el.innerHTML = '';
-  if (!email.has_attachments) return;
+  if (!email.has_attachments) return [];
   try {
     const data = await api.getAttachments(email.id);
     const items = data.items || [];
-    if (!items.length) return;
+    if (!items.length) return [];
     // Chips ohne href bauen, URL on-click frisch signieren (Token-TTL nur 5min — nicht beim Listen-Render verbrennen)
     items.forEach(att => {
       const chip = document.createElement('a');
@@ -1753,8 +1753,10 @@ async function loadAttachments(email) {
       el.appendChild(chip);
     });
     el.style.display = 'flex';
+    return items;
   } catch (e) {
     console.warn('loadAttachments:', e);
+    return [];
   }
 }
 // ─────────────────────────────────────────────────────────────

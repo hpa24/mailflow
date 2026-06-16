@@ -32,6 +32,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Re
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
+import ics_parser
 import pb_client
 import pb_user_auth
 import spam_filter
@@ -946,6 +947,18 @@ async def download_email_source(email_id: str):
             "Access-Control-Allow-Origin": "*",
         },
     )
+
+
+@router.get("/emails/{email_id}/calendar")
+async def get_email_calendar(email_id: str, token: str = Depends(pb_user_auth.get_user_token)):
+    """Event-Daten der text/calendar-Part (.ics) für die Detail-Panel-Vorschau.
+    Roh-Mail wird live von IMAP geholt und serverseitig geparst. 404, wenn die
+    Mail keinen Kalender-Part enthält."""
+    raw = await _fetch_email_raw(email_id)
+    event = ics_parser.extract_calendar_event(raw)
+    if not event:
+        raise HTTPException(status_code=404, detail="Kein Kalender-Eintrag")
+    return event
 
 
 @router.get("/emails/{email_id}/inline")

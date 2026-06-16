@@ -81,6 +81,7 @@ window.api = {
   getSmtpServers()               { return apiFetch('/smtp-servers'); },
   getSyncStatus()                { return apiFetch('/sync/status'); },
   getEmail(id)                   { return apiFetch(`/emails/${id}`); },
+  getCalendar(id)                { return apiFetch(`/emails/${id}/calendar`); },
 
   moveEmail(id, targetFolder) { return apiJson(`/emails/${id}/move`, 'POST', { target_folder: targetFolder }); },
   deleteEmail(id)   { return apiFetch(`/emails/${id}`, { method: 'DELETE' }); },

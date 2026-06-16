@@ -353,7 +353,12 @@ async function openEmail(email, itemEl) {
     }
 
     // Anhänge laden und anzeigen
-    await loadAttachments(full);
+    const atts = await loadAttachments(full);
+
+    // Kalender-Einladung (.ics) → Event-Vorschau oben im Body rendern
+    if (atts && atts.some(a => (a.mime_type || '').toLowerCase() === 'text/calendar')) {
+      renderEventCard(full.id, body);
+    }
 
     if (isDraft) {
       const draftTo      = (full.to_emails || []).join(', ');
@@ -439,6 +444,61 @@ function updateReadToggle(email, itemEl) {
       _adjustFolderCount(email.account, email.folder, newState ? +1 : -1);
     }
   };
+}
+
+
+function _eventJoinLabel(url) {
+  const u = (url || '').toLowerCase();
+  if (u.includes('teams.microsoft.com')) return 'An Teams-Besprechung teilnehmen';
+  if (u.includes('zoom.us'))             return 'Zoom-Meeting beitreten';
+  if (u.includes('meet.google.com'))     return 'An Google Meet teilnehmen';
+  if (u.includes('webex.com'))           return 'An Webex-Meeting teilnehmen';
+  return 'Online-Meeting beitreten';
+}
+
+// Event-Vorschau (.ics) als Karte oben im Detail-Body. Holt die geparsten
+// Event-Daten vom Backend (/emails/{id}/calendar) und rendert Titel, Zeit, Ort,
+// Organizer + Join-Button. Still bleiben, wenn die Mail doch kein Event hat.
+async function renderEventCard(emailId, body) {
+  let ev;
+  try {
+    ev = await api.getCalendar(emailId);
+  } catch (_) { return; }
+  if (!ev || (!ev.summary && !ev.when)) return;
+
+  const rows = [];
+  if (ev.when)      rows.push(`<div class="event-row"><span class="event-ico">🕐</span><span>${escHtml(ev.when)}</span></div>`);
+  if (ev.location)  rows.push(`<div class="event-row event-loc"><span class="event-ico">📍</span><span>${escHtml(ev.location)}</span></div>`);
+  if (ev.organizer) rows.push(`<div class="event-row event-org"><span class="event-ico">👤</span><span>${escHtml(ev.organizer)}</span></div>`);
+
+  const joinHtml = ev.join_url
+    ? `<a class="event-join" href="${escHtml(ev.join_url)}" target="_blank" rel="noopener noreferrer"><span class="event-join-ico">▶</span>${escHtml(_eventJoinLabel(ev.join_url))}</a>`
+    : '';
+  const meta = [];
+  if (ev.meeting_id) meta.push(`ID ${escHtml(ev.meeting_id)}`);
+  if (ev.passcode)   meta.push(`Code ${escHtml(ev.passcode)}`);
+  const metaHtml = meta.length ? `<div class="event-meta">${meta.join(' · ')}</div>` : '';
+
+  const card = document.createElement('div');
+  card.className = 'event-card';
+  card.innerHTML = `
+    <div class="event-card-head"><span>📅</span>KALENDEREINLADUNG</div>
+    <div class="event-card-body">
+      ${ev.summary ? `<div class="event-title">${escHtml(ev.summary)}</div>` : ''}
+      ${rows.join('')}
+      ${joinHtml}
+      ${metaHtml}
+    </div>`;
+
+  // Zoom des Bodys (Plaintext-Pfad) für die Karte neutralisieren, damit sie in
+  // der designten px-Größe bleibt; E-Mail-Text behält seinen Zoom.
+  const bz = parseFloat(getComputedStyle(body).zoom) || 1;
+  if (bz !== 1) card.style.zoom = String(1 / bz);
+
+  // "Kein Inhalt"-Platzhalter ersetzen, sonst oben einfügen
+  const ph = body.querySelector(':scope > em');
+  if (ph && /Kein Inhalt/.test(ph.textContent)) ph.remove();
+  body.insertBefore(card, body.firstChild);
 }
 
 
