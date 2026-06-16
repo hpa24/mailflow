@@ -1,10 +1,18 @@
 import email as _email_stdlib
 import logging
+import mimetypes
 from email.header import decode_header, make_header
 
 import mailparser
 
 logger = logging.getLogger(__name__)
+
+# Dateiendung für Anhang-Parts ohne Dateinamen (z.B. Kalender-Invites, die als
+# text/calendar ohne `name`/`filename` kommen). mimetypes deckt den Rest ab.
+_EXT_BY_TYPE = {
+    "text/calendar": ".ics",
+    "application/ics": ".ics",
+}
 
 
 def _decode_mime_filename(name: str | None) -> str | None:
@@ -16,6 +24,39 @@ def _decode_mime_filename(name: str | None) -> str | None:
         return str(make_header(decode_header(name)))
     except Exception:
         return name
+
+
+def _is_attachment_part(part) -> bool:
+    """Ob ein MIME-Leaf-Part als Anhang zu behandeln ist.
+
+    Anhang ist: alles mit `Content-Disposition: attachment` oder Dateinamen,
+    plus jeder weitere Leaf-Part, der **kein** Body (text/plain, text/html) und
+    **keine** per Content-ID referenzierte Inline-Ressource ist. Damit werden
+    auch Kalender-Invites (text/calendar ohne Dateiname/Disposition) erfasst —
+    die kamen vorher durch alle Tore und tauchten gar nicht auf."""
+    if part.get_content_maintype() == "multipart":
+        return False
+    cd = (part.get_content_disposition() or "").lower()
+    if cd == "attachment":
+        return True
+    if _decode_mime_filename(part.get_filename()):
+        return True
+    ctype = (part.get_content_type() or "").lower()
+    if ctype in ("text/plain", "text/html"):
+        return False
+    # Inline-Ressourcen mit Content-ID (eingebettete Bilder) werden separat per
+    # CID aufgelöst, nicht als Anhang gelistet.
+    if cd == "inline" and part.get("Content-ID"):
+        return False
+    return True
+
+
+def _fallback_filename(part, index: int) -> str:
+    """Synthetischer Dateiname für Anhänge ohne `name`/`filename`, mit
+    passender Endung aus dem Content-Type (z.B. `anhang_1.ics`)."""
+    ctype = (part.get_content_type() or "").lower()
+    ext = _EXT_BY_TYPE.get(ctype) or (mimetypes.guess_extension(ctype) or "")
+    return f"anhang_{index + 1}{ext}"
 
 
 def _decode_part(part) -> str:
@@ -118,7 +159,9 @@ def parse_email(raw_bytes: bytes) -> dict:
         "body_html": body_html,
         "snippet": snippet,
         "date_sent": mail.date.isoformat() if mail.date else None,
-        "has_attachments": bool(mail.attachments),
+        # Konsistent mit extract_attachment_meta — mailparser zählt z.B.
+        # Kalender-Invites ohne Dateiname nicht als Anhang.
+        "has_attachments": bool(extract_attachment_meta(raw_bytes)),
     }
 
 
@@ -133,21 +176,19 @@ def extract_attachment_meta(raw_bytes: bytes) -> list[dict]:
     result = []
     index = 0
     for part in msg.walk():
-        if part.get_content_maintype() == "multipart":
+        if not _is_attachment_part(part):
             continue
-        cd = (part.get_content_disposition() or "").lower()
         filename = _decode_mime_filename(part.get_filename())
-        if cd == "attachment" or filename:
-            mime_type = part.get_content_type() or "application/octet-stream"
-            payload = part.get_payload(decode=True)
-            size_bytes = len(payload) if payload else 0
-            result.append({
-                "filename": filename or f"anhang_{index + 1}",
-                "mime_type": mime_type,
-                "size_bytes": size_bytes,
-                "part_index": index,
-            })
-            index += 1
+        mime_type = part.get_content_type() or "application/octet-stream"
+        payload = part.get_payload(decode=True)
+        size_bytes = len(payload) if payload else 0
+        result.append({
+            "filename": filename or _fallback_filename(part, index),
+            "mime_type": mime_type,
+            "size_bytes": size_bytes,
+            "part_index": index,
+        })
+        index += 1
     return result
 
 
@@ -160,16 +201,14 @@ def get_attachment_payload(raw_bytes: bytes, part_index: int) -> tuple[bytes, st
 
     index = 0
     for part in msg.walk():
-        if part.get_content_maintype() == "multipart":
+        if not _is_attachment_part(part):
             continue
-        cd = (part.get_content_disposition() or "").lower()
-        filename = _decode_mime_filename(part.get_filename())
-        if cd == "attachment" or filename:
-            if index == part_index:
-                payload = part.get_payload(decode=True) or b""
-                mime_type = part.get_content_type() or "application/octet-stream"
-                return payload, filename or f"anhang_{part_index + 1}", mime_type
-            index += 1
+        if index == part_index:
+            payload = part.get_payload(decode=True) or b""
+            mime_type = part.get_content_type() or "application/octet-stream"
+            filename = _decode_mime_filename(part.get_filename())
+            return payload, filename or _fallback_filename(part, part_index), mime_type
+        index += 1
 
     return b"", "anhang", "application/octet-stream"
 

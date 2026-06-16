@@ -155,12 +155,22 @@ def _decode_part_body(raw: bytes, encoding: str) -> bytes:
 
 
 def _is_attachment_leaf(info: dict) -> bool:
-    """Spiegelt mime_parser.extract_attachment_meta: Disposition=attachment
-    ODER Filename irgendwo vorhanden."""
+    """Spiegelt mime_parser._is_attachment_part: Disposition=attachment ODER
+    Filename vorhanden, plus jeder weitere Leaf, der kein Body (text/plain,
+    text/html) und keine CID-Inline-Ressource ist (z.B. text/calendar ohne
+    Dateiname). Muss exakt mit extract_attachment_meta übereinstimmen, sonst
+    zeigt der part_index aus PocketBase auf den falschen Part."""
     if info["disposition"] == "attachment":
         return True
     fn = info["disposition_params"].get("filename") or info["params"].get("name")
-    return bool(fn)
+    if fn:
+        return True
+    ctype = f"{info['maintype']}/{info['subtype']}".lower()
+    if ctype in ("text/plain", "text/html"):
+        return False
+    if info["disposition"] == "inline" and info["content_id"]:
+        return False
+    return True
 
 
 class ImapService:
