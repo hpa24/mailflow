@@ -727,4 +727,40 @@ Der Tagesversand-Zähler im Postfach-Kopf der Sidebar (`account-sent-counter`) z
 **Event-Vorschau (Commit `629f515` + Button-Fix `562e087`):** Mails mit `text/calendar`-Anhang zeigen oben im Detail-Body eine Event-Karte (Akzent-Kopf in `--bg8`).
 - **Backend:** `GET /emails/{id}/calendar` (Roh-Mail live von IMAP, geparst; 404 ohne Kalender-Part) → `backend/ics_parser.py`, dependency-freier VEVENT-Parser (RFC-5545-Line-Folding, Escapes, `Z`/`TZID`/`DATE`; Windows-TZID „W. Europe…" als lokale Wandzeit angezeigt — für Berlin korrekt, ohne vollständige Windows→IANA-Map). Liefert Titel, Zeit (`Wochentag DD.MM.YYYY · HH:MM–HH:MM Uhr`), Ort, Organizer, **Join-URL** (Teams/Zoom/Meet/Webex; MS-Störlinks `meetingOptions`/`aka.ms`/`schemas` gefiltert), Meeting-ID, Passcode.
 - **Frontend:** `api.getCalendar`, `renderEventCard` in `email_detail.js` (ersetzt bei reinen Kalender-Mails das „Kein Inhalt"; `loadAttachments` gibt jetzt seine Items zurück, damit `text/calendar` erkannt wird). Stil `.event-*` in `main.css`. Join-Button-Schrift weiß via `#detail-body a.event-join` (schlägt das generische `#detail-body a { color: accent }`, sonst blau auf blau), Hover dunkler + fett + unterstrichen.
-- **Bewusst noch offen:** Kalender-Eintrag aus dem Impuls in den eigenen Kalender übernehmen (→ Field-Werkstatt, separat).
+- **Bewusst noch offen:** Kalender-Eintrag aus dem Impuls in den eigenen Kalender übernehmen → Spec siehe Abschnitt „Kalender-Einladung übernehmen (Spec)" weiter unten. (Korrektur des früheren „→ Field-Werkstatt, separat": der Schreibweg läuft **nicht** über die lokale Werkstatt, sondern mailflow schreibt direkt in die Activity-PB — Begründung in der Spec.)
+
+## Kalender-Einladung übernehmen (Spec, geplant) 2026-06-17 #kalender #ics #activity-pb
+
+Folgepunkt zur Event-Vorschau: aus der Einladung einen Termin im eigenen Kalender (Activity-PB `termine`) anlegen.
+
+**Architektur-Entscheidung — mailflow schreibt direkt in die Activity-PB.** Die Werkstatt-`/api/cal/*`-Proxys sind nur eine *lokale* Bequemlichkeit (Werkstatt läuft auf `127.0.0.1` am Mac, evtl. gar nicht an). Der Klick passiert in mailflow → mailflow muss selbst schreiben. mailflow und Werkstatt nutzen **verschiedene** PB-Instanzen:
+- mailflow → eigene, mitdeployte PB (`http://pocketbase:8090`, Docker-intern)
+- Kalender-Store → `https://activity-pb.barres.de` (Collections `kalender` + `termine`)
+
+mailflow bekommt also einen **zweiten PB-Client** auf `activity-pb.barres.de`. Auth wie die Werkstatt: `POST /api/collections/users/auth-with-password` als `stefan@hpa24.de` (User existiert, schreibt `termine` mit Record-Rechten — kein Superuser nötig, **solange das `termine`-Schema nicht** per API geändert wird). URL + Credentials als mailflow-Settings (`ACTIVITY_PB_URL`, `ACTIVITY_PB_IDENTITY`, `ACTIVITY_PB_PASSWORD`).
+
+**Klick-Flow:**
+1. Button „In Kalender übernehmen" auf der bestehenden Event-Karte (`renderEventCard`, `email_detail.js`).
+2. Dialog: Liste der **manuellen** Kalender (GET aus Activity-PB `kalender`, gefiltert auf `typ == "manuell"`), letzter genutzter vorausgewählt (eigener mailflow-localStorage-Key, analog Werkstatt `fw_kal_last`). Vorschau Titel/Datum.
+3. Speichern → `termine`-Record in Activity-PB.
+4. Toast „Übernommen", Button wird „✓ im Kalender".
+
+**Mapping Event → `termine`** (Felder heute: `date · time · title · kalender_id · jaehrlich · done · extern_uid`):
+- `date` ← `start` (Datum)
+- `title` ← Uhrzeit voranstellen **nur wenn vorhanden**: hat das Event eine Zeit → `"HH:MM " + summary`; ganztägig/keine Zeit → `summary` pur. (Stefans Kalender ist rein ganztägig, es gibt **kein** `time`-Feld; `time` bleibt `""`.)
+- `kalender_id` ← gewählter Kalender
+- `jaehrlich` = false, `done` = false
+- Ort/Organizer/Ende: **nicht** übernommen (bewusst).
+- **Join-Link:** neues Feld `join_url` in `termine` ← `join` aus dem Parser. → **Activity-PB-Schemaänderung nötig (Superuser, PB-Admin-UI)**; Werkstatt-Anzeige (`renderCalGrid`/`openCalModal`) zieht nach.
+
+**Doppelklick-Schutz (A1):** über die VEVENT-`UID` dedupen — vor dem Anlegen `termine` nach der UID filtern, bei Treffer kein zweiter Record. Speicherort der UID: **nicht** `extern_uid` (das markiert die Werkstatt via `isExtern` als read-only — der übernommene Termin soll editierbar bleiben), sondern ein eigenes Feld, z. B. `ics_uid`. → ebenfalls Schemaänderung. (Parser muss die `UID` zusätzlich liefern — aktuell nicht im `extract_calendar_event`-Return.)
+
+**Bau-Schritte (Reihenfolge):**
+1. ✅ (2026-06-17) Activity-PB `termine`: Felder `join_url` (text) + `ics_uid` (text) per Superuser-API angelegt (`scripts/.env` `PB_SU_*`), 11 Bestandsfelder unberührt.
+2. ✅ (2026-06-17) `ics_parser.extract_calendar_event`: gibt jetzt `uid` mit aus (`val("UID")`).
+3. ✅ (2026-06-17) mailflow Backend: zweiter PB-Client `backend/activity_pb.py` (Auth `users/auth-with-password`, lazy Token + 401-Reauth) + Endpunkte `GET /calendar/calendars` (manuelle Kalender) und `POST /emails/{id}/calendar/import` (Mapping + Dedup über `ics_uid` + Ziel-Kalender-Validierung) in `routers/mail.py`. **Braucht Coolify-Env:** `ACTIVITY_PB_URL`, `ACTIVITY_PB_IDENTITY` (`stefan@hpa24.de`), `ACTIVITY_PB_PASSWORD` (User aus `field-werkstatt/pb.json`, kein Superuser). Ohne Env → Endpoints 503.
+4. ✅ (2026-06-17) mailflow Frontend: Button „📅 In Kalender übernehmen" → Inline-Kalenderauswahl (Pillen, letzter via localStorage `mailflow_cal_last`) → Status, in `renderEventCard`/`_mountEventImport` (`email_detail.js`), API `getCalendars`/`importCalendar` (`api.js`), Styles `.event-import-*`/`.event-cal-*` (`main.css`).
+5. ✅ (2026-06-17) Werkstatt: `join_url` als „▶ Meeting beitreten"-Link im Termin-Modal (`openCalModal`/`renderCalModal`, `.calmodal-join`). PATCH beim Bearbeiten lässt `join_url` unangetastet (partielles Update).
+6. **Offen:** Coolify-Env setzen → Push `main` → Coolify-Deploy → Live-Verifikation.
+
+**Mapping-Details (Stand Umsetzung):** `date` ← `start[:10]`; `title` ← bei nicht-ganztägig mit `HH:MM != 00:00` → `"HH:MM " + summary`, sonst `summary` (`time`-Feld bleibt `""`); leerer Titel → „(ohne Titel)"; Einladung ohne `start` → 422. Ziel-Kalender wird serverseitig gegen die manuellen Kalender geprüft (kein Schreiben in externe). Antwort: `{created, duplicate, termin}`.

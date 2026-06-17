@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "https://mailflow.barres.de"
     XANO_API_KEY: str = ""
     XANO_USER_ROLES_URL: str = "https://xdmv-h2vh-soia.f2.xano.io/api:52vvrgF7/user/get/roles"
+    # Zweite PocketBase: der Activity-Kalender-Store (separate Instanz, nicht die
+    # mailflow-eigene PB). Schreibt Kalender-Einladungen als termine-Records.
+    # Auth als normaler User (stefan@hpa24.de, kein Superuser). Feature ist
+    # deaktiviert, solange IDENTITY/PASSWORD leer sind.
+    ACTIVITY_PB_URL: str = "https://activity-pb.barres.de"
+    ACTIVITY_PB_IDENTITY: str = ""
+    ACTIVITY_PB_PASSWORD: str = ""
 
     model_config = {"env_file": ".env"}
 

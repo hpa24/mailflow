@@ -82,6 +82,8 @@ window.api = {
   getSyncStatus()                { return apiFetch('/sync/status'); },
   getEmail(id)                   { return apiFetch(`/emails/${id}`); },
   getCalendar(id)                { return apiFetch(`/emails/${id}/calendar`); },
+  getCalendars()                 { return apiFetch('/calendar/calendars'); },
+  importCalendar(id, kalenderId) { return apiJson(`/emails/${id}/calendar/import`, 'POST', { kalender_id: kalenderId }); },
 
   moveEmail(id, targetFolder) { return apiJson(`/emails/${id}/move`, 'POST', { target_folder: targetFolder }); },
   deleteEmail(id)   { return apiFetch(`/emails/${id}`, { method: 'DELETE' }); },

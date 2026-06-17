@@ -32,6 +32,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Re
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
+import activity_pb
 import ics_parser
 import pb_client
 import pb_user_auth
@@ -959,6 +960,73 @@ async def get_email_calendar(email_id: str, token: str = Depends(pb_user_auth.ge
     if not event:
         raise HTTPException(status_code=404, detail="Kein Kalender-Eintrag")
     return event
+
+
+@router.get("/calendar/calendars")
+async def list_calendars(token: str = Depends(pb_user_auth.get_user_token)):
+    """Manuelle Ziel-Kalender aus der Activity-PB für den Übernahme-Dialog.
+    503, solange die Activity-PB nicht konfiguriert ist (ACTIVITY_PB_* leer)."""
+    if not activity_pb.is_configured():
+        raise HTTPException(status_code=503, detail="Activity-Kalender nicht konfiguriert")
+    return {"calendars": await activity_pb.list_manual_calendars()}
+
+
+class CalendarImportBody(BaseModel):
+    kalender_id: str = Field(min_length=1)
+
+
+@router.post("/emails/{email_id}/calendar/import")
+async def import_calendar_event(
+    email_id: str,
+    body: CalendarImportBody,
+    token: str = Depends(pb_user_auth.get_user_token),
+):
+    """Übernimmt die Kalender-Einladung der Mail als termine-Record in den
+    gewählten manuellen Kalender (Activity-PB). Dedup über die VEVENT-UID."""
+    if not activity_pb.is_configured():
+        raise HTTPException(status_code=503, detail="Activity-Kalender nicht konfiguriert")
+
+    # Ziel-Kalender muss ein manueller sein (externe sind read-only).
+    cals = await activity_pb.list_manual_calendars()
+    if body.kalender_id not in {c["id"] for c in cals}:
+        raise HTTPException(status_code=400, detail="Unbekannter oder nicht beschreibbarer Kalender")
+
+    raw = await _fetch_email_raw(email_id)
+    event = ics_parser.extract_calendar_event(raw)
+    if not event:
+        raise HTTPException(status_code=404, detail="Kein Kalender-Eintrag")
+
+    start = event.get("start") or ""
+    if not start:
+        raise HTTPException(status_code=422, detail="Einladung ohne Startdatum")
+    date = start[:10]
+
+    summary = (event.get("summary") or "").strip() or "(ohne Titel)"
+    title = summary
+    if not event.get("all_day"):
+        hhmm = start[11:16]  # "HH:MM"
+        if hhmm and hhmm != "00:00":
+            title = f"{hhmm} {summary}"
+
+    uid = event.get("uid") or ""
+
+    # Doppelklick-Schutz: schon übernommen?
+    existing = await activity_pb.find_termin_by_uid(uid)
+    if existing:
+        return {"created": False, "duplicate": True, "termin": existing}
+
+    data = {
+        "date": date,
+        "time": "",
+        "title": title,
+        "kalender_id": body.kalender_id,
+        "jaehrlich": False,
+        "done": False,
+        "join_url": event.get("join_url") or "",
+        "ics_uid": uid,
+    }
+    termin = await activity_pb.create_termin(data)
+    return {"created": True, "duplicate": False, "termin": termin}
 
 
 @router.get("/emails/{email_id}/inline")

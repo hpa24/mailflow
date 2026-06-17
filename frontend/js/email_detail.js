@@ -488,6 +488,7 @@ async function renderEventCard(emailId, body) {
       ${rows.join('')}
       ${joinHtml}
       ${metaHtml}
+      <div class="event-actions"></div>
     </div>`;
 
   // Zoom des Bodys (Plaintext-Pfad) für die Karte neutralisieren, damit sie in
@@ -499,6 +500,78 @@ async function renderEventCard(emailId, body) {
   const ph = body.querySelector(':scope > em');
   if (ph && /Kein Inhalt/.test(ph.textContent)) ph.remove();
   body.insertBefore(card, body.firstChild);
+
+  // Übernahme-in-den-Kalender: Button → Inline-Kalenderauswahl → Status.
+  if (ev.start) _mountEventImport(card.querySelector('.event-actions'), emailId);
+}
+
+
+const _CAL_LAST_KEY = 'mailflow_cal_last';
+
+// Baut die "In Kalender übernehmen"-Interaktion in den übergebenen Container.
+// Zustände: Button → Auswahl (Kalender-Pillen + Übernehmen/Abbrechen) → Status.
+function _mountEventImport(host, emailId) {
+  if (!host) return;
+  const showButton = () => {
+    host.innerHTML =
+      `<button class="event-import-btn" type="button">📅 In Kalender übernehmen</button>`;
+    host.querySelector('.event-import-btn').addEventListener('click', openPicker);
+  };
+
+  const showStatus = (text, cls = '') => {
+    host.innerHTML = `<div class="event-import-status ${cls}">${escHtml(text)}</div>`;
+  };
+
+  async function openPicker() {
+    host.innerHTML = `<div class="event-import-status">Lade Kalender …</div>`;
+    let cals;
+    try {
+      ({ calendars: cals } = await api.getCalendars());
+    } catch (e) {
+      showStatus(`Kalender nicht ladbar: ${e.message}`, 'is-error');
+      return;
+    }
+    if (!cals || !cals.length) { showStatus('Keine manuellen Kalender vorhanden.', 'is-error'); return; }
+
+    const last = localStorage.getItem(_CAL_LAST_KEY);
+    let sel = cals.some((c) => c.id === last) ? last : cals[0].id;
+
+    const render = () => {
+      const pills = cals.map((c) => `
+        <button type="button" class="event-cal-pill${c.id === sel ? ' selected' : ''}" data-id="${escHtml(c.id)}">
+          <span class="event-cal-dot" style="background:${escHtml(c.farbe || '#888')}"></span>${escHtml(c.name)}
+        </button>`).join('');
+      host.innerHTML = `
+        <div class="event-import-pick">
+          <div class="event-import-q">In welchen Kalender?</div>
+          <div class="event-cal-pills">${pills}</div>
+          <div class="event-import-row">
+            <button type="button" class="event-import-go">Übernehmen</button>
+            <button type="button" class="event-import-cancel">Abbrechen</button>
+          </div>
+        </div>`;
+      host.querySelectorAll('.event-cal-pill').forEach((b) =>
+        b.addEventListener('click', () => { sel = b.dataset.id; render(); }));
+      host.querySelector('.event-import-cancel').addEventListener('click', showButton);
+      host.querySelector('.event-import-go').addEventListener('click', () => doImport(sel, cals));
+    };
+    render();
+  }
+
+  async function doImport(kalenderId, cals) {
+    const go = host.querySelector('.event-import-go');
+    if (go) { go.disabled = true; go.textContent = 'Übernehme …'; }
+    try {
+      const res = await api.importCalendar(emailId, kalenderId);
+      localStorage.setItem(_CAL_LAST_KEY, kalenderId);
+      const name = (cals.find((c) => c.id === kalenderId) || {}).name || 'Kalender';
+      showStatus(res.duplicate ? `✓ Bereits im Kalender „${name}"` : `✓ Im Kalender „${name}" eingetragen`, 'is-ok');
+    } catch (e) {
+      showStatus(`Fehler: ${e.message}`, 'is-error');
+    }
+  }
+
+  showButton();
 }
 
 

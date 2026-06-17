@@ -172,6 +172,7 @@ def extract_calendar_event(raw_bytes: bytes) -> dict | None:
 
     return {
         "summary": _unescape(val("SUMMARY")),
+        "uid": val("UID"),
         "when": _fmt_when(start, end, all_day),
         "start": start.isoformat() if start else None,
         "end": end.isoformat() if end else None,
