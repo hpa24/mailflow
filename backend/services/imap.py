@@ -91,7 +91,18 @@ def _walk_bodystructure(bs, prefix: str = ""):
     `info` enthält: maintype, subtype, params, content_id, encoding, size,
     disposition, disposition_params.
     """
-    # Multipart: erstes Element ist selbst ein Tupel (Subpart-BodyData)
+    # Multipart: IMAPClient verschachtelt die Kind-Parts je nach Version
+    # unterschiedlich. Neuere Variante packt sie als LISTE in bs[0]
+    # (`([child1, child2, …], subtype, params, …)`) — eine Liste ist KEIN
+    # Tuple, daher hier zuerst prüfen (sonst wird die ganze Mail als ein
+    # einzelner Leaf "1" fehlgedeutet → falscher Anhang-Part).
+    if len(bs) > 0 and isinstance(bs[0], list):
+        for idx, child in enumerate(bs[0], start=1):
+            sub_id = f"{prefix}.{idx}" if prefix else str(idx)
+            yield from _walk_bodystructure(child, sub_id)
+        return
+
+    # Ältere Variante: die Subparts sind direkte Tuple-Elemente von bs.
     if len(bs) > 0 and isinstance(bs[0], tuple):
         idx = 1
         for elem in bs:
@@ -264,18 +275,6 @@ class ImapService:
             if not bs:
                 logger.warning("fetch_attachment: keine BODYSTRUCTURE für UID %s — Fallback BODY[]", imap_uid)
                 return self._fetch_attachment_full(srv, imap_uid, part_index)
-
-            # TEMP DEBUG (Anhang-Diagnose) — nach Auswertung wieder entfernen.
-            try:
-                _all = list(_walk_bodystructure(bs))
-                logger.warning(
-                    "ATTDEBUG UID %s part_index=%s\n  RAW BODYSTRUCTURE=%r\n  LEAVES=%s",
-                    imap_uid, part_index, bs,
-                    [(pid, info["maintype"] + "/" + info["subtype"], info["encoding"],
-                      info["disposition"], _is_attachment_leaf(info)) for pid, info in _all],
-                )
-            except Exception as _dbg_exc:
-                logger.warning("ATTDEBUG fehlgeschlagen: %s", _dbg_exc)
 
             attachments = [
                 (pid, info) for pid, info in _walk_bodystructure(bs)
