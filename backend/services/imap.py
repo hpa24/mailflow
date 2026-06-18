@@ -265,6 +265,18 @@ class ImapService:
                 logger.warning("fetch_attachment: keine BODYSTRUCTURE für UID %s — Fallback BODY[]", imap_uid)
                 return self._fetch_attachment_full(srv, imap_uid, part_index)
 
+            # TEMP DEBUG (Anhang-Diagnose) — nach Auswertung wieder entfernen.
+            try:
+                _all = list(_walk_bodystructure(bs))
+                logger.warning(
+                    "ATTDEBUG UID %s part_index=%s\n  RAW BODYSTRUCTURE=%r\n  LEAVES=%s",
+                    imap_uid, part_index, bs,
+                    [(pid, info["maintype"] + "/" + info["subtype"], info["encoding"],
+                      info["disposition"], _is_attachment_leaf(info)) for pid, info in _all],
+                )
+            except Exception as _dbg_exc:
+                logger.warning("ATTDEBUG fehlgeschlagen: %s", _dbg_exc)
+
             attachments = [
                 (pid, info) for pid, info in _walk_bodystructure(bs)
                 if _is_attachment_leaf(info)
